@@ -26,6 +26,7 @@ describe('animalsTableCfg', () => {
       ['id', 'string'],
       ['name', 'string'],
       ['speciesRef', 'string'],
+      ['breederRef', 'string'],
       ['bornOn', 'string'],
       ['priceCents', 'number'],
       ['backgroundStory', 'string'],
@@ -40,6 +41,17 @@ describe('animalsTableCfg', () => {
 
     expect(speciesRef?.ref).toStrictEqual({
       tableKey: 'species',
+      type: 'components',
+    });
+  });
+
+  it('declares breederRef as a reference into the components breeders table', () => {
+    const breederRef = animalsTableCfg.columns.find(
+      (column) => column.key === 'breederRef',
+    );
+
+    expect(breederRef?.ref).toStrictEqual({
+      tableKey: 'breeders',
       type: 'components',
     });
   });

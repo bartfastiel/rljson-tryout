@@ -5,26 +5,40 @@ import { describe, expect, it } from 'vitest';
 
 import { hashed } from '../hashing.ts';
 import { animalsTableCfg } from '../tables/animals.ts';
+import { breedersTableCfg } from '../tables/breeders.ts';
+import { personsTableCfg } from '../tables/persons.ts';
 import { speciesTableCfg } from '../tables/species.ts';
 import { traitsTableCfg } from '../tables/traits.ts';
 import { animalsSeed } from './animals.ts';
+import { breedersSeed } from './breeders.ts';
+import { personsSeed } from './persons.ts';
 import { speciesSeed } from './species.ts';
 import { traitsSeed } from './traits.ts';
 
 /**
  * Builds an rljson document holding every table configuration, the species
- * seed, the traits seed and the given animal rows, wired together through
- * `_tableCfg` on the `animals` table. The validator resolves `speciesRef`
- * and every element of `traitsRefs` only when the `species` and `traits`
- * tables are part of the same document.
+ * seed, the traits seed, the persons seed, the breeders seed and the given
+ * animal rows, wired together through `_tableCfg` on the `animals` table.
+ * The validator resolves `speciesRef`, `breederRef` and every element of
+ * `traitsRefs` only when the `species`, `traits` and `breeders` tables are
+ * part of the same document; `breeders` in turn needs `persons` for its own
+ * `personRef` to resolve.
  */
 const animalsDocument = (rows: Json[]): Rljson => ({
   tableCfgs: hashed({
     _type: 'tableCfgs',
-    _data: [speciesTableCfg, traitsTableCfg, animalsTableCfg],
+    _data: [
+      speciesTableCfg,
+      traitsTableCfg,
+      personsTableCfg,
+      breedersTableCfg,
+      animalsTableCfg,
+    ],
   }),
   species: hashed({ _type: 'components', _data: [...speciesSeed] }),
   traits: hashed({ _type: 'components', _data: [...traitsSeed] }),
+  persons: hashed({ _type: 'components', _data: [...personsSeed] }),
+  breeders: hashed({ _type: 'components', _data: [...breedersSeed] }),
   animals: hashed({
     _type: 'components',
     _tableCfg: hashed(animalsTableCfg)._hash,
@@ -75,6 +89,15 @@ describe('animalsSeed', () => {
     }
   });
 
+  it('references every seeded breeder at least once', () => {
+    const referencedHashes = new Set(animalsSeed.map((row) => row.breederRef));
+    const seededHashes = breedersSeed.map((row) => row._hash);
+
+    for (const hash of seededHashes) {
+      expect(referencedHashes.has(hash)).toBe(true);
+    }
+  });
+
   it('gives every animal one to four traits, referencing every seeded trait at least once', () => {
     for (const row of animalsSeed) {
       expect(row.traitsRefs.length).toBeGreaterThanOrEqual(1);
@@ -94,16 +117,16 @@ describe('animalsSeed', () => {
 
   it('has stable hashes so every node computes the same row identity', () => {
     expect(animalsSeed.map((row) => [row.id, row._hash])).toStrictEqual([
-      ['quackmore-junior', 'v4Ul9QMcLMs-6qIed0xpKm'],
-      ['donald-the-third', 'QUL1cQ6343lM2_0wJWQ9qs'],
-      ['daphne-duck', 'g-TZPnqomCtltXDPlbf1uV'],
-      ['sir-quackington', 'UXvLUGWJCFBtgVodNciRCa'],
-      ['bowser-the-guard-dog', 'WUeB7ZWkQFN9H-VhRaGwv7'],
-      ['nosey-the-bloodhound', 'Zpip4Yi-pKgOOmiwjBP5ph'],
-      ['pepper-the-poodle', 'TpIV70HbGvBGF0VDc4L4Gx'],
-      ['clara-cluck-junior', 'IBmVaFO325a3TfQ7YjbNiY'],
-      ['gadget-the-inventor', 'bFxMulCfFrybBOsFuimRnk'],
-      ['henrietta-the-egg-champion', 'rT48w8at5UbnAQrkH4OoTl'],
+      ['quackmore-junior', 'Pu0o2Ogr_8w-9sA_I8RHdm'],
+      ['donald-the-third', 'O60Td7HPPQAI7sQ5v8dgX3'],
+      ['daphne-duck', '_2qbAzzIgo5wCZK7EfoJto'],
+      ['sir-quackington', 'gmhgWXvjSF2tWIsKPNmPk0'],
+      ['bowser-the-guard-dog', 'B4yKeiDryTZJG4IlykpWhw'],
+      ['nosey-the-bloodhound', '__g19NBx18BkpP9iB9X3_M'],
+      ['pepper-the-poodle', 'TOPCaBAq7ZRhvfFrg18R0o'],
+      ['clara-cluck-junior', 'HMYG0RlL8bKOTDvbws4rgK'],
+      ['gadget-the-inventor', 'R2z2I1s77nNXsDt7llTPEc'],
+      ['henrietta-the-egg-champion', 'nbXemEJa6B6XjCb6um7oI-'],
     ]);
   });
 
@@ -125,6 +148,21 @@ describe('animalsSeed', () => {
     expect(errors.base).toHaveProperty('refsNotFound');
     expect(errors.base.refsNotFound).toMatchObject({
       missingRefs: [{ sourceTable: 'animals', targetTable: 'species' }],
+    });
+  });
+
+  it('is rejected by the validator when a breederRef is dangling', async () => {
+    const [firstAnimal] = animalsSeed;
+    const document = animalsDocument([
+      { ...rmhsh(firstAnimal), breederRef: 'no-such-breeder-hash' },
+    ]);
+
+    const errors = await validationErrors(document);
+
+    expect(errors.base.hasErrors).toBe(true);
+    expect(errors.base).toHaveProperty('refsNotFound');
+    expect(errors.base.refsNotFound).toMatchObject({
+      missingRefs: [{ sourceTable: 'animals', targetTable: 'breeders' }],
     });
   });
 
