@@ -85,7 +85,11 @@
 - Hand the kubeconfig over as a sensitive output and consume it from a file
   with mode 600 that lives only for the verification step; never `echo` it,
   never run Terraform with `TF_LOG` in CI, and set `debug_log = "/dev/null"`
-  on the `ssh` provider.
+  on the `ssh` provider. That path exists only on Linux and macOS: on
+  Windows the provider fails to open it, silently keeps the `fmt.Printf`
+  fallback, and a local `terraform apply` with `TF_LOG` set would log the
+  kubeconfig; applies run only in CI on Linux, `plan` and `validate` do not
+  execute commands.
 
 ## Candidates for upstream issues
 

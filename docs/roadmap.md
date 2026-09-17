@@ -84,7 +84,8 @@ docs/
   hub transport (required by `@rljson/server`).
 - Terraform 1.13 or later (S3 backend with `use_lockfile = true`),
   providers `hetznercloud/hcloud` (1.69 or later), `hashicorp/aws`,
-  `hashicorp/kubernetes`, `hashicorp/helm`, `hashicorp/tls`.
+  `hashicorp/kubernetes`, `hashicorp/helm`, `hashicorp/tls`, `loafoe/ssh`
+  (2.7 or later).
 - Container images: `ghcr.io/bartfastiel/rljson-tryout/node-service:<git sha>`
   and `:main`; chaos node analogous.
 
@@ -354,12 +355,15 @@ the cluster.
 - `data "hcloud_primary_ip"` by name `rljson-tryout`; the server takes its
   `datacenter` from that data source and attaches the address through
   `public_net { ipv4 = data.hcloud_primary_ip.main.id }`. No DNS resources.
-- A `terraform_data` resource with `remote-exec` that waits for
-  `cloud-init status --wait` and `k3s kubectl get nodes`, followed by
-  `local-exec` that copies `/etc/rancher/k3s/k3s.yaml` with the public IP
-  substituted for `127.0.0.1`. The result is exposed as the sensitive output
-  `kubeconfig`. Optional later improvement: build the kubeconfig without
-  SSH from a Terraform-generated root CA (k3s custom CA workflow).
+- An `ssh_sensitive_resource` of the `loafoe/ssh` provider that logs in as
+  root with the generated key, waits for `cloud-init status --wait` and for
+  a `Ready` node in `k3s kubectl get nodes`, and reads
+  `/etc/rancher/k3s/k3s.yaml`; its `result` is marked sensitive and the
+  resource re-runs only when the server id changes. The sensitive output
+  `kubeconfig` is that result with the public IP substituted for
+  `127.0.0.1`. The provider gets `debug_log = "/dev/null"` so it never
+  prints command output. Optional later improvement: build the kubeconfig
+  without SSH from a Terraform-generated root CA (k3s custom CA workflow).
 - Outputs: `server_ipv4`, `kubeconfig` (sensitive), `ssh_private_key`
   (sensitive).
 
@@ -708,7 +712,7 @@ true`), lists hide them, edit versus delete resolves to the edit. Gherkin
 - [ ] **E6 MongoDB with `mongo-agent`.** Depends on: D3.
 - [ ] **E7 Kubeconfig without SSH.** Depends on: A7. Terraform-generated
       root CA fed to k3s through cloud-init, admin client certificate issued by
-      Terraform, provisioner removed.
+      Terraform, SSH resource and `loafoe/ssh` provider removed.
 
 ## 6. Findings template
 

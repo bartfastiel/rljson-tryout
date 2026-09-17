@@ -121,12 +121,12 @@ without changing DNS:
 The first push to `main` then plans and applies the cluster stage: pull
 requests only plan, `main` applies and waits until the Kubernetes API server
 answers on port 6443. Terraform then logs in over SSH with the key it
-generated, waits for cloud-init and k3s, and reads the kubeconfig into the
-sensitive output `kubeconfig`; this SSH session is automated and the only
-one the project uses, nobody logs in to change anything. Any later change to
-`cloud-init.yaml` replaces the server on the next apply: the primary IP and
-the DNS records stay, everything stored on the server's local volumes is
-lost.
+generated, waits for cloud-init and a `Ready` node, and reads the kubeconfig
+into the sensitive output `kubeconfig`. This SSH session is automated and
+the only one the project uses; nobody logs in to change anything. Any later
+change to `cloud-init.yaml` replaces the server on the next apply: the
+primary IP and the DNS records stay, everything stored on the server's local
+volumes is lost.
 
 The server type is the Terraform variable `server_type` (default `cpx32`, a
 regular-performance 4 vCPU, 8 GB machine). The plan resolves the type and
