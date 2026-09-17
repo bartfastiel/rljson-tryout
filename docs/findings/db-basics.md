@@ -122,15 +122,26 @@ Validation:
   resolves every reference at once: `container.rljson.animals._data` holds
   every animal row and `container.rljson.species._data` holds the
   deduplicated set of every species row any animal points at, in one
-  `Db.get` call. This is what `PetShopStore.listAnimals` uses: it builds a
-  `Map` from `species._hash` to the species row and joins locally, which
-  avoids one query per animal and avoids depending on the `cell` array's
-  path shape (undocumented, and less convenient for a many-row join than
-  for a single-entity one).
+  `Db.get` call.
 - When the referencing table is empty, `species` is missing from
   `container.rljson` entirely rather than present with an empty `_data`;
   code that reads the joined table must treat "table absent" and "table
   empty" the same.
+- The unhashed route join silently drops a row whose reference does not
+  resolve: with one valid animal and one animal whose `speciesRef` is a
+  hash no species has, `Route.fromFlat('animals/species')` returns only the
+  valid animal in `container.rljson.animals._data` (`_data.length` is 1,
+  not 2); the broken row is not reported, not `null`, just absent. Good for
+  "give me every animal that has a species", wrong for "give me every
+  animal, tell me if its species is missing" or for surfacing a dangling
+  reference to an operator instead of hiding it. `PetShopStore.listAnimals`
+  needs the second contract (a caller must see the animal to know its
+  species is missing), so it does not use the join: it fetches `animals`
+  and `species` with two plain `Db.get` calls and joins them with a local
+  `Map` from `species._hash` to the species row, which includes every
+  animal row regardless of whether its reference resolves. This is the
+  "fall back to an explicit lookup by hash" case roadmap section 3.2
+  anticipated.
 - The `ref` on a reference column names the _content type_ of the target
   table (`ContentType`, e.g. `'components'`), not the _JSON type_ of the
   column's own value. The column itself stays `type: 'string'` (it holds a
@@ -159,3 +170,13 @@ Validation:
   instead of a message naming the missing `_type`.
 - `BaseValidator` does not enforce "rows in a head table must contain a
   non-null id" although `TableCfg` documents the rule.
+- The unhashed route join (`Route.fromFlat('<table>/<refTable>')`) silently
+  omits a source row whose reference column does not resolve, instead of
+  including it with a missing target or reporting it; a caller that needs
+  every source row (for example to display a broken reference rather than
+  hide it) cannot tell "no such row" from "one row was dropped because its
+  reference is broken" without a separate unfiltered read of the source
+  table. Reproduction: two `animals` rows, one with a valid `speciesRef`
+  and one with a hash no `species` row has;
+  `Route.fromFlat('animals/species')` returns only the valid row in
+  `container.rljson.animals._data`.

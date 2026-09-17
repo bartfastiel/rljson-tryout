@@ -14,21 +14,21 @@ import {
 
 const speciesRoute = Route.fromFlat(speciesTableCfg.key);
 const animalsRoute = Route.fromFlat(animalsTableCfg.key);
-const animalsWithSpeciesRoute = Route.fromFlat(
-  `${animalsTableCfg.key}/${speciesTableCfg.key}`,
-);
 
 /**
  * One animal as `PetShopStore.listAnimals` returns it: the fields a caller
  * needs to show a card, with the referenced species already resolved to its
  * `id` and `name` so the caller never has to look `speciesRef` up itself.
+ * `speciesId` and `speciesName` are `null` for the store-integrity case of
+ * an animal whose `speciesRef` does not resolve to a species in the store,
+ * rather than the method failing the whole list for one broken row.
  */
 export type AnimalWithSpecies = {
   id: string;
   hash: string;
   name: string;
-  speciesId: string;
-  speciesName: string;
+  speciesId: string | null;
+  speciesName: string | null;
   bornOn: string;
   priceCents: number;
 };
@@ -125,41 +125,44 @@ export class PetShopStore {
 
   /**
    * Every animal version in the store with its species joined, optionally
-   * narrowed to one species, ordered by `id`. The join is one `Db.get` call
-   * over the route `animals/species` (roadmap section 3.2): a reference
-   * segment resolves `speciesRef` on every animal row and the response
-   * carries both the `animals` and the referenced `species` rows in one
-   * container (`docs/findings/db-basics.md`, "Joining a reference"). An
-   * unknown `speciesId` filter yields an empty list rather than an error.
+   * narrowed to one species, ordered by `id`. Fetches `animals` and
+   * `species` separately and joins them with a local `Map`, the explicit
+   * fallback of roadmap section 3.2: the rljson route join
+   * `animals/species` was tried first, but it silently drops an animal row
+   * whose `speciesRef` does not resolve instead of including it with a
+   * missing species, which defeats listing every animal
+   * (`docs/findings/db-basics.md`, "Joining a reference"). An unknown
+   * `speciesId` filter yields an empty list rather than an error. An animal
+   * whose `speciesRef` does not resolve (nothing writes one today;
+   * `Db.insert` and `IoMem` do not check references, only `Validate` does,
+   * see the finding above) gets `speciesId` and `speciesName` of `null`
+   * instead of failing the whole list.
    */
   async listAnimals(filter: AnimalFilter = {}): Promise<AnimalWithSpecies[]> {
-    const { rljson } = await this.db.get(animalsWithSpeciesRoute, {});
-    const animalsTable = rljson[
+    const [{ rljson: animalsContainer }, { rljson: speciesContainer }] =
+      await Promise.all([
+        this.db.get(animalsRoute, {}),
+        this.db.get(speciesRoute, {}),
+      ]);
+    const animalsTable = animalsContainer[
       animalsTableCfg.key
     ] as ComponentsTable<HashedAnimalRow>;
-    // An empty animals table resolves no reference, so the join leaves the
-    // species table out of the response entirely instead of returning it
-    // empty; treat both the same way.
-    const speciesTable = rljson[speciesTableCfg.key] as
-      ComponentsTable<HashedSpeciesRow> | undefined;
+    const speciesTable = speciesContainer[
+      speciesTableCfg.key
+    ] as ComponentsTable<HashedSpeciesRow>;
     const speciesByHash = new Map(
-      (speciesTable?._data ?? []).map((species) => [species._hash, species]),
+      speciesTable._data.map((species) => [species._hash, species]),
     );
 
     const entries = animalsTable._data.map((animal) => {
       const species = speciesByHash.get(animal.speciesRef);
-      if (species === undefined) {
-        throw new Error(
-          `Animal "${animal.id}" references a species that is not in the store.`,
-        );
-      }
 
       return {
         id: animal.id,
         hash: animal._hash,
         name: animal.name,
-        speciesId: species.id,
-        speciesName: species.name,
+        speciesId: species?.id ?? null,
+        speciesName: species?.name ?? null,
         bornOn: animal.bornOn,
         priceCents: animal.priceCents,
       };

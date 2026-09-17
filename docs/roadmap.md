@@ -568,11 +568,16 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       `{ speciesSeeded, animalsSeeded }` instead of a plain row count, since
       it seeds both tables in one coordinated call (species first, because
       animals reference them by hash). The route join
-      `Route.fromFlat('animals/species')` resolves every animal's species in
-      one `Db.get` call without a per-row hash; `PetShopStore.listAnimals`
-      uses it and builds a local `Map` from the returned species rows rather
-      than parsing the `cell` array, and filters by species in JavaScript
-      after the join (findings in `docs/findings/db-basics.md`, "Joining a
+      `Route.fromFlat('animals/species')` was tried first and resolves every
+      animal's species in one `Db.get` call, but it silently drops a
+      referencing row whose reference does not resolve instead of including
+      it with a missing species; `PetShopStore.listAnimals` therefore uses
+      the explicit fallback the roadmap anticipated instead: two plain
+      `Db.get` calls (`animals`, `species`) joined with a local `Map`, which
+      includes every animal and reports `speciesId`/`speciesName` as `null`
+      when a reference does not resolve rather than dropping the row or
+      failing the request; filtering by species happens in JavaScript after
+      the join (findings in `docs/findings/db-basics.md`, "Joining a
       reference"). The `animals` view becomes the default route
       (`#/animals`) and gets a second, first-listed navigation entry
       `Animals`; `#/species` stays and its cards link to the filtered

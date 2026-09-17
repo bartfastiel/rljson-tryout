@@ -1,7 +1,27 @@
-import { animalsSeed, speciesSeed } from '@rljson-tryout/domain';
+import { Route } from '@rljson/rljson';
+import {
+  animalsSeed,
+  animalsTableCfg,
+  hashed,
+  speciesSeed,
+} from '@rljson-tryout/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { PetShopStore } from './petShopStore.ts';
+
+/**
+ * `PetShopStore.db` is a TypeScript-private field with no runtime
+ * enforcement; this narrow view reaches it to write a row `listAnimals`
+ * should never see from the seed, so the test can prove the method
+ * tolerates a dangling `speciesRef` instead of only asserting it never
+ * happens. Neither `Db.insert` nor `IoMem` check references on write (only
+ * `Validate` does, see `docs/findings/db-basics.md`, "Joining a
+ * reference"), so this is how a dangling reference actually reaches the
+ * store outside of a hand-crafted test.
+ */
+type StoreInternals = {
+  db: { insert: (route: Route, tree: unknown) => Promise<unknown> };
+};
 
 describe('PetShopStore', () => {
   let store: PetShopStore;
@@ -116,6 +136,33 @@ describe('PetShopStore', () => {
       expect(await store.listAnimals({ speciesId: 'dragon' })).toStrictEqual(
         [],
       );
+    });
+
+    it('reports a dangling speciesRef as null fields instead of failing', async () => {
+      const ghost = hashed({
+        id: 'ghost',
+        name: 'Ghost Animal',
+        speciesRef: 'no-such-species-hash',
+        bornOn: '2020-01-01',
+        priceCents: 100,
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(animalsTableCfg.key),
+        { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
+      );
+
+      const animals = await store.listAnimals();
+
+      expect(animals).toHaveLength(11);
+      expect(animals.find((animal) => animal.id === 'ghost')).toStrictEqual({
+        id: 'ghost',
+        hash: ghost._hash,
+        name: 'Ghost Animal',
+        speciesId: null,
+        speciesName: null,
+        bornOn: '2020-01-01',
+        priceCents: 100,
+      });
     });
   });
 });
