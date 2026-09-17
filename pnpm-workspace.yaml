@@ -9,3 +9,4 @@ overrides:
   '@rljson/io': 0.0.78
   '@rljson/hash': 0.0.19
   '@rljson/json': 0.0.23
+  '@rljson/network': 0.0.21

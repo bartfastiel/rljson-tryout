@@ -147,3 +147,38 @@ stay on disk until the next clean install but nothing resolves to them.
   without overrides gets a third `rljson` and a second `io` and `hash`.
   Reproduction: `pnpm add @rljson/db@0.0.42 @rljson/io-sqlite-node@1.0.7`
   in an empty package, then `pnpm why @rljson/rljson`.
+
+## Adding `@rljson/server` and `@rljson/bs` (slice D2)
+
+### What we tried
+
+- `pnpm --filter @rljson-tryout/node-service add --save-exact @rljson/server@0.0.64 @rljson/bs@0.0.26`
+  on 2026-09-17 (0.0.66 of `server` appeared the same week and stays out
+  until a dedicated upgrade pull request), then `socket.io@4.8.3` and
+  `socket.io-client@4.8.3`, the versions `@rljson/server`'s own
+  `devDependencies` name, and `pnpm why -r` for every `@rljson/*` package.
+
+### What happened
+
+- `@rljson/server` 0.0.64 declares `@rljson/bs` 0.0.26, `@rljson/db`
+  0.0.42, `@rljson/io` 0.0.78, `@rljson/hash` 0.0.19, `@rljson/json`
+  0.0.23, `@rljson/rljson` 0.0.81 (all exact, all matching this project)
+  and `@rljson/network` 0.0.20, one behind the 0.0.21 this project pins,
+  so `pnpm why -r @rljson/network` showed two versions. A fifth override
+  in `pnpm-workspace.yaml` (`'@rljson/network': 0.0.21`) brings it back to
+  one; the only consumer inside `server` is its `Node` class, which this
+  project does not use.
+- It declares no dependency on `socket.io` or `socket.io-client`, although
+  `dist/socket-io-bridge.d.ts` imports both for its types; without them
+  installed `tsc` fails on the import of `SocketIoBridge`. Both are
+  regular dependencies of the node service now, and esbuild bundles them
+  without an external (the bundle grew from 2.1 MB to 3.2 MB).
+- After the change `pnpm why -r` ends in `Found 1 version` for `rljson`,
+  `io`, `hash`, `json`, `network`, `bs` and `db`.
+
+### Candidates for upstream issues
+
+- `@rljson/server` 0.0.64 depends on `@rljson/network` 0.0.20 while 0.0.21
+  is current, and declares neither `socket.io` nor `socket.io-client`
+  although its public `SocketIoBridge` type needs both. Reproduction: see
+  `docs/findings/hub-transport.md`.
