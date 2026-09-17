@@ -255,7 +255,9 @@ jobs:
 
   # Deploys workspace production on main and the preview workspace pr-<n>
   # of a pull request; the workspace name selects the environment in the
-  # Terraform stage.
+  # Terraform stage. A pull request that was closed while this run was in
+  # its earlier jobs gets no preview: the Terraform steps are skipped and
+  # the job ends without deployment URLs, so smoke is skipped as well.
   terraform-workloads:
     name: terraform-workloads
     needs: [checks, image, terraform-cluster]
@@ -265,6 +267,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      pull-requests: read
     # One group per workspace: applies to production queue up behind each
     # other, and the preview of a pull request never races its own
     # preview-destroy run, which shares the group.
@@ -283,7 +286,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      # Read live, right after this job took the workspace's concurrency
+      # group, so that a pull request closed meanwhile is not deployed on
+      # top of the preview-destroy run that already cleaned up.
+      - name: Check that the pull request is still open
+        id: pull-request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          state="$(gh pr view "${PULL_REQUEST_NUMBER}" --json state --jq .state)"
+          echo "state=${state}" >> "$GITHUB_OUTPUT"
+          if [ "${state}" != "OPEN" ]; then
+            echo "::notice::Pull request ${PULL_REQUEST_NUMBER} is ${state}; its preview is not deployed."
+          fi
+
       - name: Start the Terraform session
+        if: github.event_name == 'push' || steps.pull-request.outputs.state == 'OPEN'
         uses: ./.github/actions/terraform-session
         with:
           working-directory: infra/terraform/workloads
@@ -291,19 +312,24 @@ jobs:
           aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
 
       - name: Check formatting
+        if: github.event_name == 'push' || steps.pull-request.outputs.state == 'OPEN'
         run: terraform fmt -check -recursive
 
       - name: Validate
+        if: github.event_name == 'push' || steps.pull-request.outputs.state == 'OPEN'
         run: terraform validate
 
       - name: Plan for apply
+        if: github.event_name == 'push' || steps.pull-request.outputs.state == 'OPEN'
         run: terraform plan -input=false -no-color -out=tfplan
 
       - name: Apply
+        if: github.event_name == 'push' || steps.pull-request.outputs.state == 'OPEN'
         run: terraform apply -input=false -no-color tfplan
 
       - name: Expose the deployment URLs
         id: deployment
+        if: github.event_name == 'push' || steps.pull-request.outputs.state == 'OPEN'
         run: |
           urls="$(terraform output -json deployment_urls | jq -r 'join(" ")')"
           if [ -z "${urls}" ]; then
@@ -318,7 +344,7 @@ jobs:
   smoke:
     name: smoke
     needs: [terraform-workloads]
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    if: needs.terraform-workloads.outputs.deployment_urls != '' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

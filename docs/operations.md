@@ -124,9 +124,12 @@ workloads workspace `pr-<number>` (created on first use) and applies it
 with the image the `image` job pushed for the pull request's merge commit;
 the `smoke` job then verifies the preview like production and posts one
 comment on the pull request with the links, the deployed commit and the
-certificate note. Later pushes update that comment instead of adding
-another; a hidden HTML marker identifies it. The workspace name selects the
-environment in `infra/terraform/workloads`:
+certificate note. Later runs (a push, a reopen, a manual rerun) update
+that comment instead of adding another; a hidden HTML marker identifies
+it. Right before the apply, the job reads the pull request's state from
+GitHub and skips the deployment when the pull request was closed while
+the run was in its earlier jobs; `smoke` is skipped with it. The
+workspace name selects the environment in `infra/terraform/workloads`:
 
 | Workspace     | Namespace     | Hosts                                            | Certificates             |
 | ------------- | ------------- | ------------------------------------------------ | ------------------------ |
@@ -162,8 +165,14 @@ Both preview workflows run `infra/scripts/destroy-workloads.sh` with the
 workspace names as arguments; a name that does not exist (a pull request
 that never had a preview) is reported and skipped. The sweep is the safety
 net for a `Preview destroy` that failed, for example on a stale state
-lock or a GitHub outage at the moment of the close. The sweep and `Preview
-destroy` are not serialized against each other: when both pick the same
+lock or a GitHub outage at the moment of the close, and for the one
+window the pipeline's state check leaves open: a pull request closed
+during its own apply. In that case `Preview destroy` queues behind the
+apply in the shared group and removes the preview right after it, but
+should that fail too, the sweep removes it within six hours; the comment
+then still reads "deployed" until someone reopens the pull request. The
+sweep and `Preview destroy` are not serialized against each other: when
+both pick the same
 workspace at the same moment, one fails on the state lock or finds the
 workspace gone, and the next sweep leaves nothing behind. To clean up by
 hand, start the sweep: `gh workflow run "Preview sweep" --ref main`.
@@ -171,8 +180,8 @@ hand, start the sweep: `gh workflow run "Preview sweep" --ref main`.
 While the system is down, every pull request pipeline fails in
 `terraform-workloads` because the cluster state has no kubeconfig to apply
 against; `checks` is unaffected and merging still works. The next `Up`
-brings production back, previews come back with the next push to their
-pull request.
+brings production back; a preview comes back with the next pipeline run
+of its pull request, which a push, a reopen or a manual rerun triggers.
 
 Cost: a preview is one more pod on the same server (requests 100m CPU and
 128 MiB, limits 500m and 512 MiB) and one staging certificate; no Hetzner

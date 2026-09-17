@@ -46,7 +46,7 @@ case "${PREVIEW_STATUS}" in
   destroyed)
     body="${marker}"$'\n'
     body+="## Preview environment"$'\n\n'
-    body+="Destroyed after the pull request was closed: namespace \`${namespace}\` and its Terraform workspace are gone. A push to a reopened pull request creates them again."$'\n'
+    body+="Destroyed after the pull request was closed: namespace \`${namespace}\` and its Terraform workspace are gone. Reopening the pull request runs the pipeline again, which recreates them."$'\n'
     ;;
   *)
     fail "PREVIEW_STATUS must be deployed or destroyed, got: ${PREVIEW_STATUS}"

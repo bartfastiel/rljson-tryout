@@ -30,7 +30,7 @@ cluster_directory="${CLUSTER_DIRECTORY:-../cluster}"
 summary_file="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 
 for requested in "$@"; do
-  if [ "${requested}" = default ] || ! [[ "${requested}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  if ! [[ "${requested}" =~ ^(production|pr-[1-9][0-9]*)$ ]]; then
     echo "::error::\"${requested}\" is not a workspace this script destroys: name production or a pr-<number> workspace."
     exit 2
   fi

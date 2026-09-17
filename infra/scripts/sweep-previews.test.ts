@@ -17,6 +17,8 @@ import {
 type Scenario = {
   workspaces: string[];
   pullRequestStates: Record<number, string>;
+  failDestroyIn?: string;
+  failWorkspaceList?: boolean;
 };
 
 type Outcome = ShellOutcome & { summary: string };
@@ -45,8 +47,8 @@ function runScript(scenario: Scenario): Outcome {
       FAKE_WORKSPACES: scenario.workspaces.join(' '),
       FAKE_KUBECONFIG_PRESENT: 'yes',
       FAKE_API_ANSWERS: 'yes',
-      FAKE_FAIL_DESTROY_IN: '',
-      FAKE_FAIL_WORKSPACE_LIST: 'no',
+      FAKE_FAIL_DESTROY_IN: scenario.failDestroyIn ?? '',
+      FAKE_FAIL_WORKSPACE_LIST: scenario.failWorkspaceList ? 'yes' : 'no',
       FAKE_PULL_REQUEST_STATES: Object.entries(scenario.pullRequestStates)
         .map(([number, state]) => `${number}=${state}`)
         .join(' '),
@@ -108,7 +110,47 @@ describe('sweep-previews.sh', () => {
     expect(outcome.summary).toContain(
       '| pr-3 | 5 resources destroyed, workspace deleted |',
     );
+    expect(outcome.summary.indexOf('## Preview sweep')).toBeLessThan(
+      outcome.summary.indexOf('## Workloads'),
+    );
     expect(outcome.summary).not.toContain('| production |');
+  });
+
+  it('reports a failed destroy in its own table and fails', () => {
+    const outcome = runScript({
+      workspaces: ['default', 'pr-3', 'pr-8'],
+      pullRequestStates: { 3: 'MERGED', 8: 'CLOSED' },
+      failDestroyIn: 'pr-8',
+    });
+
+    expect(outcome.status).toBe(1);
+    expect(outcome.summary).toContain(
+      '| pr-3 | #3 | merged | destroy failed with exit code 1, see the Workloads table |',
+    );
+    expect(outcome.summary).toContain(
+      '| pr-8 | #8 | closed | destroy failed with exit code 1, see the Workloads table |',
+    );
+    expect(outcome.summary).toContain(
+      '| pr-3 | 5 resources destroyed, workspace deleted |',
+    );
+    expect(outcome.summary).toContain(
+      '| pr-8 | failed with exit code 1, see the log |',
+    );
+  });
+
+  it('fails when the workspaces cannot be listed instead of reporting no preview', () => {
+    const outcome = runScript({
+      workspaces: ['default', 'pr-3'],
+      pullRequestStates: { 3: 'MERGED' },
+      failWorkspaceList: true,
+    });
+
+    expect(outcome.status).toBe(1);
+    expect(outcome.calls).toHaveLength(0);
+    expect(outcome.output).toContain(
+      'Error: the fake workspace list fails on purpose',
+    );
+    expect(outcome.summary).toBe('');
   });
 
   it('does nothing when every preview belongs to an open pull request', () => {

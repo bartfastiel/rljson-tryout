@@ -275,20 +275,25 @@ describe('destroy-workloads.sh', () => {
       expect(outcome.summary).not.toContain('No workspace besides default');
     });
 
-    it.each([['default'], ['Pr-1'], ['pr 1'], ['-pr-1']])(
-      'refuses the workspace name %s before touching anything',
-      (name) => {
-        const outcome = runScript({
-          workspaces: ['default', 'production'],
-          arguments: [name],
-        });
+    it.each([
+      ['default'],
+      ['Pr-1'],
+      ['pr 1'],
+      ['-pr-1'],
+      ['pr-0'],
+      ['pr-01'],
+      ['staging'],
+    ])('refuses the workspace name %s before touching anything', (name) => {
+      const outcome = runScript({
+        workspaces: ['default', 'production'],
+        arguments: [name],
+      });
 
-        expect(outcome.status).toBe(2);
-        expect(outcome.calls).toEqual([]);
-        expect(outcome.output).toContain(
-          `::error::"${name}" is not a workspace this script destroys`,
-        );
-      },
-    );
+      expect(outcome.status).toBe(2);
+      expect(outcome.calls).toEqual([]);
+      expect(outcome.output).toContain(
+        `::error::"${name}" is not a workspace this script destroys`,
+      );
+    });
   });
 });

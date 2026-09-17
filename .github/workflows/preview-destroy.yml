@@ -3,8 +3,9 @@ name: Preview destroy
 # Removes the preview environment of a pull request as soon as it is closed
 # or merged: destroys the workloads workspace pr-<number> (namespace,
 # deployment, service, ingress, certificate) and deletes the workspace, then
-# rewrites the preview comment on the pull request. A push to a reopened
-# pull request creates the preview again. See docs/operations.md.
+# rewrites the preview comment on the pull request. Reopening the pull
+# request runs the pipeline again, which recreates the preview. See
+# docs/operations.md.
 
 on:
   pull_request:

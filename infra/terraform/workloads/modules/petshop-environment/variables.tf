@@ -44,7 +44,7 @@ variable "enable_apex_ingress" {
 }
 
 variable "nodes" {
-  description = "Nodes of this environment in display order; the first one also answers on the apex host. Every node runs the in-memory store."
+  description = "Nodes of this environment in display order; the first one also answers on the apex host when enable_apex_ingress is set. Every node runs the in-memory store."
   type = list(object({
     name = string
   }))

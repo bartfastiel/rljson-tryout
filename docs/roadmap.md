@@ -335,11 +335,12 @@ Triggers: `pull_request` and `push` to `main`. Jobs:
 3. `terraform-cluster`: `plan` on pull requests, `apply` on `main`.
    Workspace `default`. Needs `id-token: write` for AWS and `HCLOUD_TOKEN`.
 4. `terraform-workloads`: on `main` workspace `production`, on pull requests
-   workspace `pr-<n>` with `apply` (this is the preview), image tag from job
-   2, `TF_VAR_letsencrypt_email` from the repository secret. Comments the
-   preview links on the pull request (update the same comment on later runs).
+   workspace `pr-<n>` with `apply` (this is the preview, skipped when the
+   pull request is no longer open by the time the job starts), image tag
+   from job 2, `TF_VAR_letsencrypt_email` from the repository secret.
 5. `smoke`: waits until `https://<host>/health` returns the deployed commit
-   sha, for production and preview alike.
+   sha, for production and preview alike; on a pull request it then
+   comments the preview links (updating the same comment on later runs).
 
 `concurrency` groups: `cluster`, `workloads-production`, `workloads-pr-<n>`.
 Pull requests from forks get no secrets; that is acceptable.
@@ -387,9 +388,12 @@ cluster, `up.yml` brings both back (see `docs/operations.md`).
   (`mcr.microsoft.com/mssql/server:2022-latest`, `MSSQL_PID=Express`,
   `MSSQL_MEMORY_LIMIT_MB=1536`, 4 Gi claim) controlled by `enable_mssql`
   (true in production, false in previews).
-- Variables: `environment_name`, `image` (the full reference the `image`
-  job pushed), `hostname_suffix`, `enable_mssql`, `letsencrypt_email`,
-  `seed_size`, `rljson_domain`.
+- Module variables: `environment_name`, `image` (the full reference the
+  `image` job pushed), `base_domain`, `hostname_infix`, `cluster_issuer`,
+  `enable_apex_ingress`, `nodes`; later slices add `enable_mssql`,
+  `seed_size`, `rljson_domain`. The root module chooses them from the
+  workspace name and takes `image`, `base_domain` and `letsencrypt_email`
+  (for the issuers) as its own variables.
 
 ## 5. Slices
 

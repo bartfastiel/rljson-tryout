@@ -8,7 +8,8 @@ data "terraform_remote_state" "cluster" {
   }
 
   # Evaluated before anything is read, so a mistyped workspace fails the
-  # plan with this message instead of deploying an environment nobody asked for.
+  # plan instead of deploying an environment nobody asked for (a name that
+  # also breaks the module's variable validations fails on those first).
   lifecycle {
     precondition {
       condition     = local.is_production_workspace || local.is_preview_workspace
