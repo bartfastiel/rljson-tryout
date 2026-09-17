@@ -418,7 +418,7 @@ node-service start` answers on 8080 and tests pass.
       measured size in `docs/findings/image-size.md`. If the GHCR package is
       private after the first push, say so in the pull request; a human sets it
       to public once.
-- [ ] **A5 State backend bootstrap.** Depends on: nothing.
+- [x] **A5 State backend bootstrap.** Depends on: nothing.
       `infra/scripts/bootstrap-aws-state-backend.sh`: idempotently creates the
       S3 bucket (versioning, encryption, public access blocked), an IAM role
       `github-actions-rljson-tryout` trusting the existing GitHub OIDC provider
@@ -426,7 +426,9 @@ node-service start` answers on 8080 and tests pass.
       and sets the repository variable `AWS_ROLE_ARN` with `gh variable set`.
       Run it once with the local AWS credentials. Done when the variable exists
       and `aws sts get-caller-identity` through the role works from a workflow
-      step.
+      step. Deviation: the workflow-step proof of the role moves to A6, whose
+      first `terraform init` in CI assumes the role; this slice only bootstraps
+      the AWS side and confirms the script is idempotent by running it twice.
 - [ ] **A6 Server with k3s.** Depends on: A5. Stage 1 per 4.3 with an
       ephemeral address and without the kubeconfig provisioner;
       `terraform-cluster` job. Done when

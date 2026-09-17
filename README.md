@@ -41,6 +41,25 @@ Node 24 runs the TypeScript sources directly (type stripping); there is no
 build step in the monorepo. Per-package scripts live in
 `packages/*/package.json`.
 
+## Reproducing
+
+### Terraform state backend
+
+`infra/scripts/bootstrap-aws-state-backend.sh` creates the S3 bucket that
+holds Terraform state and an IAM role that GitHub Actions assumes through
+OIDC, scoped to that one bucket; it finishes by setting the repository
+variable `AWS_ROLE_ARN`. Run it once, from a shell with local AWS
+credentials that have IAM and S3 rights and an authenticated `gh` CLI:
+
+```sh
+infra/scripts/bootstrap-aws-state-backend.sh
+```
+
+It is idempotent: re-running it on an already bootstrapped account changes
+nothing. Override `GITHUB_REPOSITORY`, `STATE_BUCKET`, `AWS_REGION` or
+`ROLE_NAME` as environment variables to reproduce the project under a
+different account or repository.
+
 ## License
 
 [MIT](LICENSE)
