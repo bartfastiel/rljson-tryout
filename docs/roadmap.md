@@ -154,6 +154,7 @@ immutable version (`_hash`).
 | `GET /api/stats`                                    | Row counts per table, seed size, uptime                                                        |
 | `GET /api/species`                                  | List of current species versions                                                               |
 | `GET /api/species/:hash/image`                      | PNG bytes, `Content-Type: image/png`                                                           |
+| `GET /api/traits`                                   | List of current trait versions                                                                 |
 | `GET /api/animals?species=<id>&trait=<id>&q=<text>` | Current animal versions with species name joined                                               |
 | `GET /api/animals/:id`                              | Current version with species, breeder and traits joined                                        |
 | `GET /api/animals/:id/history`                      | All versions with InsertHistory rows, newest first                                             |
@@ -635,10 +636,34 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       `not-found-view.js`, and an animal card is now the whole `<a>` element
       rather than an `<article>` with a separate link, so the link target
       covers the entire card.
-- [ ] **B5 Traits as multi-reference.** Depends on: B4. Table `traits`,
+- [x] **B5 Traits as multi-reference.** Depends on: B4. Table `traits`,
       column `traitsRefs` (jsonArray of hashes), validation test for a dangling
       entry, trait chips in the detail view, filter `?trait=<id>`. Done when
-      filtering works and the validator rejects a dangling trait.
+      filtering works and the validator rejects a dangling trait. Deviation:
+      rljson 0.0.81's `BaseValidator` already validates a `jsonArray`
+      multi-reference: `_refsNotFound` treats an array-valued `ref` column
+      the same way as a single-valued one, resolving every element against
+      the target table and reporting each unresolved one, so no domain-level
+      validation helper was needed for the acceptance criterion
+      (`docs/findings/db-basics.md`, "Multi-references"). The same mechanism
+      incidentally also rejects an element of the wrong JSON type (a number
+      or a boolean can never equal a stored hash), which `dataDoesNotMatchColumnConfig`
+      on its own would not catch, since it only checks that the column as a
+      whole is an array. The seed holds nine Duckburg-flavoured traits, not
+      a fixed count the roadmap left open, and every animal gets one to four
+      of them chosen to fit its existing `backgroundStory`. `GET /api/traits`
+      is a new endpoint the roadmap's original section 2.5 table did not
+      list; it is added there now. Filtering by `trait` happens in
+      `PetShopStore.listAnimals` and `getAnimal` after a full read of
+      `animals`, `species` and `traits`, the same fallback `speciesId`
+      filtering and `getAnimal` already use, for the same reason
+      (`docs/findings/db-basics.md`, "Filtering by id"): `db.get` with a
+      `where` clause is unreliable once a table has a reference column, and
+      `traitId` needs to be resolved against `traitsRefs` element by element
+      besides, a shape `where` cannot express at all. The web app renders
+      the species and trait filters as two labelled chip rows rather than
+      one combined bar, reusing the existing `.chip` component for both the
+      filter chips and the detail view's trait chips.
 - [ ] **B6 Traits as a junction table.** Depends on: B5. Table
       `animalTraits`, the same filter implemented over the junction, both
       implementations behind one interface with a toggle in configuration, and
