@@ -33,6 +33,7 @@ other nodes.
 The system is live with a production Let's Encrypt certificate on three nodes: [node1](https://node1.rljson-tryout.wer-ist-daniel-schwarz.de) (also the apex host [rljson-tryout.wer-ist-daniel-schwarz.de](https://rljson-tryout.wer-ist-daniel-schwarz.de)), [node2](https://node2.rljson-tryout.wer-ist-daniel-schwarz.de) and [node3](https://node3.rljson-tryout.wer-ist-daniel-schwarz.de).
 Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress, slice C1 gives node1 and node2 in production a SQLite store on a persistent volume each, so their invoices survive a redeploy, and slice C3 puts the three nodes on the internet, each still with its own data.
 Slice D1 (discovery and roles) was pulled forward: every node discovers the other nodes of its rljson domain by UDP broadcast, takes part in the hub election and reports the outcome at `/status`; since C3 the three production nodes agree on one hub, which the header of the web app and the `Network` view show live.
+Slice D2 (hub transport) makes the nodes talk: the hub serves its store over socket.io on the hub port, every client connects to it, and a row written on one node is readable by its hash on every other node through the read cascade of `@rljson/server`.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
@@ -140,7 +141,7 @@ probe listener on `HUB_PORT` (3000) and the UDP broadcast socket on
 every node it hears, and takes part in the hub election of
 `@rljson/network` (earliest start wins, an incumbent hub is kept while it
 answers). `GET /status` reports the outcome:
-`{ nodeName, nodeId, publicUrl, domain, role, hubNodeId, hubAddress, peers, nodes, storage, tables }`
+`{ nodeName, nodeId, publicUrl, domain, role, hubNodeId, hubAddress, peers, nodes, transport, storage, tables }`
 with `role` one of `starting`, `standalone` (no other node of the domain
 is known, or discovery is disabled), `hub` and `client`; `peers` lists
 every node discovery knows (`nodeId`, `name` when known, `hostname`,
@@ -149,9 +150,10 @@ every node discovery knows (`nodeId`, `name` when known, `hostname`,
 advances for as long as discovery still lists it, not per heartbeat, so
 `probe.measuredAt` and `probe.reachable` tell whether it answered); `nodes` lists every
 URL of `NODE_URLS` (this node included and flagged `self`) with the name,
-node id and role it reported to this node's poll of its `/status`,
-`reachable` from that server-side poll, `seenInTopology` from discovery
-and `lastSeen`; `tables` holds the row count of every table of the store.
+node id, role and, for the hub, `connectedClients` it reported to this
+node's poll of its `/status`, `reachable` from that server-side poll,
+`seenInTopology` from discovery and `lastSeen`; `tables` holds the row
+count of every table of the store.
 `GET /api/stats` reports
 `{ nodeName, seedSize, uptimeSeconds, startedAt, rssBytes, tables }`: the
 seed size the node was configured with, its uptime, the resident set size
@@ -162,6 +164,27 @@ can probe every other node. Set `DISCOVERY=disabled` for a
 single-node run without sockets; the node then reports `standalone` with
 an id that lives for the process only. The node id of a node with
 discovery persists under `DATA_DIR/identity/<domain>/node-id`.
+
+The role decides what runs on the hub port. The hub starts a socket.io
+server on `HUB_PORT` with a `Server` of `@rljson/server` over the node's
+own store behind it, and every client connects a socket.io client to the
+hub's address with a `Client` over its own store; `transport` in
+`/status` shows it: `{ role: "hub", hubAddress, connectedClients, lastError }`
+on the hub, `{ role: "client", hubAddress, connectedToHub, lastError }` on
+a client, `{ role: "standalone", hubAddress: null, lastError }` otherwise,
+with `lastError` the last failure of the transport (a port that would not
+bind, a hub that cannot be reached, a dropped socket), `null` once the
+next step succeeded. From then on every read of a specific row goes
+through the read cascade of `@rljson/server`: the local store first, then
+the hub, and through the hub every other client, and what comes back is
+cached locally. Writes stay local and whole-table reads never leave the
+node, so `GET /api/animals/:id?version=<hash>` on a client serves a
+version written on the hub by its hash and `GET /api/invoices/:id` serves
+an invoice issued on the hub by its id, while the lists of a client show
+only what the client holds itself until slice D3 synchronises change sets.
+What the cascade does on a read miss, what the requests look like on the
+wire and what happens when the hub goes away are in
+[docs/findings/hub-transport.md](docs/findings/hub-transport.md).
 
 `STORAGE` selects what backs the store. `memory` (the default) keeps
 everything in the process, so a restart starts from the seed again.
@@ -194,9 +217,10 @@ animals matching its search the same way.
 The web app shows the environment in the header: this node as a badge,
 every other node of `NODE_URLS` as a link outlined green when discovery
 on this node sees it and red otherwise, with a small marker for the
-browser's own `/health` probe. The `Network` view lists the same nodes
-with all three signals and the discovered peers, refreshed every five
-seconds.
+browser's own `/health` probe and, on the hub, a small count of its
+connected clients. The `Network` view lists the same nodes with all three
+signals, what this node's hub transport is doing, and the discovered
+peers, refreshed every five seconds.
 
 Environment variables the service understands so far:
 
@@ -227,24 +251,31 @@ ports 8301 to 8303 (`NODE1_PORT` to `NODE3_PORT`):
 
 ```sh
 docker compose -f deploy/compose/three-nodes.yml up --build --wait
-curl -s http://localhost:8301/status | jq '{nodeName, role, hubAddress}'
+curl -s http://localhost:8301/status | jq '{nodeName, role, hubAddress, transport}'
 docker compose -f deploy/compose/three-nodes.yml down
 ```
 
 Within about five seconds (one broadcast interval) exactly one node
-reports `hub` and the other two `client` with the same `hubAddress`. Like
-in Kubernetes, the nodes carry two address lists: `NODE_URLS` names the
-host-side URLs (`http://localhost:8301` and so on), so the links in the
-header open from a browser on the host and its probe marker turns green,
-and `NODE_STATUS_URLS` names the container-internal URLs
-(`http://node1:8080` and so on), where the nodes poll each other's
-`/status`. Set
+reports `hub` and the other two `client` with the same `hubAddress`, and
+a moment later the hub's `transport` counts two connected clients and
+each client's reports `connectedToHub: true`. An invoice issued on the
+hub (`POST /api/invoices`) is then readable by its id on either client
+(`GET /api/invoices/<id>`), and a version written on the hub
+(`PUT /api/animals/<id>`) by its hash
+(`GET /api/animals/<id>?version=<hash>`). Like in Kubernetes, the nodes
+carry two address lists: `NODE_URLS` names the host-side URLs
+(`http://localhost:8301` and so on), so the links in the header open from
+a browser on the host and its probe marker turns green, and
+`NODE_STATUS_URLS` names the container-internal URLs (`http://node1:8080`
+and so on), where the nodes poll each other's `/status`. Set
 `NODE_SERVICE_IMAGE` to run a pushed image instead of building one, together
 with `NODE_SERVICE_PULL_POLICY=missing` unless the image was pulled before
 (the compose file never pulls by default, so a local build is never
-overwritten by a registry image of the same name). The Gherkin feature
+overwritten by a registry image of the same name). The Gherkin features
 `packages/node-service/features/network.feature` ("three nodes start,
-exactly one becomes hub") drives exactly this setup:
+exactly one becomes hub") and `features/hub-transport.feature` ("a row
+written on the hub is readable by hash on a client", also run in-process
+by `pnpm test`) drive exactly this setup:
 
 ```sh
 pnpm --filter @rljson-tryout/node-service test:integration
@@ -252,12 +283,15 @@ pnpm --filter @rljson-tryout/node-service test:integration
 
 It needs Docker, builds the image from the working tree (or uses
 `NODE_SERVICE_IMAGE`), waits for the three `/status` endpoints to settle,
-checks the roles, the hub address and the node lists, saves the compose
-logs to `packages/node-service/test-results/compose/three-nodes.log` and
-tears the project down again. `pnpm test` leaves it out; the `integration`
-job of the pipeline runs it against the image the `image` job pushed.
-What the library does and does not do, and the timings measured, are in
-[docs/findings/network-discovery.md](docs/findings/network-discovery.md).
+checks the roles, the hub address, the node lists and the transport, edits
+an animal and issues an invoice on the hub and reads both back on a
+client, saves the compose logs to
+`packages/node-service/test-results/compose/three-nodes.log` and tears the
+project down again. `pnpm test` leaves it out; the `integration` job of
+the pipeline runs it against the image the `image` job pushed. What the
+library does and does not do, and the timings measured, are in
+[docs/findings/network-discovery.md](docs/findings/network-discovery.md)
+and [docs/findings/hub-transport.md](docs/findings/hub-transport.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, pull request and
 commit conventions.

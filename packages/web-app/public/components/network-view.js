@@ -1,6 +1,10 @@
 // @ts-check
 import { element } from '../dom.js';
-import { browserProbeMarker, topologyDot } from '../node-indicators.js';
+import {
+  browserProbeMarker,
+  connectedClientsBadge,
+  topologyDot,
+} from '../node-indicators.js';
 import { statusFeed } from '../status-feed.js';
 import {
   errorState,
@@ -72,6 +76,28 @@ const probeMarker = (reachable) => {
 };
 
 /**
+ * What the hub transport is doing, in one sentence: serving, connected,
+ * trying, or idle, with the last failure when there was one.
+ *
+ * @param {import('../status-feed.js').StatusTransport} transport
+ */
+const transportSummary = (transport) => {
+  let text = 'idle, this node runs on its own';
+  if (transport.role === 'hub') {
+    const count = transport.connectedClients ?? 0;
+    text = `serving ${count} connected ${count === 1 ? 'client' : 'clients'}`;
+  } else if (transport.role === 'client') {
+    text = transport.connectedToHub
+      ? `connected to the hub at ${transport.hubAddress ?? ''}`
+      : `not connected to the hub at ${transport.hubAddress ?? ''}`;
+  }
+  if (transport.lastError !== null) {
+    text = `${text}; last error: ${transport.lastError}`;
+  }
+  return text;
+};
+
+/**
  * @param {import('../status-feed.js').Status} status
  * @param {Date} at
  */
@@ -97,6 +123,7 @@ const thisNode = (status, at) => {
     ['Domain', status.domain],
     ['Hub', hub],
     ['Peers', String(status.peers.length)],
+    ['Transport', transportSummary(status.transport)],
     ['Updated', timeFormat.format(at)],
   ]);
 };
@@ -148,6 +175,9 @@ const nodeCard = (node, reachableFromBrowser, at) => {
   const meta = element('p', 'node-card-meta');
   meta.append(
     roleBadge(node.role),
+    ...[connectedClientsBadge(node.connectedClients)].filter(
+      (badge) => badge !== null,
+    ),
     element('span', 'node-card-url', node.url),
     nodeIdCode(node.nodeId),
   );
@@ -193,9 +223,10 @@ const peerCard = (peer, at) => {
 };
 
 /**
- * The network view: what this node is (name, role, id, domain, hub), every
- * node of the environment with the discovery flag, the server-side probe
- * and this browser's own probe, and the peers discovery knows with their
+ * The network view: what this node is (name, role, id, domain, hub, what
+ * its hub transport is doing), every node of the environment with the
+ * discovery flag, the server-side probe, this browser's own probe and the
+ * connected clients of the hub, and the peers discovery knows with their
  * addresses and probe results. Follows the shared status feed, which
  * polls `/status` every five seconds while the view is open.
  */

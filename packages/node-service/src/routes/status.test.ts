@@ -16,6 +16,7 @@ import {
 } from '../testing/fakeDiscoveryManager.ts';
 import {
   buildTestServer,
+  buildTestTransport,
   silentLogger,
   testConfiguration,
 } from '../testing/testServer.ts';
@@ -86,12 +87,18 @@ const serverOverFakeNetwork = async () => {
   });
   const logger = silentLogger();
   let manager: FakeDiscoveryManager | undefined;
-  const orchestrator = new RoleOrchestrator(configuration, logger, {
-    createDiscoveryManager: (config) => {
-      manager = new FakeDiscoveryManager(config, fakeNodeInfo('id-node1'));
-      return manager;
+  const store = await seededStore();
+  const orchestrator = new RoleOrchestrator(
+    configuration,
+    logger,
+    buildTestTransport(store, configuration),
+    {
+      createDiscoveryManager: (config) => {
+        manager = new FakeDiscoveryManager(config, fakeNodeInfo('id-node1'));
+        return manager;
+      },
     },
-  });
+  );
   cleanups.push(() => orchestrator.stop());
   const fetchStub = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
@@ -100,6 +107,7 @@ const serverOverFakeNetwork = async () => {
         nodeName: 'node2',
         nodeId: 'id-node2',
         role: 'client',
+        transport: { role: 'client', connectedToHub: true },
       });
     }
     throw new TypeError('fetch failed');
@@ -108,7 +116,6 @@ const serverOverFakeNetwork = async () => {
     fetch: fetchStub,
   });
   cleanups.push(() => directory.stop());
-  const store = await seededStore();
   const server = closing(
     buildServer({ configuration, store, orchestrator, directory, logger }),
   );
@@ -150,11 +157,13 @@ describe('GET /status', () => {
           name: 'node1',
           nodeId: null,
           role: 'starting',
+          connectedClients: null,
           reachable: true,
           lastSeen: expect.any(String) as string,
           seenInTopology: true,
         },
       ],
+      transport: { role: 'standalone', hubAddress: null, lastError: null },
       storage: 'memory',
       seedSize: 'small',
       tables: expect.objectContaining({
@@ -205,13 +214,14 @@ describe('GET /status', () => {
     expect(response.json<{ storage: string }>().storage).toBe('sqlite');
   });
 
-  it('reports the hub role, the peers with their names and every node of the environment', async () => {
+  it('reports the hub role, the transport, the peers with their names and every node of the environment', async () => {
     const { server, manager } = await serverOverFakeNetwork();
     manager().join(
       fakeNodeInfo('id-node2', { hostname: 'node2', localIps: ['172.18.0.3'] }),
     );
     manager().join(fakeNodeInfo('id-node4', { hostname: 'stranger' }));
     manager().elect('id-node1', '172.18.0.2:3000');
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     const response = await server.inject({ method: 'GET', url: '/status' });
     const status = response.json<{
@@ -225,9 +235,11 @@ describe('GET /status', () => {
         name: string | null;
         nodeId: string | null;
         role: string | null;
+        connectedClients: number | null;
         reachable: boolean;
         seenInTopology: boolean;
       }[];
+      transport: Record<string, unknown>;
     }>();
 
     expect(status).toMatchObject({
@@ -237,6 +249,12 @@ describe('GET /status', () => {
       role: 'hub',
       hubNodeId: 'id-node1',
       hubAddress: '172.18.0.2:3000',
+      transport: {
+        role: 'hub',
+        hubAddress: '172.18.0.2:3000',
+        connectedClients: 0,
+        lastError: null,
+      },
     });
     expect(status.peers).toHaveLength(2);
     expect(status.peers[0]).toMatchObject({
@@ -258,6 +276,7 @@ describe('GET /status', () => {
         name: 'node1',
         nodeId: 'id-node1',
         role: 'hub',
+        connectedClients: 0,
         reachable: true,
         lastSeen: expect.any(String) as string,
         seenInTopology: true,
@@ -268,6 +287,7 @@ describe('GET /status', () => {
         name: 'node2',
         nodeId: 'id-node2',
         role: 'client',
+        connectedClients: null,
         reachable: true,
         lastSeen: expect.any(String) as string,
         seenInTopology: true,
@@ -278,6 +298,7 @@ describe('GET /status', () => {
         name: null,
         nodeId: null,
         role: null,
+        connectedClients: null,
         reachable: false,
         lastSeen: null,
         seenInTopology: false,

@@ -112,10 +112,26 @@ export class FakeDiscoveryManager implements DiscoveryManager {
 
   /** Settles the election on the given hub and announces every change. */
   elect(hubNodeId: string, hubAddress: string): void {
+    this.settle(hubNodeId, hubAddress);
+  }
+
+  /** Drops the hub, as the real manager does when no candidate is left. */
+  unassign(): void {
+    this.settle(null, null);
+  }
+
+  /**
+   * Emits the events in the order `NetworkManager._recomputeTopology`
+   * emits them: the hub change first, then the role change, then the
+   * topology.
+   */
+  private settle(hubNodeId: string | null, hubAddress: string | null): void {
     const previousRole = this.topology.myRole;
     const previousHub = this.topology.hubNodeId;
-    const myRole: NodeRole =
-      hubNodeId === this.identity.nodeId ? 'hub' : 'client';
+    let myRole: NodeRole = 'unassigned';
+    if (hubNodeId !== null) {
+      myRole = hubNodeId === this.identity.nodeId ? 'hub' : 'client';
+    }
     this.topology = { ...this.topology, hubNodeId, hubAddress, myRole };
     if (previousHub !== hubNodeId) {
       this.emit('hub-changed', { previousHub, currentHub: hubNodeId });

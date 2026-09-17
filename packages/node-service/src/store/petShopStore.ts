@@ -1,5 +1,6 @@
 import { Db } from '@rljson/db';
 import type { Io } from '@rljson/io';
+import type { FastifyBaseLogger } from 'fastify';
 import {
   Route,
   timeId,
@@ -70,6 +71,7 @@ import {
   type VersionHistoryRow,
 } from '@rljson-tryout/domain';
 
+import { IoSwitch, type ReadCascade } from './ioSwitch.ts';
 import {
   JunctionTraitRelation,
   MultiReferenceTraitRelation,
@@ -78,6 +80,44 @@ import {
 } from './traitRelation.ts';
 
 const changeSetsRoute = Route.fromFlat(changeSetsTableCfg.key);
+
+/**
+ * Every domain table of roadmap section 2.6 with its InsertHistory
+ * companion, in creation order. `domainTableCfgs` is the list without the
+ * companions, which is what `Server.createTables` and
+ * `Client.createTables` of `@rljson/server` take (`withInsertHistory`
+ * derives the companion itself, with the same `createInsertHistoryTableCfg`
+ * the domain package uses, so creating them again on a role change is a
+ * no-op on every store).
+ */
+const tablePairs: readonly (readonly [TableCfg, TableCfg])[] = [
+  [speciesTableCfg, speciesInsertHistoryTableCfg],
+  [traitsTableCfg, traitsInsertHistoryTableCfg],
+  [personsTableCfg, personsInsertHistoryTableCfg],
+  [breedersTableCfg, breedersInsertHistoryTableCfg],
+  [animalsTableCfg, animalsInsertHistoryTableCfg],
+  [animalTraitsTableCfg, animalTraitsInsertHistoryTableCfg],
+  [customersTableCfg, customersInsertHistoryTableCfg],
+  [invoicesTableCfg, invoicesInsertHistoryTableCfg],
+  [invoiceItemsTableCfg, invoiceItemsInsertHistoryTableCfg],
+  [changeSetsTableCfg, changeSetsInsertHistoryTableCfg],
+];
+
+export const domainTableCfgs: readonly TableCfg[] = tablePairs.map(
+  ([tableCfg]) => tableCfg,
+);
+
+/**
+ * Whether a value from a request may enter an `Io.readRows` `where`
+ * clause: hashes are URL-safe base64 and every entity id in this project
+ * is a slug of letters, digits, hyphens and underscores. `IoSqliteNode`
+ * builds its `WHERE` by string concatenation without escaping
+ * (`docs/findings/stores.md`), and a read that falls through to the hub
+ * runs the same clause on every store of the network, so nothing else is
+ * ever passed on.
+ */
+const isSafeWhereValue = (value: string): boolean =>
+  /^[A-Za-z0-9_-]+$/u.test(value);
 
 /**
  * One trait as an animal carries it, resolved through the configured
@@ -726,11 +766,14 @@ const resolveAnimalBreeder = (
  * picks the implementation of the animal-trait relation
  * (`docs/findings/n-to-m.md`, default `multi-reference`); `today` returns
  * the ISO date an issued invoice is dated with, replaceable in tests so
- * that an invoice number and date can be asserted exactly.
+ * that an invoice number and date can be asserted exactly; `logger`
+ * receives the warning when a read through the network fails (a silent
+ * default for tests that build a store without one).
  */
 export type PetShopStoreOptions = Readonly<{
   traitRelationMode?: TraitRelationMode;
   today?: () => string;
+  logger?: Pick<FastifyBaseLogger, 'warn'>;
 }>;
 
 /**
@@ -744,12 +787,28 @@ export type PetShopStoreOptions = Readonly<{
  * seeded, regardless of `traitRelationMode`: the table is part of the
  * domain either way, and switching the mode at runtime must not require
  * reseeding (`docs/findings/n-to-m.md`).
+ *
+ * The `Db` sits on an `IoSwitch` over that `Io`: while the node is hub or
+ * client, the hub transport points the switch's row reads through the
+ * `IoMulti` of its `Server` or `Client` (`readThrough`), so a row the
+ * local store does not hold is looked up on the hub and cached locally;
+ * writes and whole-table reads always go to the local `Io`, so lists show
+ * what this node holds until slice D3 pulls change sets, while `getAnimal`
+ * with a `version` and `getInvoice` fall back to a targeted read that does
+ * cascade (`docs/findings/hub-transport.md`).
  */
 export class PetShopStore {
-  private readonly io: Io;
+  /**
+   * The `Io` the configured storage gave this store, for the hub transport
+   * to lend to `@rljson/server`: as hub it is what the `Server` serves to
+   * the clients, as client it is what the `Client` exposes to the hub.
+   */
+  readonly localIo: Io;
+  private readonly io: IoSwitch;
   private readonly db: Db;
   private readonly traitRelationMode: TraitRelationMode;
   private readonly today: () => string;
+  private readonly logger: Pick<FastifyBaseLogger, 'warn'>;
 
   /**
    * Writes that must not interleave (issuing an invoice reads the invoice
@@ -763,34 +822,31 @@ export class PetShopStore {
    * Every table this store creates, each domain table followed by its
    * InsertHistory companion; `tableRowCounts` reports them in this order.
    */
-  private readonly tableCfgs = [
-    speciesTableCfg,
-    speciesInsertHistoryTableCfg,
-    traitsTableCfg,
-    traitsInsertHistoryTableCfg,
-    personsTableCfg,
-    personsInsertHistoryTableCfg,
-    breedersTableCfg,
-    breedersInsertHistoryTableCfg,
-    animalsTableCfg,
-    animalsInsertHistoryTableCfg,
-    animalTraitsTableCfg,
-    animalTraitsInsertHistoryTableCfg,
-    customersTableCfg,
-    customersInsertHistoryTableCfg,
-    invoicesTableCfg,
-    invoicesInsertHistoryTableCfg,
-    invoiceItemsTableCfg,
-    invoiceItemsInsertHistoryTableCfg,
-    changeSetsTableCfg,
-    changeSetsInsertHistoryTableCfg,
-  ];
+  private readonly tableCfgs = tablePairs.flat();
 
   constructor(io: Io, options: PetShopStoreOptions = {}) {
-    this.io = io;
-    this.db = new Db(io);
+    this.localIo = io;
+    this.io = new IoSwitch(io);
+    this.db = new Db(this.io);
     this.traitRelationMode = options.traitRelationMode ?? 'multi-reference';
     this.today = options.today ?? todayInUtc;
+    this.logger = options.logger ?? { warn: () => undefined };
+  }
+
+  /**
+   * Routes every row read of this store through the given cascade (the
+   * `IoMulti` of the hub transport's `Server` or `Client`, asked for on
+   * every read because `@rljson/server` rebuilds it on every client join
+   * and leave), or back to the local `Io` alone with `null`. Writes are
+   * unaffected either way.
+   */
+  readThrough(cascade: ReadCascade): void {
+    this.io.readThrough(cascade);
+  }
+
+  /** Whether row reads currently fall through to the network. */
+  get readsThroughNetwork(): boolean {
+    return this.io.cascading;
   }
 
   /**
@@ -1019,6 +1075,58 @@ export class PetShopStore {
     const { rljson } = await this.db.get(Route.fromFlat(tableCfg.key), {});
     const table = rljson[tableCfg.key] as ComponentsTable<Row>;
     return table._data;
+  }
+
+  /**
+   * A targeted read of one table, the one kind of read that falls through
+   * to the network while this node is hub or client: `IoMulti.readRows`
+   * walks its layers by priority and answers from the first that returns
+   * rows, so a `where` the local store has no row for is asked of the hub
+   * and, through the hub, of every other client, and what comes back is
+   * cached in the local store on the way (`docs/findings/hub-transport.md`).
+   * Values are checked with `isSafeWhereValue` first; an unsafe value reads
+   * as "nothing found". A cascade that cannot answer (the hub gone between
+   * two probe cycles, a peer that did not answer within the 30 s of
+   * `IoPeer`) reads as "nothing found" too, so the node stays usable on
+   * its local data; the failure is logged here and the hub transport
+   * reports socket-level failures in `/status` under `transport.lastError`.
+   */
+  private async readMatching<Row extends { _hash: string }>(
+    tableCfg: TableCfg,
+    where: Record<string, string>,
+  ): Promise<Row[]> {
+    if (!Object.values(where).every(isSafeWhereValue)) {
+      return [];
+    }
+    try {
+      const rljson = await this.io.readRows({ table: tableCfg.key, where });
+      return (rljson[tableCfg.key] as ComponentsTable<Row>)._data;
+    } catch (error) {
+      this.logger.warn(
+        { err: error, table: tableCfg.key, where },
+        'read through the network failed, answering from local data',
+      );
+      return [];
+    }
+  }
+
+  /**
+   * The given rows by hash plus, for every hash the map lacks, the row of
+   * that hash read through `readMatching`: how a detail assembled from a
+   * row another node wrote resolves that row's references when the local
+   * tables do not hold them. The map passed in is left untouched.
+   */
+  private async withRowsOfHashes<Row extends { _hash: string }>(
+    known: ReadonlyMap<string, Row>,
+    tableCfg: TableCfg,
+    hashes: readonly string[],
+  ): Promise<Map<string, Row>> {
+    const fetched = await Promise.all(
+      [...new Set(hashes)]
+        .filter((hash) => !known.has(hash))
+        .map((hash) => this.readMatching<Row>(tableCfg, { _hash: hash })),
+    );
+    return new Map([...known, ...byHash(fetched.flat())]);
   }
 
   /**
@@ -1322,21 +1430,37 @@ export class PetShopStore {
    * `listAnimals`'s explicit fallback instead: read every table in full and
    * join them with local `Map`s, then find the animal by `id` in
    * JavaScript.
+   *
+   * A `version` no local history row names is read by its hash through
+   * the network (`readMatching`): this is how a version written on the hub
+   * is readable by hash on a client before slice D3 pulls its change set.
+   * The row is served when it carries this `id` and joined against the
+   * local tables; its InsertHistory row is not fetched, so the version
+   * does not become the animal's current version here.
    */
   async getAnimal(
     id: string,
     options: { version?: string } = {},
   ): Promise<AnimalDetail | undefined> {
     const tables = await this.readAnimalTables();
-    const animal =
-      options.version === undefined
-        ? tables.animals.current.find((row) => row.id === id)
-        : versionsOf(
-            tables.animals.rows,
-            tables.animals.history,
-            animalsTableCfg.key,
-            id,
-          ).find((version) => version.row._hash === options.version)?.row;
+    let animal: HashedAnimalRow | undefined;
+    if (options.version === undefined) {
+      animal = tables.animals.current.find((row) => row.id === id);
+    } else {
+      const version = options.version;
+      animal =
+        versionsOf(
+          tables.animals.rows,
+          tables.animals.history,
+          animalsTableCfg.key,
+          id,
+        ).find((candidate) => candidate.row._hash === version)?.row ??
+        (
+          await this.readMatching<HashedAnimalRow>(animalsTableCfg, {
+            _hash: version,
+          })
+        ).find((row) => row.id === id);
+    }
 
     return animal === undefined
       ? undefined
@@ -1610,13 +1734,81 @@ export class PetShopStore {
   /**
    * One invoice with its customer, its items and their animals joined and
    * the hash of the change set that wrote it, or `undefined` when no
-   * invoice has this id, in the shape `GET /api/invoices/:id` serves.
+   * invoice has this id, in the shape `GET /api/invoices/:id` serves. An
+   * id no local version has is looked up through the network
+   * (`getInvoiceThroughNetwork`).
    */
   async getInvoice(id: string): Promise<InvoiceDetail | undefined> {
     const tables = await this.readInvoiceTables();
     const invoice = tables.invoices.current.find((row) => row.id === id);
 
-    return invoice === undefined ? undefined : invoiceDetail(invoice, tables);
+    return invoice === undefined
+      ? this.getInvoiceThroughNetwork(id, tables)
+      : invoiceDetail(invoice, tables);
+  }
+
+  /**
+   * An invoice this node holds no version of, as another node of the
+   * network holds it: the invoice row by `id` through `readMatching`
+   * (which asks the hub, and through the hub every other client, and only
+   * answers once this node has no row of that id itself, so a locally
+   * issued invoice always wins over a remote one with the same number,
+   * `docs/findings/change-sets.md`), then its items by `invoiceRef` and
+   * the customer, animals and species they name by hash where the local
+   * tables lack them. This is how an invoice issued on the hub is readable
+   * on a client before slice D3 pulls its change set. `changeSetHash`
+   * stays `null` until then: a change set names the invoice inside its
+   * `items` array, which no `where` clause can match, and the invoice list
+   * does not show the invoice either, since its InsertHistory row is not
+   * fetched and only a version with a history row is current. The cached
+   * invoice row does count for `nextInvoiceSequence`, which reads every
+   * `invoices` row: a node that read `invoice-2026-0007` from the hub
+   * numbers its next invoice `2026-0008`, a node that never read it issues
+   * its own `2026-0007` (`docs/findings/change-sets.md`, "Invoice numbers
+   * across nodes"), until D3 gives every node the same rows.
+   */
+  private async getInvoiceThroughNetwork(
+    id: string,
+    tables: InvoiceTables,
+  ): Promise<InvoiceDetail | undefined> {
+    const [invoice] = await this.readMatching<HashedInvoiceRow>(
+      invoicesTableCfg,
+      { id },
+    );
+    if (invoice === undefined) {
+      return undefined;
+    }
+
+    const invoiceItems = await this.readMatching<HashedInvoiceItemRow>(
+      invoiceItemsTableCfg,
+      { invoiceRef: invoice._hash },
+    );
+    const [customersByHash, animalsByHash] = await Promise.all([
+      this.withRowsOfHashes(tables.customersByHash, customersTableCfg, [
+        invoice.customerRef,
+      ]),
+      this.withRowsOfHashes(
+        tables.animalsByHash,
+        animalsTableCfg,
+        invoiceItems.map((item) => item.animalRef),
+      ),
+    ]);
+    const speciesByHash = await this.withRowsOfHashes(
+      tables.speciesByHash,
+      speciesTableCfg,
+      invoiceItems.flatMap((item) => {
+        const animal = animalsByHash.get(item.animalRef);
+        return animal === undefined ? [] : [animal.speciesRef];
+      }),
+    );
+
+    return invoiceDetail(invoice, {
+      ...tables,
+      invoiceItemsByInvoiceRef: groupByInvoiceRef(invoiceItems),
+      customersByHash,
+      animalsByHash,
+      speciesByHash,
+    });
   }
 
   /**

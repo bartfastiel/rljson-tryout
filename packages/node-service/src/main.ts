@@ -1,6 +1,8 @@
+import { BsMem } from '@rljson/bs';
 import pino from 'pino';
 
 import { readConfiguration } from './configuration.ts';
+import { HubTransport } from './network/hubTransport.ts';
 import { NodeDirectory } from './network/nodeDirectory.ts';
 import { RoleOrchestrator } from './network/roleOrchestrator.ts';
 import { buildServer } from './server.ts';
@@ -16,11 +18,25 @@ const logger = pino({ level: configuration.logLevel });
 try {
   const store = new PetShopStore(
     createIo(configuration, logger.child({ component: 'storage' })),
-    { traitRelationMode: configuration.traitRelationMode },
+    {
+      traitRelationMode: configuration.traitRelationMode,
+      logger: logger.child({ component: 'store' }),
+    },
+  );
+  // Blobs stay in memory until slice C2 puts them on disk; nothing writes
+  // one before slice B12, but the hub transport serves them to peers from
+  // here on.
+  const blobs = new BsMem();
+  const transport = new HubTransport(
+    configuration,
+    logger.child({ component: 'transport' }),
+    store,
+    blobs,
   );
   const orchestrator = new RoleOrchestrator(
     configuration,
     logger.child({ component: 'orchestrator' }),
+    transport,
   );
   const directory = new NodeDirectory(
     configuration,

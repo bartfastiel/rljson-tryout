@@ -7,10 +7,16 @@ type FakeNode = {
   nodeName: string;
   nodeId: string;
   role: string;
+  transport?: Record<string, unknown>;
 };
 
 const selfUrl = 'http://node1:8080';
-const self = { name: 'node1', nodeId: 'id-node1', role: 'hub' as const };
+const self = {
+  name: 'node1',
+  nodeId: 'id-node1',
+  role: 'hub' as const,
+  connectedClients: 2,
+};
 
 /**
  * A `fetch` that answers `/status` for the nodes it knows and fails for
@@ -94,6 +100,7 @@ describe('NodeDirectory', () => {
         name: 'node1',
         nodeId: 'id-node1',
         role: 'hub',
+        connectedClients: 2,
         reachable: true,
         lastSeen: '2023-11-14T22:13:20.000Z',
         seenInTopology: true,
@@ -227,6 +234,7 @@ describe('NodeDirectory', () => {
       name: 'node2',
       nodeId: 'id-node2',
       role: 'client',
+      connectedClients: null,
       reachable: true,
       lastSeen: '2023-11-14T22:13:20.000Z',
       seenInTopology: true,
@@ -253,6 +261,39 @@ describe('NodeDirectory', () => {
     );
   });
 
+  it('reads the connected clients a polled hub reports', async () => {
+    const { directory } = directoryOver(
+      {
+        'http://node2:8080': {
+          nodeName: 'node2',
+          nodeId: 'id-node2',
+          role: 'hub',
+          transport: { role: 'hub', connectedClients: 2 },
+        },
+        'http://node3:8080': {
+          nodeName: 'node3',
+          nodeId: 'id-node3',
+          role: 'client',
+          transport: { role: 'client', connectedToHub: true },
+        },
+        'http://node4:8080': {
+          nodeName: 'node4',
+          nodeId: 'id-node4',
+          role: 'hub',
+          transport: { role: 'hub', connectedClients: 'many' },
+        },
+      },
+      ['http://node2:8080', 'http://node3:8080', 'http://node4:8080'],
+    );
+    started.push(directory);
+
+    await directory.start();
+
+    expect(
+      directory.entries(self, []).map((entry) => entry.connectedClients),
+    ).toStrictEqual([2, 2, null, null]);
+  });
+
   it('marks a node unreachable when it fails, answers an error or times out', async () => {
     const { directory } = directoryOver(
       { 'http://node3:8080': 'broken', 'http://node4:8080': 'slow' },
@@ -268,6 +309,7 @@ describe('NodeDirectory', () => {
         name: null,
         nodeId: null,
         role: null,
+        connectedClients: null,
         reachable: false,
         lastSeen: null,
         seenInTopology: false,

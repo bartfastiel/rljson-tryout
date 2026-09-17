@@ -12,6 +12,7 @@ import { fetchJson } from './api.js';
  * @property {string | null} name
  * @property {string | null} nodeId
  * @property {string | null} role
+ * @property {number | null} connectedClients
  * @property {boolean} reachable
  * @property {string | null} lastSeen
  * @property {boolean} seenInTopology
@@ -34,6 +35,19 @@ import { fetchJson } from './api.js';
  */
 
 /**
+ * The state of the hub transport, from `GET /status` under `transport`:
+ * as hub how many clients it holds, as client whether it is connected to
+ * the hub, and the last failure of the transport when there was one.
+ *
+ * @typedef {object} StatusTransport
+ * @property {'standalone' | 'hub' | 'client'} role
+ * @property {string | null} hubAddress
+ * @property {number} [connectedClients]
+ * @property {boolean} [connectedToHub]
+ * @property {string | null} lastError
+ */
+
+/**
  * The answer of `GET /status`.
  *
  * @typedef {object} Status
@@ -46,6 +60,7 @@ import { fetchJson } from './api.js';
  * @property {string | null} hubAddress
  * @property {StatusPeer[]} peers
  * @property {StatusNode[]} nodes
+ * @property {StatusTransport} transport
  * @property {string} storage
  * @property {Record<string, number>} tables
  */
