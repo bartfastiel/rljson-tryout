@@ -134,11 +134,61 @@ const versionsByEntity = <Row extends EntityRow>(
   return byEntity;
 };
 
+/**
+ * How far each version is from the start of its entity's history: one for
+ * a version whose `previous` names no version of the entity, one more than
+ * the deepest version it supersedes otherwise. Versions written on one
+ * node within the same millisecond share a timestamp, so their `timeId`s
+ * alone cannot say which came first; their `previous` links can, and the
+ * depth is what "newest first" orders by before falling back to the
+ * `timeId`. Versions on a cycle (impossible from honest writes) get no
+ * depth and rank by `timeId` alone.
+ */
+const depthsOf = <Row extends EntityRow>(
+  versions: readonly Version<Row>[],
+): Map<string, number> => {
+  const timeIds = new Set(versions.map((version) => version.history.timeId));
+  const depths = new Map<string, number>();
+  let unresolved = [...versions].sort((left, right) =>
+    compareTimeIdsNewestFirst(right.history.timeId, left.history.timeId),
+  );
+
+  let resolvedAny = true;
+  while (resolvedAny && unresolved.length > 0) {
+    resolvedAny = false;
+    unresolved = unresolved.filter((version) => {
+      const previous = (version.history.previous ?? []).filter((timeId) =>
+        timeIds.has(timeId),
+      );
+      if (!previous.every((timeId) => depths.has(timeId))) {
+        return true;
+      }
+      depths.set(
+        version.history.timeId,
+        1 + Math.max(0, ...previous.map((timeId) => depths.get(timeId)!)),
+      );
+      resolvedAny = true;
+      return false;
+    });
+  }
+
+  return depths;
+};
+
+/**
+ * Orders versions newest first: by depth in the entity's history, then by
+ * `timeId`, so that a chain reads in write order even when several
+ * versions were written within one millisecond.
+ */
 const newestFirst = <Row extends EntityRow>(
   versions: readonly Version<Row>[],
+  depths: ReadonlyMap<string, number>,
 ): Version<Row>[] =>
-  [...versions].sort((left, right) =>
-    compareTimeIdsNewestFirst(left.history.timeId, right.history.timeId),
+  [...versions].sort(
+    (left, right) =>
+      (depths.get(right.history.timeId) ?? 0) -
+        (depths.get(left.history.timeId) ?? 0) ||
+      compareTimeIdsNewestFirst(left.history.timeId, right.history.timeId),
   );
 
 /**
@@ -155,10 +205,12 @@ const tipsOf = <Row extends EntityRow>(
   const superseded = new Set(
     versions.flatMap((version) => version.history.previous ?? []),
   );
+  const depths = depthsOf(versions);
   const tips = newestFirst(
     versions.filter((version) => !superseded.has(version.history.timeId)),
+    depths,
   );
-  return tips.length > 0 ? tips : newestFirst(versions).slice(0, 1);
+  return tips.length > 0 ? tips : newestFirst(versions, depths).slice(0, 1);
 };
 
 /**
@@ -202,8 +254,9 @@ export const currentRows = <Row extends EntityRow>(
 /**
  * Every version of one entity, newest first, each flagged `current` when
  * it is a tip of the entity's DAG. An `id` the table does not hold gives an
- * empty list. Newest first means by `timeId`, the same order every node
- * computes for the same history rows.
+ * empty list. Newest first means by depth in the history and then by
+ * `timeId` (`depthsOf`), the same order every node computes for the same
+ * history rows.
  */
 export const versionsOf = <Row extends EntityRow>(
   rows: readonly Row[],
@@ -214,7 +267,7 @@ export const versionsOf = <Row extends EntityRow>(
   const versions = versionsByEntity(rows, historyRows, tableKey).get(id) ?? [];
   const tipTimeIds = new Set(tipsOf(versions).map((tip) => tip.history.timeId));
 
-  return newestFirst(versions).map((version) => ({
+  return newestFirst(versions, depthsOf(versions)).map((version) => ({
     row: version.row,
     timeId: version.history.timeId,
     previous: [...(version.history.previous ?? [])],

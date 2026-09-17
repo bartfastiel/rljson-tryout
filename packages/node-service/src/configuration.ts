@@ -1,6 +1,8 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { isSeedSize, seedSizes, type SeedSize } from '@rljson-tryout/domain';
+
 import type { TraitRelationMode } from './store/traitRelation.ts';
 
 /**
@@ -43,17 +45,6 @@ const discoveryModes: readonly DiscoveryMode[] = ['enabled', 'disabled'];
 export type StorageKind = 'memory' | 'sqlite';
 
 const storageKinds: readonly StorageKind[] = ['memory', 'sqlite'];
-
-/**
- * Which seed the node imports at its first start while its store is empty
- * (`SEED_SIZE` in roadmap section 2.4): `small` is the hand-written pet
- * shop of `@rljson-tryout/domain`, `none` leaves the store empty for a node
- * that is meant to receive its data from the network. The generated
- * `medium` and `large` seeds arrive with slice C5.
- */
-export type SeedSize = 'none' | 'small';
-
-const seedSizes: readonly SeedSize[] = ['none', 'small'];
 
 /**
  * The subset of the node configuration (see roadmap section 2.4) that this
@@ -237,20 +228,6 @@ const readStorageKind = (value: string | undefined): StorageKind => {
   return value as StorageKind;
 };
 
-const readSeedSize = (value: string | undefined): SeedSize => {
-  if (value === undefined) {
-    return 'small';
-  }
-
-  if (!seedSizes.includes(value as SeedSize)) {
-    throw new Error(
-      `SEED_SIZE must be one of ${seedSizes.join(', ')}, got "${value}"`,
-    );
-  }
-
-  return value as SeedSize;
-};
-
 const readLogLevel = (value: string | undefined): LogLevel => {
   if (value === undefined) {
     return 'info';
@@ -285,6 +262,26 @@ const readTraitRelationMode = (
   }
 
   return value as TraitRelationMode;
+};
+
+/**
+ * Reads which seed the store loads when it is empty at first start
+ * (roadmap section 2.4): `none`, `small` (the hand-written Duckburg seed,
+ * the default), `medium` or `large` (the hand-written seed plus generated
+ * rows, `packages/domain/src/generator`).
+ */
+const readSeedSize = (value: string | undefined): SeedSize => {
+  if (value === undefined) {
+    return 'small';
+  }
+
+  if (!isSeedSize(value)) {
+    throw new Error(
+      `SEED_SIZE must be one of ${seedSizes.join(', ')}, got "${value}"`,
+    );
+  }
+
+  return value;
 };
 
 /**

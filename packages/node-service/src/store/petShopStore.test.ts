@@ -55,7 +55,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       expect(await store.listTraits()).toStrictEqual([]);
       expect(await store.listBreeders()).toStrictEqual([]);
       expect(await store.listCustomers()).toStrictEqual([]);
-      expect(await store.listAnimals()).toStrictEqual([]);
+      expect((await store.listAnimals()).items).toStrictEqual([]);
       expect(await store.listInvoices()).toStrictEqual([]);
     });
 
@@ -68,6 +68,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       );
 
       expect(seeded).toStrictEqual({
+        seedSize: 'small',
         speciesSeeded: 3,
         traitsSeeded: 8,
         personsSeeded: 8,
@@ -76,12 +77,13 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         animalsSeeded: 10,
         animalTraitsSeeded: expectedAnimalTraits,
         invoicesSeeded: 6,
+        changeSetsSeeded: 6,
       });
       expect(await store.listSpecies()).toHaveLength(3);
       expect(await store.listTraits()).toHaveLength(8);
       expect(await store.listBreeders()).toHaveLength(4);
       expect(await store.listCustomers()).toHaveLength(5);
-      expect(await store.listAnimals()).toHaveLength(10);
+      expect((await store.listAnimals()).items).toHaveLength(10);
       expect(await store.listInvoices()).toHaveLength(6);
     });
 
@@ -91,6 +93,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       const seeded = await store.seedIfEmpty();
 
       expect(seeded).toStrictEqual({
+        seedSize: 'small',
         speciesSeeded: 0,
         traitsSeeded: 0,
         personsSeeded: 0,
@@ -99,12 +102,13 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         animalsSeeded: 0,
         animalTraitsSeeded: 0,
         invoicesSeeded: 0,
+        changeSetsSeeded: 0,
       });
       expect(await store.listSpecies()).toHaveLength(3);
       expect(await store.listTraits()).toHaveLength(8);
       expect(await store.listBreeders()).toHaveLength(4);
       expect(await store.listCustomers()).toHaveLength(5);
-      expect(await store.listAnimals()).toHaveLength(10);
+      expect((await store.listAnimals()).items).toHaveLength(10);
       expect(await store.listInvoices()).toHaveLength(6);
     });
 
@@ -235,7 +239,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       });
 
       it('lists every animal ordered by id', async () => {
-        const ids = (await store.listAnimals()).map((row) => row.id);
+        const ids = (await store.listAnimals()).items.map((row) => row.id);
 
         expect(ids).toStrictEqual([...ids].sort());
         expect(ids).toHaveLength(10);
@@ -248,7 +252,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         const byBreederId = new Map(
           breedersSeed.map((breeder) => [breeder._hash, breeder]),
         );
-        const animals = await store.listAnimals();
+        const animals = (await store.listAnimals()).items;
 
         for (const seedRow of animalsSeed) {
           const expectedSpecies = bySpeciesId.get(seedRow.speciesRef);
@@ -272,7 +276,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       });
 
       it('narrows the list to the given species id', async () => {
-        const ducks = await store.listAnimals({ speciesId: 'duck' });
+        const ducks = (await store.listAnimals({ speciesId: 'duck' })).items;
 
         expect(ducks.length).toBeGreaterThan(0);
         expect(ducks.length).toBeLessThan(10);
@@ -290,7 +294,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         expect(expectedIds.length).toBeGreaterThan(0);
         expect(expectedIds.length).toBeLessThan(10);
 
-        const filtered = await store.listAnimals({ breederId });
+        const filtered = (await store.listAnimals({ breederId })).items;
 
         expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
         for (const animal of filtered) {
@@ -307,7 +311,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         expect(expectedIds.length).toBeGreaterThan(0);
         expect(expectedIds.length).toBeLessThan(10);
 
-        const filtered = await store.listAnimals({ traitId });
+        const filtered = (await store.listAnimals({ traitId })).items;
 
         expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
       });
@@ -327,10 +331,12 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           .sort();
         expect(expectedIds.length).toBeGreaterThan(0);
 
-        const filtered = await store.listAnimals({
-          speciesId: speciesSeed[2]!.id,
-          traitId,
-        });
+        const filtered = (
+          await store.listAnimals({
+            speciesId: speciesSeed[2]!.id,
+            traitId,
+          })
+        ).items;
 
         expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
         for (const animal of filtered) {
@@ -355,11 +361,13 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           .sort();
         expect(expectedIds.length).toBeGreaterThan(0);
 
-        const filtered = await store.listAnimals({
-          speciesId: speciesSeed[2]!.id,
-          breederId: grandmasFarm.id,
-          traitId,
-        });
+        const filtered = (
+          await store.listAnimals({
+            speciesId: speciesSeed[2]!.id,
+            breederId: grandmasFarm.id,
+            traitId,
+          })
+        ).items;
 
         expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
       });
@@ -372,7 +380,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         'returns an empty list for an unknown %s',
         async (filterKey, value) => {
           expect(await store.listAnimals({ [filterKey]: value })).toStrictEqual(
-            [],
+            { items: [], total: 0, limit: 50, offset: 0 },
           );
         },
       );
@@ -393,7 +401,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
         );
 
-        const animals = await store.listAnimals();
+        const animals = (await store.listAnimals()).items;
 
         expect(animals).toHaveLength(11);
         expect(animals.find((animal) => animal.id === 'ghost')).toStrictEqual({
@@ -425,7 +433,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
         );
 
-        const animals = await store.listAnimals();
+        const animals = (await store.listAnimals()).items;
 
         expect(
           animals.find((animal) => animal.id === 'ghost-breeder'),
@@ -692,12 +700,12 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         for (const trait of traitsSeed) {
           const multiReferenceAnimals = (
             await multiReferenceStore.listAnimals({ traitId: trait.id })
-          )
+          ).items
             .map((animal) => animal.id)
             .sort();
           const junctionAnimals = (
             await junctionStore.listAnimals({ traitId: trait.id })
-          )
+          ).items
             .map((animal) => animal.id)
             .sort();
 

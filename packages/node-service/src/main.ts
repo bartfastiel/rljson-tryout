@@ -53,12 +53,16 @@ try {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
   await store.initialize();
-  if (configuration.seedSize === 'none') {
-    server.log.info('pet shop store ready, not seeded (SEED_SIZE is none)');
-  } else {
-    const seeded = await store.seedIfEmpty();
-    server.log.info(seeded, 'pet shop store ready');
-  }
+  const seedingStarted = performance.now();
+  const seeded = await store.seedIfEmpty(configuration.seedSize);
+  server.log.info(
+    {
+      ...seeded,
+      seedDurationMilliseconds: Math.round(performance.now() - seedingStarted),
+      rssBytes: process.memoryUsage().rss,
+    },
+    'pet shop store ready',
+  );
 
   const address = await server.listen({
     host: '0.0.0.0',

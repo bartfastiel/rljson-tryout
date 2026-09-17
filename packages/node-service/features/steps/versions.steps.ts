@@ -93,7 +93,7 @@ const listAnimals = async (
     url: `/api/animals${query}`,
   });
   expect(response.statusCode).toBe(200);
-  return response.json<AnimalListEntry[]>();
+  return response.json<{ items: AnimalListEntry[] }>().items;
 };
 
 const dataDirectories = useTemporaryDataDirectories();

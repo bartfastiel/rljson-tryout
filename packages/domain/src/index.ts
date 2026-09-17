@@ -20,6 +20,7 @@ export {
   generateSeed,
   generatedSeedFor,
   handWrittenSeedBase,
+  seedChangeSetId,
   type GeneratedSeed,
   type GenerateSeedOptions,
   type SeedBase,

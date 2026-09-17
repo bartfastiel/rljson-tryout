@@ -26,6 +26,7 @@ import {
   customersInsertHistoryTableCfg,
   customersSeed,
   customersTableCfg,
+  generatedSeedFor,
   hashed,
   invoiceId,
   invoiceItemId,
@@ -37,6 +38,8 @@ import {
   invoicesTableCfg,
   issueInvoiceChangeSetId,
   nextInvoiceSequence,
+  seedChangeSetId,
+  seedPlans,
   personsInsertHistoryTableCfg,
   personsSeed,
   personsTableCfg,
@@ -51,6 +54,7 @@ import {
   versionsOf,
   type AnimalChanges,
   type ChangeSetItem,
+  type GeneratedSeed,
   type HashedAnimalRow,
   type HashedAnimalTraitRow,
   type HashedBreederRow,
@@ -62,6 +66,7 @@ import {
   type HashedSpeciesRow,
   type HashedTraitRow,
   type InvoiceStatus,
+  type SeedSize,
   type VersionHistoryRow,
 } from '@rljson-tryout/domain';
 
@@ -164,14 +169,40 @@ export type AnimalWithSpecies = {
 };
 
 /**
- * Narrows a filter for `listAnimals` to the animals of one species, one
- * breeder and, or, one trait. All three narrow the same list and combine
+ * Narrows `listAnimals` to the animals of one species, one breeder and, or,
+ * one trait, and, or, to the animals whose name or species name contains
+ * `query` (case-insensitive). All four narrow the same list and combine
  * with a logical AND.
  */
 export type AnimalFilter = {
   speciesId?: string;
   breederId?: string;
   traitId?: string;
+  query?: string;
+};
+
+/**
+ * Which slice of a filtered list to return: `limit` rows from `offset` on.
+ * `GET /api/animals` defaults to the first fifty (roadmap section 2.5).
+ */
+export type PageRequest = {
+  limit: number;
+  offset: number;
+};
+
+export const defaultPageRequest: PageRequest = { limit: 50, offset: 0 };
+
+/**
+ * One page of animals as `PetShopStore.listAnimals` returns it and
+ * `GET /api/animals` serves it: the rows of the requested slice, the
+ * number of rows the filter matches in total, and the slice itself, so a
+ * client can show "50 of 2 000" and ask for the next page.
+ */
+export type AnimalPage = {
+  items: AnimalWithSpecies[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 /**
@@ -383,18 +414,22 @@ type VersionedTable<Row extends { _hash: string; id: string }> = {
 
 /**
  * The tables an invoice needs joined, read once per call so that a list and
- * a detail resolve their references against one consistent snapshot.
- * `invoices`, `customers` and `animals` are versioned: the list serves
- * current invoices, `issueInvoice` resolves a customer or animal id to its
- * current version, and every join by hash reads all versions.
+ * a detail resolve their references against one consistent snapshot, with
+ * the lookups by hash built once per read rather than once per invoice,
+ * which is what keeps a list of thousands of invoices linear. `invoices`,
+ * `customers` and `animals` are versioned: the list serves current
+ * invoices, `issueInvoice` resolves a customer or animal id to its current
+ * version, and every join by hash reads all versions.
  */
 type InvoiceTables = {
   invoices: VersionedTable<HashedInvoiceRow>;
-  invoiceItems: HashedInvoiceItemRow[];
+  invoiceItemsByInvoiceRef: Map<string, HashedInvoiceItemRow[]>;
   customers: VersionedTable<HashedCustomerRow>;
-  persons: HashedPersonRow[];
+  customersByHash: Map<string, HashedCustomerRow>;
+  personsByHash: Map<string, HashedPersonRow>;
   animals: VersionedTable<HashedAnimalRow>;
-  species: HashedSpeciesRow[];
+  animalsByHash: Map<string, HashedAnimalRow>;
+  speciesByHash: Map<string, HashedSpeciesRow>;
   changeSets: HashedChangeSetRow[];
 };
 
@@ -417,6 +452,40 @@ type AnimalTables = {
 };
 
 /**
+ * A hashed row of any domain table the seed writes.
+ */
+type SeedRow =
+  | HashedSpeciesRow
+  | HashedTraitRow
+  | HashedPersonRow
+  | HashedBreederRow
+  | HashedCustomerRow
+  | HashedAnimalRow
+  | HashedAnimalTraitRow
+  | HashedInvoiceRow
+  | HashedInvoiceItemRow;
+
+/**
+ * What `PetShopStore.seedIfEmpty` reports: the size it was asked for and
+ * how many rows of each kind it wrote, hand-written and generated together,
+ * all zero when the store already held rows. `invoicesSeeded` counts
+ * invoices, not their items; `changeSetsSeeded` counts the change sets
+ * written for invoices and generated entities.
+ */
+export type SeedReport = {
+  seedSize: SeedSize;
+  speciesSeeded: number;
+  traitsSeeded: number;
+  personsSeeded: number;
+  breedersSeeded: number;
+  customersSeeded: number;
+  animalsSeeded: number;
+  animalTraitsSeeded: number;
+  invoicesSeeded: number;
+  changeSetsSeeded: number;
+};
+
+/**
  * What `PetShopStore.writeRow` reports about a row it wrote: the change
  * set items naming the row and its InsertHistory row, and the `timeId` of
  * that history row, which a follow-up version names in `previous`.
@@ -429,6 +498,23 @@ type WrittenRow = {
 const byHash = <Row extends { _hash: string }>(
   rows: readonly Row[],
 ): Map<string, Row> => new Map(rows.map((row) => [row._hash, row]));
+
+/**
+ * The invoice items grouped by the invoice they belong to, built once per
+ * read so that a list of thousands of invoices resolves its items in one
+ * pass over the items instead of one pass per invoice.
+ */
+const groupByInvoiceRef = (
+  items: readonly HashedInvoiceItemRow[],
+): Map<string, HashedInvoiceItemRow[]> => {
+  const grouped = new Map<string, HashedInvoiceItemRow[]>();
+  for (const item of items) {
+    const group = grouped.get(item.invoiceRef) ?? [];
+    group.push(item);
+    grouped.set(item.invoiceRef, group);
+  }
+  return grouped;
+};
 
 /**
  * The ids of the traits an animal version carries, ordered by id: the
@@ -471,14 +557,10 @@ const resolveInvoiceItems = (
   invoice: HashedInvoiceRow,
   tables: InvoiceTables,
 ): InvoiceItem[] => {
-  const animalsByHash = byHash(tables.animals.rows);
-  const speciesByHash = byHash(tables.species);
-
-  return tables.invoiceItems
-    .filter((item) => item.invoiceRef === invoice._hash)
+  return [...(tables.invoiceItemsByInvoiceRef.get(invoice._hash) ?? [])]
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((item) => {
-      const animal = animalsByHash.get(item.animalRef);
+      const animal = tables.animalsByHash.get(item.animalRef);
       return {
         id: item.id,
         hash: item._hash,
@@ -488,7 +570,8 @@ const resolveInvoiceItems = (
             : {
                 id: animal.id,
                 name: animal.name,
-                speciesName: speciesByHash.get(animal.speciesRef)?.name ?? null,
+                speciesName:
+                  tables.speciesByHash.get(animal.speciesRef)?.name ?? null,
               },
         quantity: item.quantity,
         unitPriceCents: item.unitPriceCents,
@@ -517,7 +600,7 @@ const invoiceSummary = (
   invoice: HashedInvoiceRow,
   tables: InvoiceTables,
 ): InvoiceSummary => {
-  const customer = byHash(tables.customers.rows).get(invoice.customerRef);
+  const customer = tables.customersByHash.get(invoice.customerRef);
   const items = resolveInvoiceItems(invoice, tables);
 
   return {
@@ -533,7 +616,7 @@ const invoiceSummary = (
             id: customer.id,
             customerNumber: customer.customerNumber,
             personName:
-              resolveCustomerPerson(customer, byHash(tables.persons))?.name ??
+              resolveCustomerPerson(customer, tables.personsByHash)?.name ??
               null,
           },
     totalCents: sumCents(items),
@@ -545,7 +628,7 @@ const invoiceDetail = (
   invoice: HashedInvoiceRow,
   tables: InvoiceTables,
 ): InvoiceDetail => {
-  const customer = byHash(tables.customers.rows).get(invoice.customerRef);
+  const customer = tables.customersByHash.get(invoice.customerRef);
   const items = resolveInvoiceItems(invoice, tables);
 
   return {
@@ -560,7 +643,7 @@ const invoiceDetail = (
         : {
             id: customer.id,
             customerNumber: customer.customerNumber,
-            person: resolveCustomerPerson(customer, byHash(tables.persons)),
+            person: resolveCustomerPerson(customer, tables.personsByHash),
           },
     items,
     totalCents: sumCents(items),
@@ -741,89 +824,97 @@ export class PetShopStore {
   }
 
   /**
-   * Inserts the seed species, the seed traits, the seed persons, the seed
-   * breeders, the seed customers, once all of those are in place the seed
-   * animals, then the derived `animalTraits` junction rows and finally the
-   * seed invoices, skipping a step when its table already holds rows.
-   * Animals reference species, breeders and traits by hash, breeders and
-   * customers reference persons by hash, `animalTraits` rows reference
-   * animals and traits by hash, and invoices reference customers and
-   * animals by hash, so every table a row points at is always seeded
-   * first. Every row is inserted on its own because `Db.insert` records
-   * only the first row of a multi-row insert in the InsertHistory. Seed
-   * invoices go through `issueInvoice`'s own write path (`writeInvoice`),
-   * so each one is written together with its items and its change set
-   * exactly like an invoice issued through the API; `invoicesSeeded`
-   * counts invoices, not rows.
+   * Whether no table of the store holds a row yet: the state a node is in
+   * at its first start, and the only state `seedIfEmpty` writes into. A
+   * persistent store that already holds rows keeps them, whatever
+   * `SEED_SIZE` says.
    */
-  async seedIfEmpty(): Promise<{
-    speciesSeeded: number;
-    traitsSeeded: number;
-    personsSeeded: number;
-    breedersSeeded: number;
-    customersSeeded: number;
-    animalsSeeded: number;
-    animalTraitsSeeded: number;
-    invoicesSeeded: number;
-  }> {
-    const speciesSeeded = await this.seedTableIfEmpty(
-      speciesTableCfg,
-      speciesSeed,
-    );
-    const traitsSeeded = await this.seedTableIfEmpty(
-      traitsTableCfg,
-      traitsSeed,
-    );
-    const personsSeeded = await this.seedTableIfEmpty(
-      personsTableCfg,
-      personsSeed,
-    );
-    const breedersSeeded = await this.seedTableIfEmpty(
+  private async isEmpty(): Promise<boolean> {
+    for (const tableCfg of this.tableCfgs) {
+      if ((await this.io.rowCount(tableCfg.key)) > 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Seeds an empty store with the given size (roadmap section 2.4) and
+   * reports how many rows of each kind it wrote; a store that already
+   * holds rows is left alone and reported with zero counts. The
+   * hand-written seed (every size but `none`) goes in first, through the
+   * same code path as before the generator existed: species, traits,
+   * persons, breeders, customers, then animals, the derived `animalTraits`
+   * junction rows and finally the invoices, each table after the tables its
+   * rows reference by hash. Every row is inserted on its own because
+   * `Db.insert` records only the first row of a multi-row insert in the
+   * InsertHistory. Seed invoices go through `issueInvoice`'s own write path
+   * (`writeInvoice`), so each one is written together with its items and
+   * its change set exactly like an invoice issued through the API. The
+   * generated rows of `medium` and `large` follow through
+   * `writeGeneratedSeed`. `invoicesSeeded` counts invoices, not rows;
+   * `changeSetsSeeded` counts the change sets of both parts.
+   */
+  async seedIfEmpty(size: SeedSize = 'small'): Promise<SeedReport> {
+    const report: SeedReport = {
+      seedSize: size,
+      speciesSeeded: 0,
+      traitsSeeded: 0,
+      personsSeeded: 0,
+      breedersSeeded: 0,
+      customersSeeded: 0,
+      animalsSeeded: 0,
+      animalTraitsSeeded: 0,
+      invoicesSeeded: 0,
+      changeSetsSeeded: 0,
+    };
+    const plan = seedPlans[size];
+    if (!plan.handWritten || !(await this.isEmpty())) {
+      return report;
+    }
+
+    report.speciesSeeded = await this.seedTable(speciesTableCfg, speciesSeed);
+    report.traitsSeeded = await this.seedTable(traitsTableCfg, traitsSeed);
+    report.personsSeeded = await this.seedTable(personsTableCfg, personsSeed);
+    report.breedersSeeded = await this.seedTable(
       breedersTableCfg,
       breedersSeed,
     );
-    const customersSeeded = await this.seedTableIfEmpty(
+    report.customersSeeded = await this.seedTable(
       customersTableCfg,
       customersSeed,
     );
-    const animalsSeeded = await this.seedTableIfEmpty(
-      animalsTableCfg,
-      animalsSeed,
-    );
-    const animalTraitsSeeded = await this.seedTableIfEmpty(
+    report.animalsSeeded = await this.seedTable(animalsTableCfg, animalsSeed);
+    report.animalTraitsSeeded = await this.seedTable(
       animalTraitsTableCfg,
       animalTraitsSeed,
     );
-    const invoicesSeeded = await this.seedInvoicesIfEmpty();
+    for (const entry of invoicesSeed) {
+      await this.writeInvoice(entry, entry.issuedOn, entry.status);
+    }
+    report.invoicesSeeded = invoicesSeed.length;
+    report.changeSetsSeeded = invoicesSeed.length;
 
-    return {
-      speciesSeeded,
-      traitsSeeded,
-      personsSeeded,
-      breedersSeeded,
-      customersSeeded,
-      animalsSeeded,
-      animalTraitsSeeded,
-      invoicesSeeded,
-    };
-  }
-
-  private async seedTableIfEmpty(
-    tableCfg: TableCfg,
-    rows: readonly (
-      | HashedSpeciesRow
-      | HashedTraitRow
-      | HashedPersonRow
-      | HashedBreederRow
-      | HashedCustomerRow
-      | HashedAnimalRow
-      | HashedAnimalTraitRow
-    )[],
-  ): Promise<number> {
-    if ((await this.io.rowCount(tableCfg.key)) > 0) {
-      return 0;
+    const generated = generatedSeedFor(size);
+    if (generated !== null) {
+      report.changeSetsSeeded += await this.writeGeneratedSeed(generated);
+      report.speciesSeeded += generated.species.length;
+      report.traitsSeeded += generated.traits.length;
+      report.personsSeeded += generated.persons.length;
+      report.breedersSeeded += generated.breeders.length;
+      report.customersSeeded += generated.customers.length;
+      report.animalsSeeded += generated.animals.length;
+      report.animalTraitsSeeded += generated.animalTraits.length;
+      report.invoicesSeeded += generated.invoices.length;
     }
 
+    return report;
+  }
+
+  private async seedTable(
+    tableCfg: TableCfg,
+    rows: readonly SeedRow[],
+  ): Promise<number> {
     const route = Route.fromFlat(tableCfg.key);
     for (const row of rows) {
       await this.db.insert(route, {
@@ -834,16 +925,86 @@ export class PetShopStore {
     return rows.length;
   }
 
-  private async seedInvoicesIfEmpty(): Promise<number> {
-    if ((await this.io.rowCount(invoicesTableCfg.key)) > 0) {
-      return 0;
+  /**
+   * Writes the generated rows of a seed size the way the API paths write
+   * their rows: one `Db.insert` per row, so every row gets its InsertHistory
+   * row and the version rule of roadmap section 2.6 applies to generated
+   * data too, and one change set per logical entity naming every row it
+   * consists of, InsertHistory rows included (roadmap section 3.4): a
+   * species, a trait, a person, a breeder, a customer, an animal with its
+   * `animalTraits` junction rows, and an invoice with its items under the
+   * same `issue-invoice-<number>` id `issueInvoice` uses. Measured against
+   * `Core.import` of whole tables in `docs/findings/seed-generator.md`:
+   * the per-row path costs a few seconds for the large seed and keeps
+   * `Db`'s own bookkeeping (DAG tips, insert notifications) in step, which
+   * a bulk import bypasses. Returns the number of change sets written.
+   */
+  private async writeGeneratedSeed(generated: GeneratedSeed): Promise<number> {
+    let changeSets = 0;
+    const single = async (tableCfg: TableCfg, rows: readonly SeedRow[]) => {
+      for (const row of rows) {
+        await this.writeSeedEntity(seedChangeSetId(tableCfg.key, row.id), [
+          [tableCfg, row],
+        ]);
+        changeSets += 1;
+      }
+    };
+
+    await single(speciesTableCfg, generated.species);
+    await single(traitsTableCfg, generated.traits);
+    await single(personsTableCfg, generated.persons);
+    await single(breedersTableCfg, generated.breeders);
+    await single(customersTableCfg, generated.customers);
+
+    const pairingsByAnimalRef = new Map<string, HashedAnimalTraitRow[]>();
+    for (const pairing of generated.animalTraits) {
+      const pairings = pairingsByAnimalRef.get(pairing.animalRef) ?? [];
+      pairings.push(pairing);
+      pairingsByAnimalRef.set(pairing.animalRef, pairings);
+    }
+    for (const animal of generated.animals) {
+      await this.writeSeedEntity(
+        seedChangeSetId(animalsTableCfg.key, animal.id),
+        [
+          [animalsTableCfg, animal],
+          ...(pairingsByAnimalRef.get(animal._hash) ?? []).map(
+            (pairing): [TableCfg, SeedRow] => [animalTraitsTableCfg, pairing],
+          ),
+        ],
+      );
+      changeSets += 1;
     }
 
-    for (const entry of invoicesSeed) {
-      await this.writeInvoice(entry, entry.issuedOn, entry.status);
+    const itemsByInvoiceRef = groupByInvoiceRef(generated.invoiceItems);
+    for (const invoice of generated.invoices) {
+      await this.writeSeedEntity(
+        issueInvoiceChangeSetId(invoice.invoiceNumber),
+        [
+          [invoicesTableCfg, invoice],
+          ...(itemsByInvoiceRef.get(invoice._hash) ?? []).map(
+            (item): [TableCfg, SeedRow] => [invoiceItemsTableCfg, item],
+          ),
+        ],
+      );
+      changeSets += 1;
     }
 
-    return invoicesSeed.length;
+    return changeSets;
+  }
+
+  /**
+   * Writes the rows of one generated entity through `writeRow` and one
+   * change set naming all of them, in the given order.
+   */
+  private async writeSeedEntity(
+    changeSetId: string,
+    rows: readonly (readonly [TableCfg, SeedRow])[],
+  ): Promise<void> {
+    const items: ChangeSetItem[] = [];
+    for (const [tableCfg, row] of rows) {
+      items.push(...(await this.writeRow(tableCfg, row)).changeSetItems);
+    }
+    await this.writeChangeSet(changeSetId, items);
   }
 
   /**
@@ -870,17 +1031,34 @@ export class PetShopStore {
   private async readVersioned<Row extends { _hash: string; id: string }>(
     tableCfg: TableCfg,
   ): Promise<VersionedTable<Row>> {
-    const historyTableKey = `${tableCfg.key}InsertHistory`;
-    const [rows, historyDump] = await Promise.all([
+    const [rows, history] = await Promise.all([
       this.readRows<Row>(tableCfg),
-      this.db.getInsertHistory(tableCfg.key),
+      this.readHistoryRows(tableCfg),
     ]);
-    const historyTable = historyDump[
-      historyTableKey
-    ] as InsertHistoryTable<string>;
-    const history = historyTable._data as VersionHistoryRow[];
 
     return { rows, history, current: currentRows(rows, history, tableCfg.key) };
+  }
+
+  /**
+   * Every InsertHistory row of one entity table, read straight from the
+   * `Io` rather than through `Db.getInsertHistory`: that call dumps the
+   * table, and `IoMem` recomputes the hash of the whole store before any
+   * dump that follows a write, which with the large seed costs several
+   * hundred milliseconds per read after every write
+   * (`docs/findings/seed-generator.md`). `Io.readRows` with an empty
+   * `where` returns the same rows without the refresh, the way
+   * `readChangeSets` already reads its table.
+   */
+  private async readHistoryRows(
+    tableCfg: TableCfg,
+  ): Promise<VersionHistoryRow[]> {
+    const historyTableKey = `${tableCfg.key}InsertHistory`;
+    const rljson = await this.io.readRows({
+      table: historyTableKey,
+      where: {},
+    });
+    const historyTable = rljson[historyTableKey] as InsertHistoryTable<string>;
+    return historyTable._data as VersionHistoryRow[];
   }
 
   /**
@@ -984,32 +1162,38 @@ export class PetShopStore {
   }
 
   /**
-   * Every current animal version in the store with its species and breeder
-   * joined, optionally narrowed to one species, one breeder, one trait, or
-   * any combination, ordered by `id`. Fetches `animals`, `species`,
-   * `breeders`, `persons` and `traits` (and, in `junction` mode,
-   * `animalTraits`) separately and joins them with local `Map`s, the
-   * explicit fallback of roadmap section 3.2: the rljson route join
-   * `animals/species` was tried first, but it silently drops an animal row
-   * whose `speciesRef` does not resolve instead of including it with a
-   * missing species, which defeats listing every animal
-   * (`docs/findings/db-basics.md`, "Joining a reference"). Filtering
-   * happens here, in plain JavaScript, after this full read, for the same
-   * reason `getAnimal` cannot filter `db.get` by `where`: `id` collides
-   * with a column of a *referenced* table and is silently mismatched by
-   * `ComponentController`'s reference resolution
+   * One page of the current animal versions in the store with their
+   * species and breeder joined, optionally narrowed to one species, one
+   * breeder, one trait, a search text, or any combination, ordered by
+   * `id`; `total` counts every animal the filter matches, `items` holds the
+   * slice `page` selects. Fetches `animals`, `species`, `breeders`,
+   * `persons` and `traits` (and, in `junction` mode, `animalTraits`)
+   * separately and joins them with local `Map`s, the explicit fallback of
+   * roadmap section 3.2: the rljson route join `animals/species` was tried
+   * first, but it silently drops an animal row whose `speciesRef` does not
+   * resolve instead of including it with a missing species, which defeats
+   * listing every animal (`docs/findings/db-basics.md`, "Joining a
+   * reference"). Filtering happens here, in plain JavaScript, after this
+   * full read, for the same reason `getAnimal` cannot filter `db.get` by
+   * `where`: `id` collides with a column of a *referenced* table and is
+   * silently mismatched by `ComponentController`'s reference resolution
    * (`docs/findings/db-basics.md`, "Filtering by id"), and `traitId` would
    * have to be resolved element by element against whichever table carries
-   * the relation besides, a shape `where` cannot express at all. An unknown
-   * `speciesId`, `breederId` or `traitId` filter yields an empty list rather
-   * than an error. An animal whose `speciesRef` or `breederRef` does not
-   * resolve (nothing writes one today; `Db.insert` and `IoMem` do not check
-   * references, only `Validate` does, see the finding above) gets the
-   * matching fields `null` instead of failing the whole list; an animal
-   * that does not carry the filtered trait, according to the configured
-   * `TraitRelation`, simply does not match.
+   * the relation besides, a shape `where` cannot express at all. The search
+   * text matches case-insensitively anywhere in the animal's name or its
+   * species name; an unknown `speciesId`, `breederId` or `traitId` filter
+   * yields an empty page rather than an error. An animal whose
+   * `speciesRef` or `breederRef` does not resolve (nothing writes one
+   * today; `Db.insert` and `IoMem` do not check references, only
+   * `Validate` does, see the finding above) gets the matching fields
+   * `null` instead of failing the whole list, and never matches a search
+   * by species name; an animal that does not carry the filtered trait,
+   * according to the configured `TraitRelation`, simply does not match.
    */
-  async listAnimals(filter: AnimalFilter = {}): Promise<AnimalWithSpecies[]> {
+  async listAnimals(
+    filter: AnimalFilter = {},
+    page: PageRequest = defaultPageRequest,
+  ): Promise<AnimalPage> {
     const tables = await this.readAnimalTables();
     const speciesByHash = byHash(tables.species.rows);
     const breedersByHash = byHash(tables.breeders.rows);
@@ -1017,13 +1201,12 @@ export class PetShopStore {
       filter.traitId === undefined
         ? undefined
         : PetShopStore.animalHashesWithTraitId(tables, filter.traitId);
+    const query = filter.query?.trim().toLowerCase() ?? '';
 
     const matchesFilter = (animal: HashedAnimalRow): boolean => {
-      if (filter.speciesId !== undefined) {
-        const species = speciesByHash.get(animal.speciesRef);
-        if (species?.id !== filter.speciesId) {
-          return false;
-        }
+      const species = speciesByHash.get(animal.speciesRef);
+      if (filter.speciesId !== undefined && species?.id !== filter.speciesId) {
+        return false;
       }
       if (filter.breederId !== undefined) {
         const breeder = breedersByHash.get(animal.breederRef);
@@ -1031,30 +1214,45 @@ export class PetShopStore {
           return false;
         }
       }
-      if (matchingAnimalHashes !== undefined) {
-        if (!matchingAnimalHashes.has(animal._hash)) {
-          return false;
-        }
+      if (
+        matchingAnimalHashes !== undefined &&
+        !matchingAnimalHashes.has(animal._hash)
+      ) {
+        return false;
       }
-      return true;
+      return (
+        query === '' ||
+        animal.name.toLowerCase().includes(query) ||
+        (species?.name.toLowerCase().includes(query) ?? false)
+      );
     };
 
-    return tables.animals.current.filter(matchesFilter).map((animal) => {
-      const species = speciesByHash.get(animal.speciesRef);
-      const breeder = breedersByHash.get(animal.breederRef);
+    const matching = tables.animals.current.filter(matchesFilter);
+    const items = matching
+      .slice(page.offset, page.offset + page.limit)
+      .map((animal) => {
+        const species = speciesByHash.get(animal.speciesRef);
+        const breeder = breedersByHash.get(animal.breederRef);
 
-      return {
-        id: animal.id,
-        hash: animal._hash,
-        name: animal.name,
-        speciesId: species?.id ?? null,
-        speciesName: species?.name ?? null,
-        breederId: breeder?.id ?? null,
-        breederFarmName: breeder?.farmName ?? null,
-        bornOn: animal.bornOn,
-        priceCents: animal.priceCents,
-      };
-    });
+        return {
+          id: animal.id,
+          hash: animal._hash,
+          name: animal.name,
+          speciesId: species?.id ?? null,
+          speciesName: species?.name ?? null,
+          breederId: breeder?.id ?? null,
+          breederFarmName: breeder?.farmName ?? null,
+          bornOn: animal.bornOn,
+          priceCents: animal.priceCents,
+        };
+      });
+
+    return {
+      items,
+      total: matching.length,
+      limit: page.limit,
+      offset: page.offset,
+    };
   }
 
   /**
@@ -1356,11 +1554,13 @@ export class PetShopStore {
 
     return {
       invoices,
-      invoiceItems,
+      invoiceItemsByInvoiceRef: groupByInvoiceRef(invoiceItems),
       customers,
-      persons,
+      customersByHash: byHash(customers.rows),
+      personsByHash: byHash(persons),
       animals,
-      species,
+      animalsByHash: byHash(animals.rows),
+      speciesByHash: byHash(species),
       changeSets,
     };
   }
@@ -1511,7 +1711,10 @@ export class PetShopStore {
 
     return invoiceDetail(invoice, {
       ...tables,
-      invoiceItems: [...tables.invoiceItems, ...items],
+      invoiceItemsByInvoiceRef: new Map([
+        ...tables.invoiceItemsByInvoiceRef,
+        [invoice._hash, items],
+      ]),
       changeSets: [...tables.changeSets, changeSet],
     });
   }
@@ -1529,11 +1732,7 @@ export class PetShopStore {
    */
   private async writeRow(
     tableCfg: TableCfg,
-    row:
-      | HashedAnimalRow
-      | HashedAnimalTraitRow
-      | HashedInvoiceRow
-      | HashedInvoiceItemRow,
+    row: SeedRow,
     previousTimeId?: string,
   ): Promise<WrittenRow> {
     const route = Route.fromFlat(

@@ -1,3 +1,4 @@
+import type { SeedSize } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 
 import type { Configuration, StorageKind } from '../configuration.ts';
@@ -37,11 +38,15 @@ export type StatusReport = {
   peers: StatusPeer[];
   nodes: StatusNode[];
   storage: StorageKind;
+  seedSize: SeedSize;
   tables: Record<string, number>;
 };
 
 export type StatusSources = Readonly<{
-  configuration: Pick<Configuration, 'nodeName' | 'publicUrl' | 'storage'>;
+  configuration: Pick<
+    Configuration,
+    'nodeName' | 'publicUrl' | 'storage' | 'seedSize'
+  >;
   store: Pick<PetShopStore, 'tableRowCounts'>;
   orchestrator: Pick<RoleOrchestrator, 'snapshot'>;
   directory: Pick<NodeDirectory, 'entries' | 'nameOf'>;
@@ -78,6 +83,7 @@ export const buildStatusReport = async ({
     peers,
     nodes,
     storage: configuration.storage,
+    seedSize: configuration.seedSize,
     tables: await store.tableRowCounts(),
   };
 };

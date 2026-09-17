@@ -22,6 +22,7 @@ import {
   generateSeed,
   generatedSeedFor,
   handWrittenSeedBase,
+  seedChangeSetId,
   type GeneratedSeed,
 } from './generateSeed.ts';
 import { seedPlans, type GeneratedCounts } from './seedSizes.ts';
@@ -334,6 +335,12 @@ describe('generateSeed', () => {
     expect(() =>
       generateSeed({ ...tinyCounts, invoices: 2, invoiceItems: 9 }),
     ).toThrow(/cannot be spread/);
+  });
+});
+
+describe('seedChangeSetId', () => {
+  it('names the table and the row', () => {
+    expect(seedChangeSetId('species', 'goose-1')).toBe('seed-species-goose-1');
   });
 });
 

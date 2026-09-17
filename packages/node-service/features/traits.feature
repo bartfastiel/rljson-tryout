@@ -26,7 +26,7 @@ Feature: Traits as a multi-reference and as a junction table
   Scenario: An unknown trait id filters out every animal
     Given a freshly seeded pet shop store
     When the client requests the animals with the trait "telekinesis"
-    Then the response is an empty list
+    Then the response is an empty page
 
   Scenario Outline: The trait filter answers identically in both trait relation modes
     Given a freshly seeded pet shop store reading traits through "<mode>"

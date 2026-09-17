@@ -1,3 +1,4 @@
+import type { SeedSize } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 
 import type { StorageKind } from '../src/configuration.ts';
@@ -30,6 +31,7 @@ export type WorldOptions = {
   storage: StorageKind;
   dataDirectory: string;
   traitRelationMode?: TraitRelationMode;
+  seedSize?: SeedSize;
 };
 
 /**
@@ -42,6 +44,7 @@ export const createWorld = async ({
   storage,
   dataDirectory,
   traitRelationMode = 'multi-reference',
+  seedSize = 'small',
 }: WorldOptions): Promise<World> => {
   const store = await testStore(
     { storage, dataDirectory },
@@ -52,6 +55,7 @@ export const createWorld = async ({
     storage,
     dataDirectory,
     traitRelationMode,
+    seedSize,
   });
   return { store, server };
 };

@@ -93,6 +93,16 @@ export type GenerateSeedOptions = {
 export const defaultRandomSeed = 'duckburg';
 
 /**
+ * The `id` of the change set that wrote one generated entity of the seed
+ * (`seed-species-goose-1`, `seed-animals-marmalade-1`): the table key and
+ * the row id, so that a table dump tells the seed's change sets from the
+ * ones an operation wrote. Generated invoices use `issueInvoiceChangeSetId`
+ * instead, exactly like invoices issued through the API.
+ */
+export const seedChangeSetId = (tableKey: string, id: string): string =>
+  `seed-${tableKey}-${id}`;
+
+/**
  * The first and last calendar day the generator draws a date from, per
  * date column. Generated invoices are dated before the hand-written ones
  * (all in 2026), so the hand-written invoices stay the newest of the seed

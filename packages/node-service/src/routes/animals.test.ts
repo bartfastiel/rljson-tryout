@@ -6,6 +6,32 @@ import type { PetShopStore } from '../store/petShopStore.ts';
 import { buildTestServer } from '../testing/testServer.ts';
 import { memoryStore } from '../testing/testStores.ts';
 
+type AnimalListEntry = {
+  id: string;
+  hash: string;
+  name: string;
+  speciesId: string | null;
+  speciesName: string | null;
+  breederId: string | null;
+  breederFarmName: string | null;
+  bornOn: string;
+  priceCents: number;
+};
+
+type AnimalPageResponse = {
+  items: AnimalListEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+const emptyPage: AnimalPageResponse = {
+  items: [],
+  total: 0,
+  limit: 50,
+  offset: 0,
+};
+
 describe('GET /api/animals', () => {
   let store: PetShopStore;
   let server: FastifyInstance;
@@ -20,17 +46,26 @@ describe('GET /api/animals', () => {
     await store.close();
   });
 
-  it('answers with an empty list when nothing is seeded', async () => {
+  const listAnimals = async (query = ''): Promise<AnimalPageResponse> => {
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/animals${query}`,
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json<AnimalPageResponse>();
+  };
+
+  it('answers with an empty page when nothing is seeded', async () => {
     const response = await server.inject({
       method: 'GET',
       url: '/api/animals',
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual([]);
+    expect(response.json()).toStrictEqual(emptyPage);
   });
 
-  it('lists the ten seeded animals in the documented shape', async () => {
+  it('lists the ten seeded animals in the documented page shape', async () => {
     await store.seedIfEmpty();
 
     const response = await server.inject({
@@ -40,9 +75,16 @@ describe('GET /api/animals', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toMatch(/^application\/json/);
-    const animals = response.json<Record<string, unknown>[]>();
-    expect(animals).toHaveLength(10);
-    for (const entry of animals) {
+    const page = response.json<AnimalPageResponse>();
+    expect(Object.keys(page).sort()).toStrictEqual([
+      'items',
+      'limit',
+      'offset',
+      'total',
+    ]);
+    expect(page).toMatchObject({ total: 10, limit: 50, offset: 0 });
+    expect(page.items).toHaveLength(10);
+    for (const entry of page.items) {
       expect(Object.keys(entry).sort()).toStrictEqual([
         'bornOn',
         'breederFarmName',
@@ -63,15 +105,11 @@ describe('GET /api/animals', () => {
       speciesSeed.map((species) => [species._hash, species]),
     );
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals',
-    });
+    const { items } = await listAnimals();
 
-    const animals = response.json<{ id: string; speciesName: string }[]>();
     for (const seedRow of animalsSeed) {
       const expectedSpecies = speciesById.get(seedRow.speciesRef);
-      const listed = animals.find((animal) => animal.id === seedRow.id);
+      const listed = items.find((animal) => animal.id === seedRow.id);
       expect(listed?.speciesName).toBe(expectedSpecies?.name);
     }
   });
@@ -79,14 +117,11 @@ describe('GET /api/animals', () => {
   it('narrows the list with ?species=<id>', async () => {
     await store.seedIfEmpty();
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?species=duck',
-    });
+    const { items, total } = await listAnimals('?species=duck');
 
-    const animals = response.json<{ speciesId: string }[]>();
-    expect(animals.length).toBeGreaterThan(0);
-    for (const animal of animals) {
+    expect(items.length).toBeGreaterThan(0);
+    expect(total).toBe(items.length);
+    for (const animal of items) {
       expect(animal.speciesId).toBe('duck');
     }
   });
@@ -95,14 +130,10 @@ describe('GET /api/animals', () => {
     await store.seedIfEmpty();
     const breederId = breedersSeed[0]!.id;
 
-    const response = await server.inject({
-      method: 'GET',
-      url: `/api/animals?breeder=${breederId}`,
-    });
+    const { items } = await listAnimals(`?breeder=${breederId}`);
 
-    const animals = response.json<{ breederId: string }[]>();
-    expect(animals.length).toBeGreaterThan(0);
-    for (const animal of animals) {
+    expect(items.length).toBeGreaterThan(0);
+    for (const animal of items) {
       expect(animal.breederId).toBe(breederId);
     }
   });
@@ -113,15 +144,11 @@ describe('GET /api/animals', () => {
       breedersSeed.map((breeder) => [breeder._hash, breeder]),
     );
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals',
-    });
+    const { items } = await listAnimals();
 
-    const animals = response.json<{ id: string; breederFarmName: string }[]>();
     for (const seedRow of animalsSeed) {
       const expectedBreeder = breederByHash.get(seedRow.breederRef);
-      const listed = animals.find((animal) => animal.id === seedRow.id);
+      const listed = items.find((animal) => animal.id === seedRow.id);
       expect(listed?.breederFarmName).toBe(expectedBreeder?.farmName);
     }
   });
@@ -129,26 +156,20 @@ describe('GET /api/animals', () => {
   it('narrows the list with ?trait=<id>', async () => {
     await store.seedIfEmpty();
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?trait=competitive-streak',
-    });
+    const { items } = await listAnimals('?trait=competitive-streak');
 
-    const animals = response.json<{ id: string }[]>();
-    expect(animals.length).toBeGreaterThan(0);
-    expect(animals.length).toBeLessThan(10);
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.length).toBeLessThan(10);
   });
 
   it('combines ?species=<id> and ?trait=<id>', async () => {
     await store.seedIfEmpty();
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?species=chicken&trait=competitive-streak',
-    });
+    const { items } = await listAnimals(
+      '?species=chicken&trait=competitive-streak',
+    );
 
-    const animals = response.json<{ id: string; speciesId: string }[]>();
-    expect(animals).toStrictEqual([
+    expect(items).toStrictEqual([
       expect.objectContaining({
         id: 'henrietta-the-egg-champion',
         speciesId: 'chicken',
@@ -161,7 +182,7 @@ describe('GET /api/animals', () => {
     ['breeder', 'no-such-breeder'],
     ['trait', 'telekinesis'],
   ])(
-    'answers with an empty list for an unknown %s id',
+    'answers with an empty page for an unknown %s id',
     async (queryParam, value) => {
       await store.seedIfEmpty();
 
@@ -171,22 +192,105 @@ describe('GET /api/animals', () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toStrictEqual([]);
+      expect(response.json()).toStrictEqual(emptyPage);
     },
   );
 
   it('never includes the background story in the list', async () => {
     await store.seedIfEmpty();
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals',
-    });
+    const { items } = await listAnimals();
 
-    const animals = response.json<Record<string, unknown>[]>();
-    for (const entry of animals) {
+    for (const entry of items) {
       expect(entry).not.toHaveProperty('backgroundStory');
     }
+  });
+
+  it('searches the name and the species name case-insensitively with ?q=<text>', async () => {
+    await store.seedIfEmpty();
+
+    const byName = await listAnimals('?q=QUACK');
+    const bySpecies = await listAnimals('?q=chick');
+    const nothing = await listAnimals('?q=dragon');
+
+    expect(byName.items.map((animal) => animal.id).sort()).toStrictEqual([
+      'quackmore-junior',
+      'sir-quackington',
+    ]);
+    expect(byName.total).toBe(2);
+    expect(bySpecies.items.map((animal) => animal.speciesId)).toStrictEqual([
+      'chicken',
+      'chicken',
+      'chicken',
+    ]);
+    expect(nothing).toStrictEqual(emptyPage);
+  });
+
+  it('combines ?q=<text> with the filters', async () => {
+    await store.seedIfEmpty();
+
+    const { items, total } = await listAnimals(
+      '?species=duck&trait=competitive-streak&q=junior',
+    );
+
+    expect(total).toBe(1);
+    expect(items[0]).toMatchObject({ id: 'quackmore-junior' });
+  });
+
+  it('serves the page ?limit=<n>&offset=<n> selects and reports the total', async () => {
+    await store.seedIfEmpty();
+    const everything = await listAnimals();
+
+    const first = await listAnimals('?limit=4');
+    const second = await listAnimals('?limit=4&offset=4');
+    const last = await listAnimals('?limit=4&offset=8');
+    const beyond = await listAnimals('?limit=4&offset=10');
+
+    expect(first).toMatchObject({ total: 10, limit: 4, offset: 0 });
+    expect(second).toMatchObject({ total: 10, limit: 4, offset: 4 });
+    expect(last).toMatchObject({ total: 10, limit: 4, offset: 8 });
+    expect(beyond).toStrictEqual({
+      items: [],
+      total: 10,
+      limit: 4,
+      offset: 10,
+    });
+    expect([...first.items, ...second.items, ...last.items]).toStrictEqual(
+      everything.items,
+    );
+  });
+
+  it.each([
+    ['limit', '0'],
+    ['limit', '201'],
+    ['limit', 'ten'],
+    ['limit', '2.5'],
+    ['limit', ''],
+    ['offset', '-1'],
+    ['offset', 'later'],
+  ])('answers 400 for %s=%j', async (name, value) => {
+    await store.seedIfEmpty();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/animals?${name}=${value}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toStrictEqual({
+      statusCode: 400,
+      error: 'Bad Request',
+      message: expect.stringContaining(`${name} must be a whole number`),
+    });
+  });
+
+  it('accepts the largest allowed limit', async () => {
+    await store.seedIfEmpty();
+
+    const page = await listAnimals('?limit=200');
+
+    expect(page).toMatchObject({ total: 10, limit: 200, offset: 0 });
+    expect(page.items).toHaveLength(10);
   });
 });
 
@@ -435,8 +539,8 @@ describe('PUT /api/animals/:id', () => {
     expect(detail.json()).toStrictEqual(updated);
     const list = await server.inject({ method: 'GET', url: '/api/animals' });
     const listed = list
-      .json<{ id: string; hash: string; priceCents: number }[]>()
-      .find((animal) => animal.id === 'donald-the-third');
+      .json<{ items: { id: string; hash: string; priceCents: number }[] }>()
+      .items.find((animal) => animal.id === 'donald-the-third');
     expect(listed).toMatchObject({ hash: updated.hash, priceCents: 61000 });
   });
 

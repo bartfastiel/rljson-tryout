@@ -279,6 +279,57 @@ describe('versionsOf', () => {
     ]);
   });
 
+  it('orders a chain by its previous links when versions share a timestamp', () => {
+    const first = row('donald', 100);
+    const second = row('donald', 200);
+    const third = row('donald', 300);
+
+    const versions = versionsOf(
+      [first, second, third],
+      [
+        history(first, '5:zzzz'),
+        history(second, '5:mmmm', ['5:zzzz']),
+        history(third, '5:aaaa', ['5:mmmm']),
+      ],
+      'animals',
+      'donald',
+    );
+
+    expect(versions.map((version) => version.row)).toStrictEqual([
+      third,
+      second,
+      first,
+    ]);
+    expect(versions.map((version) => version.current)).toStrictEqual([
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it('orders two tips of the same depth by timeId', () => {
+    const base = row('donald', 100);
+    const left = row('donald', 200);
+    const right = row('donald', 300);
+
+    const versions = versionsOf(
+      [base, left, right],
+      [
+        history(base, '1:aaaa'),
+        history(left, '2:bbbb', ['1:aaaa']),
+        history(right, '2:aaaa', ['1:aaaa']),
+      ],
+      'animals',
+      'donald',
+    );
+
+    expect(versions.map((version) => version.row)).toStrictEqual([
+      left,
+      right,
+      base,
+    ]);
+  });
+
   it('flags both tips of a branch as current', () => {
     const base = row('donald', 100);
     const left = row('donald', 200);
