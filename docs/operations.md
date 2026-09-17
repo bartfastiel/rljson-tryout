@@ -1,9 +1,10 @@
 # Operations: bringing the system down and up
 
-The whole system runs on one Hetzner `cpx32` that costs 0.0569 EUR per hour
-plus 0.0008 EUR per hour for its primary IPv4 (about 42 EUR per month,
-excluding VAT) whether anybody uses it or not. Two manually triggered
-workflows switch it off and on with one click each:
+The whole system runs on one Hetzner `cpx32`. Hetzner bills it by the hour
+(0.0569 EUR) and caps the month at the monthly price, 35.49 EUR, plus about
+0.50 EUR for the primary IPv4, excluding VAT, whether anybody uses it or
+not. Two manually triggered workflows switch it off and on with one click
+each:
 
 | Workflow                                | What it does                                                                                                       |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -15,7 +16,18 @@ the pipeline (secrets `HCLOUD_TOKEN` and `LETSENCRYPT_EMAIL`, variable
 `AWS_ROLE_ARN`). They share the concurrency groups `cluster` and
 `workloads-production` with the pipeline, so they queue behind a deployment
 that is in flight instead of racing it, and a common group `lifecycle` keeps
-`Up` and `Down` from ever overlapping each other.
+`Up` and `Down` from ever overlapping each other. The verification steps
+are the pipeline's own, shared through `infra/scripts/`.
+
+Two things to keep in mind while the system is down:
+
+- Any push to `main` runs the pipeline, which applies the cluster and the
+  workloads. Merging a pull request is an implicit `Up`; the server then
+  runs until the next `Down`.
+- `Up` deploys the commit it was started from (`github.sha` is fixed at
+  dispatch). Do not merge while `Up` runs: if the pipeline's apply takes the
+  `workloads-production` group first, `Up` afterwards rolls production back
+  to its own, older commit and its verification still passes.
 
 ## Bringing the system down
 
@@ -24,27 +36,30 @@ In the GitHub UI: Actions, `Down`, "Run workflow", branch `main`, type
 
 ```sh
 gh workflow run Down --ref main --field confirmation=down
+sleep 5   # the new run appears in the list with a short delay
 gh run watch "$(gh run list --workflow Down --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-Any other confirmation value fails the run in its first job before anything
-is touched.
+The first job `confirm` fails within seconds, before any concurrency group
+is taken or anything is checked out, when the run was started from another
+branch or with any confirmation other than `down`.
 
 Expected sequence and durations (measured on the pipeline; the first real
 `Down` and `Up` cycle refines them):
 
-| Job         | Step                                                     | Duration                                                           |
-| ----------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
-| `confirm`   | Checks the input                                         | seconds                                                            |
-| `workloads` | Checkout, AWS role, Terraform, `init` of both stages     | about 30 seconds                                                   |
-| `workloads` | Probes the Kubernetes API server                         | seconds                                                            |
-| `workloads` | `terraform destroy` per workspace, previews first        | about 1 minute for `production` (the namespace deletion dominates) |
-| `cluster`   | Checkout, AWS role, Terraform, `init`                    | about 20 seconds                                                   |
-| `cluster`   | `terraform destroy`: server, firewall, SSH key, key pair | about 30 seconds                                                   |
+| Job         | Step                                                     | Duration                                                                                                      |
+| ----------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `confirm`   | Checks the branch and the input                          | seconds                                                                                                       |
+| `workloads` | Checkout, AWS role, Terraform, `init` of both stages     | about 30 seconds                                                                                              |
+| `workloads` | Probes the Kubernetes API server                         | seconds                                                                                                       |
+| `workloads` | `terraform destroy` per workspace, previews first        | one to two minutes for `production` (eight resources; the Helm uninstall and the namespace deletion dominate) |
+| `cluster`   | Checkout, AWS role, Terraform, `init`                    | about 20 seconds                                                                                              |
+| `cluster`   | `terraform destroy`: server, firewall, SSH key, key pair | about 30 seconds                                                                                              |
 
-A `Down` on a system with production only takes three to four minutes. The
+A `Down` on a system with production only takes four to five minutes. The
 run's summary page lists every workspace with the number of resources it
-destroyed and the cluster resources that are gone.
+destroyed and the cluster resources that are gone; when a workspace fails,
+the summary names it and the workspaces that were not touched.
 
 `Down` iterates over every workspace of the workloads stage except
 `default`: `pr-*` previews first, `production` last. Preview workspaces are
@@ -74,27 +89,31 @@ workflow". From a shell:
 
 ```sh
 gh workflow run Up --ref main
+sleep 5   # the new run appears in the list with a short delay
 gh run watch "$(gh run list --workflow Up --limit 1 --json databaseId --jq '.[0].databaseId')"
 ```
 
-`Up` deploys the image of the commit it was started from, which is the head
-of `main`. The pipeline pushed that image when the commit landed, so start
-`Up` only when the last pipeline run on `main` is green; a missing image
-fails the workloads job in its first step instead of after a rollout
-timeout.
+`Up` deploys the image of the commit it was started from, the head of
+`main` at that moment. The pipeline pushed that image when the commit
+landed, so start `Up` only when the last pipeline run on `main` is green.
+The first job `preflight` fails within seconds, before any server exists,
+when the run was started from another branch or the image is missing.
 
-| Job         | Step                                                                         | Duration                                                                 |
-| ----------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `cluster`   | Checkout, AWS role, Terraform, `init`                                        | about 20 seconds                                                         |
-| `cluster`   | `terraform apply`: key pair, SSH key, firewall, server                       | server created after about 15 seconds                                    |
-| `cluster`   | Still `apply`: SSH hand-off waits for cloud-init, k3s and a `Ready` node     | one to three minutes                                                     |
-| `cluster`   | Waits for the API server, verifies the kubeconfig with `kubectl`             | about 20 seconds                                                         |
-| `workloads` | Checkout, image check, AWS role, Terraform, `init`, workspace `production`   | about 30 seconds                                                         |
-| `workloads` | `terraform apply`: namespace, deployment, service, two ingresses             | about 30 seconds, the rollout waits for the image pull and the readiness |
-| `workloads` | Polls `/health` on every hostname for the commit, checks the `http` redirect | seconds                                                                  |
+| Job         | Step                                                                                    | Duration                                                               |
+| ----------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `preflight` | Checks the branch and that the image of the commit exists in GHCR                       | seconds                                                                |
+| `cluster`   | Checkout, AWS role, Terraform, `init`                                                   | about 20 seconds                                                       |
+| `cluster`   | `terraform apply`: key pair, SSH key, firewall, server                                  | server created after about 15 seconds                                  |
+| `cluster`   | Still `apply`: SSH hand-off waits for cloud-init, k3s and a `Ready` node                | one to three minutes                                                   |
+| `cluster`   | Waits for the API server, verifies the kubeconfig with `kubectl`                        | about 20 seconds                                                       |
+| `workloads` | Checkout, AWS role, Terraform, `init`, workspace `production`                           | about 30 seconds                                                       |
+| `workloads` | `terraform apply`: cert-manager, issuers, namespace, deployment, service, ingresses     | one to two minutes, the rollout waits for the image pull and readiness |
+| `workloads` | Polls `/health` for the commit, waits for the Let's Encrypt issuer, checks the redirect | up to two minutes, the certificate is ordered when the ingress appears |
 
-An `Up` takes four to six minutes. Preview environments are not recreated;
-they come back with the next push to their pull request.
+An `Up` takes five to eight minutes. Preview environments are not
+recreated; they come back with the next push to their pull request.
+Running `Up` while the system is already up is harmless: both stages plan
+no changes, or a rolling update to the head of `main` if it moved.
 
 ## What survives, what is lost
 
@@ -104,8 +123,8 @@ Survives a `Down`:
   `production` workspace. Nothing has to be imported or bootstrapped again.
 - The primary IP `rljson-tryout` and the two DNS records pointing at it.
   The next server gets the same address, so `Up` needs no DNS change. The
-  primary IP is the only Hetzner cost that remains (0.0008 EUR per hour,
-  well under one euro per month).
+  primary IP is the only Hetzner cost that remains (about 0.50 EUR per
+  month).
 - The container images in GHCR, the repository secrets and variables, the
   AWS role and the bucket.
 
@@ -116,23 +135,27 @@ Lost with a `Down`:
   store is in memory and reseeds itself at start; the persistent stores of
   phase C live on the server's local disk and start empty after an `Up`.
 - The generated SSH key pair. `Up` creates a new one.
-- Traefik's self-signed default certificate. Once slice A10 issues Let's
-  Encrypt certificates, every `Up` requests them again: the limit that
-  matters is five duplicate certificates per exact hostname set per week,
-  so more than five `Down` and `Up` cycles in a week leave production
-  without a valid certificate until the window passes. Test frequent
-  cycles against the staging issuer.
+- The Let's Encrypt account and certificates of cert-manager. Every `Up`
+  registers a new account and orders the certificates again. The limit
+  that matters is five duplicate certificates per exact hostname set per
+  week on the production issuer, so more than five `Down` and `Up` cycles in
+  a week leave production without a valid certificate until the window
+  passes; the staging issuer, which slice A10 uses until it switches, has
+  far higher limits.
 
 ## Recovering from trouble
 
 ### A stale state lock
 
 Symptom: a Terraform step fails with `Error acquiring the state lock` and
-prints a lock ID, although no run is in progress. This happens when a run
-was cancelled or the runner died between lock and unlock. Check the
-Actions tab first: every `Pipeline`, `Up` and `Down` run must be finished.
-Then, from a shell with AWS credentials that may access the bucket, in the
-stage directory the error came from:
+prints a lock ID, although no run is in progress. This is the expected
+outcome of a run cancelled in the middle of an apply or destroy: the runner
+sends the step an interrupt, a termination signal 7.5 seconds later and
+then kills it, which is far shorter than the SSH hand-off of the cluster
+stage (up to fifteen minutes) or a namespace deletion. Check the Actions
+tab first: every `Pipeline`, `Up` and `Down` run must be finished. Then,
+from a shell with AWS credentials that may access the bucket, in the stage
+directory the error came from:
 
 ```sh
 cd infra/terraform/workloads   # or infra/terraform/cluster
@@ -143,7 +166,8 @@ terraform force-unlock <lock ID from the error>
 
 `force-unlock` removes the lock file the S3 backend keeps next to the state
 object; the state itself is untouched. Rerun the failed workflow
-afterwards.
+afterwards. A cancelled cluster apply may also have left the server half
+provisioned; the next `Up` or `Down` reconciles it from the state.
 
 ### The cluster was destroyed outside Terraform
 
@@ -169,7 +193,5 @@ then `Up`.
 
 GitHub keeps at most one pending run per concurrency group and cancels the
 older pending one when another arrives. A run cancelled while pending did
-nothing yet; a run cancelled in the middle of an apply or destroy gets an
-interrupt that Terraform normally honours by finishing the current resource
-and releasing the lock. Start the workflow again; if it reports a stale
-lock, see above.
+nothing yet and can simply be started again. A run cancelled while a
+Terraform step was in progress usually leaves a stale lock; see above.
