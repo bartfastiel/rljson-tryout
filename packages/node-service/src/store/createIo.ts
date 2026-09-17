@@ -22,8 +22,8 @@ export type IoConfiguration = Pick<Configuration, 'storage' | 'dataDirectory'>;
  * the database with SQLite's defaults (`journal_mode = delete`,
  * `synchronous = FULL`), and since every `Io.write` is its own
  * transaction, seeding the store means one journal file and two `fsync`s
- * per row: 0.7 s for the seed and 28 ms per invoice on the development
- * machine, against 70 ms and 3.5 ms with these two pragmas
+ * per row: 698 ms for the seed and 28.4 ms per invoice on the development
+ * machine, against 49 ms and 2.9 ms with these two pragmas
  * (`docs/findings/stores.md`). Committed transactions stay durable across
  * a crash of the process; only a power loss can lose the last ones, which
  * this project accepts.

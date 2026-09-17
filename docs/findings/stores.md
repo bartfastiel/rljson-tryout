@@ -141,6 +141,21 @@ In the container and in Kubernetes:
   sqlite node survives a restart and a redeploy, which is what slice D7
   needs to observe for the hub's treatment of a returning identity; a
   memory node keeps getting a fresh id with its fresh `emptyDir`.
+- The switch from the Deployment to the StatefulSet on `main` (run
+  35247809937): Terraform destroyed the one and created the other in the
+  same second, the old pod got `SIGTERM` and exited at once, and the new
+  pod's container started 7 s later after its image pull, so the two
+  never ran side by side and node1 came back `standalone` after about
+  10 s of downtime. Had the old pod lingered (the grace period is 30 s),
+  both would have been in `petshop-production` with different node ids
+  (the `emptyDir` identity against the fresh claim), discovered each
+  other and elected a hub for those seconds, and the survivor would
+  have dropped the vanished peer after the 15 s broadcast timeout
+  (`docs/findings/network-discovery.md`): a transient election, not a
+  fault, but one that a smoke check waiting for a settled role has to
+  wait out. Acceptance afterwards: an invoice issued through the API,
+  `kubectl delete pod -n petshop node1-0`, the new pod ready after 6 s,
+  the invoice listed and `nodeId` unchanged.
 
 ## What it means for rljson users
 
