@@ -126,20 +126,21 @@ README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
-| Variable            | Values                             | Meaning                                                                                |
-| ------------------- | ---------------------------------- | -------------------------------------------------------------------------------------- |
-| `NODE_NAME`         | `node1` …                          | Display name, also used for the hostname                                               |
-| `STORAGE`           | `memory`, `sqlite`, `mssql`        | Which `Io` implementation backs the node                                               |
-| `DATA_DIR`          | path                               | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                |
-| `MSSQL_CONNECTION`  | connection string                  | Only for `STORAGE=mssql`                                                               |
-| `HTTP_PORT`         | default `8080`                     |                                                                                        |
-| `HUB_PORT`          | default `3000`                     |                                                                                        |
-| `BROADCAST_PORT`    | default `41234`                    |                                                                                        |
-| `RLJSON_DOMAIN`     | string                             | Network domain for peer discovery                                                      |
-| `SEED_SIZE`         | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty                                   |
-| `PUBLIC_URL`        | URL                                | Shown in status and used for links                                                     |
-| `LOG_LEVEL`         | `info`                             |                                                                                        |
-| `WEB_APP_DIRECTORY` | path                               | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image |
+| Variable            | Values                             | Meaning                                                                                                                                                   |
+| ------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_NAME`         | `node1` …                          | Display name, also used for the hostname                                                                                                                  |
+| `STORAGE`           | `memory`, `sqlite`, `mssql`        | Which `Io` implementation backs the node                                                                                                                  |
+| `DATA_DIR`          | path                               | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                   |
+| `MSSQL_CONNECTION`  | connection string                  | Only for `STORAGE=mssql`                                                                                                                                  |
+| `HTTP_PORT`         | default `8080`                     |                                                                                                                                                           |
+| `HUB_PORT`          | default `3000`                     |                                                                                                                                                           |
+| `BROADCAST_PORT`    | default `41234`                    |                                                                                                                                                           |
+| `RLJSON_DOMAIN`     | string                             | Network domain for peer discovery                                                                                                                         |
+| `SEED_SIZE`         | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty                                                                                                      |
+| `PUBLIC_URL`        | URL                                | Shown in status and used for links                                                                                                                        |
+| `LOG_LEVEL`         | `info`                             |                                                                                                                                                           |
+| `WEB_APP_DIRECTORY` | path                               | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                    |
+| `TRAIT_RELATION`    | `multi-reference`, `junction`      | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference` |
 
 ### 2.5 HTTP contract of a node
 
@@ -684,11 +685,22 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       the species and trait filters as two labelled chip rows rather than
       one combined bar, reusing the existing `.chip` component for both the
       filter chips and the detail view's trait chips.
-- [ ] **B6 Traits as a junction table.** Depends on: B5. Table
+- [x] **B6 Traits as a junction table.** Depends on: B5. Table
       `animalTraits`, the same filter implemented over the junction, both
       implementations behind one interface with a toggle in configuration, and
       `docs/findings/n-to-m.md` comparing query shape, payload size and
       validation. Done when both paths return the same result in a test.
+      Deviation: none; the interface `TraitRelation`
+      (`traitIdsOfAnimal`, `animalHashesWithTrait`) has two implementations,
+      `MultiReferenceTraitRelation` and `JunctionTraitRelation`, selected by
+      the new configuration variable `TRAIT_RELATION`
+      (`multi-reference`, the default, or `junction`); `animalTraits` seed
+      rows are derived from `animalsSeed.traitsRefs` at module load rather
+      than hand-written, so the seed stays in one place. The Gherkin world
+      of `@amiceli/vitest-cucumber` 8.0.0 handles a `Scenario Outline` with
+      `Examples` cleanly, so the dual-mode filter scenario in
+      `features/traits.feature` uses that instead of a separate Vitest
+      parameterised test.
 - [x] **B7 Persons and breeders.** Depends on: B4. Tables `persons`,
       `breeders`, column `breederRef`, `GET /api/breeders`, breeder shown in the
       detail view. Done when a breeder appears with their person data.
