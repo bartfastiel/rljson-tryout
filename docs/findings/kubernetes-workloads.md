@@ -85,8 +85,10 @@
 - When the cluster stage replaces the server, its `kubeconfig` output
   changes with it, the workloads provider is reconfigured from the remote
   state on the next run, the refresh gets 404 for every resource in the
-  new cluster, the provider drops them from state and the plan is
-  `5 to add` again without any `state rm`. The failing order is the other
+  new cluster, the provider drops them from state and the plan is a full
+  re-creation without any `state rm` (`5 to add` for the environment
+  alone, `8 to add` in production since slice A10 added cert-manager and
+  the two issuers). The failing order is the other
   one: while the cluster state has no `kubeconfig` output (destroyed, not
   yet recreated) every workloads command including `destroy` stops at
   `data.terraform_remote_state.cluster.outputs.kubeconfig` with

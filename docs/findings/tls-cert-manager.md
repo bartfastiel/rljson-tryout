@@ -44,14 +44,38 @@ not installed)`, `no matches for kind "ClusterIssuer" in group
   prints `email: (sensitive value)` inside it, and the sensitive Terraform
   variable keeps the address out of every other plan line as well.
 - Before cert-manager existed, `openssl x509 -noout -issuer` on the served
-  certificate returned `issuer=CN=TRAEFIK DEFAULT CERT`; a Let's Encrypt
-  certificate reads `issuer=C=US, O=Let's Encrypt, CN=...`, the staging
-  authority `O=(STAGING) Let's Encrypt`. Both contain `Let's Encrypt`, so
-  one check covers both pull requests of the slice.
+  certificate returned `issuer=CN=TRAEFIK DEFAULT CERT`. The staging
+  certificates read `issuer=C = US, O = Let's Encrypt, CN = (STAGING)
+Ersatz Emmer YR2` on the runner (OpenSSL 3.0 prints spaces around the
+  `=`, the local OpenSSL 3.2 does not), the production ones name a `CN`
+  without the `(STAGING)` prefix. Both contain `Let's Encrypt`, so one
+  check covers both pull requests of the slice.
+- First apply on `main` (run 35212430213): the Helm release took 51 s
+  including the CRDs and the three deployments, both ClusterIssuers were
+  `Ready` 2 s after creation, and the ingress shim had the staging
+  certificate for `node1` issued 46 s after the issuers appeared (`Order`
+  `valid`, `Certificate` `READY True`, no `Challenge` left behind); the apex
+  certificate followed within the same minute. The ingress update itself
+  was instantaneous, the deployment rollout to the new image tag 17 s.
+- The apply did not need the retries on the kubectl provider: the webhook
+  answered the first ClusterIssuer request 1 s after Helm reported the
+  release ready.
 - Traefik's permanent redirect from `web` to `websecure` does not block
   HTTP-01: Let's Encrypt follows redirects to `https://` and does not
   validate the certificate it meets there, and the solver ingress created
   by cert-manager is attached to both entrypoints like every other ingress.
+  cert-manager's own pre-flight self-check behaves the same way, it follows
+  the redirect with certificate verification disabled, and the hairpin from
+  a pod through the public IP back into Traefik works on this k3s (the
+  review of pull request #16 verified both from inside the cluster).
+- A `terraform destroy` of the workloads leaves the namespace
+  `cert-manager`, the custom resource definitions (`crds.keep` defaults to
+  `true` in the chart) and the two ACME account key secrets in the cluster.
+  Helm adopts the kept definitions on the next install because release
+  name and namespace are unchanged, so a re-apply needs no manual cleanup,
+  and the reused account keys mean no new ACME registration. The module
+  depends on the issuers, so a destroy removes the ingresses and any open
+  challenge before cert-manager and its finalizers are gone.
 
 ## What it means for rljson users
 
