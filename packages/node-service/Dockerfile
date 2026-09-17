@@ -4,7 +4,7 @@
 # workspace dependencies of `@rljson-tryout/node-service` and typecheck the
 # whole workspace before bundling. See `docs/roadmap.md` section 4.1.
 
-FROM node:24-alpine AS base
+FROM node:26-alpine AS base
 RUN corepack enable
 
 # Only the files pnpm needs to resolve the dependency graph. This layer is
@@ -33,7 +33,7 @@ RUN node -e "\
 
 # A minimal runtime with no pnpm store, no sources and no dev dependencies:
 # the bundle already contains every dependency it needs.
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 ARG GIT_COMMIT
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV NODE_ENV=production
