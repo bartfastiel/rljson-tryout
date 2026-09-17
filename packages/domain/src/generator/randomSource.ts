@@ -24,13 +24,13 @@ export type RandomSource = {
 };
 
 /**
- * FNV-1a over the UTF-16 code units of a string, so that a readable seed
- * such as `duckburg` turns into the 32-bit state the generator starts from.
+ * FNV-1a over the code points of a string, so that a readable seed such as
+ * `duckburg` turns into the 32-bit state the generator starts from.
  */
 const seedStateOf = (seed: string): number => {
   let state = 0x811c9dc5;
-  for (let index = 0; index < seed.length; index += 1) {
-    state ^= seed.charCodeAt(index);
+  for (const character of seed) {
+    state ^= character.codePointAt(0) ?? 0;
     state = Math.imul(state, 0x01000193);
   }
   return state >>> 0;
@@ -46,7 +46,9 @@ export const createRandomSource = (seed: string): RandomSource => {
   let state = seedStateOf(seed);
 
   const nextFraction = (): number => {
-    state = (state + 0x6d2b79f5) | 0;
+    // The state stays an unsigned 32-bit integer; the shift by zero wraps
+    // the sum, which is what makes the sequence the same on every platform.
+    state = (state + 0x6d2b79f5) >>> 0;
     let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
     mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
     return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;

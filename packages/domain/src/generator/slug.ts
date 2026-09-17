@@ -9,7 +9,7 @@ export const slugOf = (name: string): string =>
     .toLowerCase()
     .replaceAll("'", '')
     .replaceAll(/[^a-z0-9]+/g, '-')
-    .replaceAll(/^-+|-+$/g, '');
+    .replaceAll(/^-|-$/g, '');
 
 /**
  * The id of a generated row: the slug of its name followed by its running
