@@ -195,6 +195,143 @@ const nodeCard = (node, reachableFromBrowser, at) => {
 };
 
 /**
+ * The display name of a node by its id: from the environment's node list
+ * or the discovered peers, the first characters of the id when neither
+ * knows it.
+ *
+ * @param {import('../status-feed.js').Status} status
+ * @param {string} nodeId
+ */
+const nodeNameOf = (status, nodeId) =>
+  status.nodes.find((node) => node.nodeId === nodeId)?.name ??
+  status.peers.find((peer) => peer.nodeId === nodeId)?.name ??
+  nodeId.slice(0, 8);
+
+/**
+ * Where a transfer came from or went to, as a phrase: "from node2",
+ * "to node1", "to every client" for a hub's announcement, "from the hub"
+ * for an announcement that named no writer.
+ *
+ * @param {import('../status-feed.js').Status} status
+ * @param {import('../status-feed.js').SyncTransfer} transfer
+ */
+const transferPartner = (status, transfer) => {
+  const preposition = transfer.direction === 'incoming' ? 'from' : 'to';
+  if (transfer.peerNodeId !== null) {
+    return `${preposition} ${nodeNameOf(status, transfer.peerNodeId)}`;
+  }
+  return transfer.direction === 'incoming' ? 'from the hub' : 'to every client';
+};
+
+/**
+ * The rows a transfer named, as "4 rows in 4 tables", with the tables in
+ * the title.
+ *
+ * @param {Record<string, number>} tables
+ */
+const transferRows = (tables) => {
+  const entries = Object.entries(tables);
+  const rowCount = entries.reduce((sum, [, count]) => sum + count, 0);
+  const text = element(
+    'span',
+    'transfer-rows',
+    `${rowCount} ${rowCount === 1 ? 'row' : 'rows'} in ${entries.length} ${entries.length === 1 ? 'table' : 'tables'}`,
+  );
+  text.title = entries.map(([table, count]) => `${table}: ${count}`).join(', ');
+  return text;
+};
+
+/**
+ * One transfer as a list item: direction and partner, the change set by
+ * id and short hash, the rows, the outcome and when it finished.
+ *
+ * @param {import('../status-feed.js').Status} status
+ * @param {import('../status-feed.js').SyncTransfer} transfer
+ * @param {Date} at
+ */
+const transferItem = (status, transfer, at) => {
+  const item = element('li', `transfer transfer-${transfer.direction}`);
+  const heading = element('p', 'transfer-heading');
+  heading.append(
+    element(
+      'span',
+      'transfer-direction',
+      transfer.direction === 'incoming' ? 'Received' : 'Announced',
+    ),
+    element(
+      'span',
+      'transfer-partner',
+      ` ${transferPartner(status, transfer)}`,
+    ),
+    element(
+      'span',
+      `transfer-status transfer-status-${transfer.status}`,
+      transfer.status,
+    ),
+  );
+  const changeSet = element('p', 'transfer-change-set');
+  changeSet.append(
+    element(
+      'span',
+      'transfer-change-set-id',
+      transfer.changeSetId ?? 'change set',
+    ),
+    element('code', 'transfer-hash', transfer.changeSetHash.slice(0, 8)),
+  );
+  changeSet.title = transfer.changeSetHash;
+  const duration =
+    transfer.direction === 'incoming' ? `, ${transfer.durationMs} ms` : '';
+  const meta = element('p', 'transfer-meta');
+  meta.append(
+    transferRows(transfer.tables),
+    element(
+      'span',
+      'transfer-time',
+      `${formatRelativeTime(transfer.at, at)}${duration}`,
+    ),
+  );
+  item.append(heading, changeSet, meta);
+  if (transfer.error !== undefined) {
+    item.append(element('p', 'transfer-error', transfer.error));
+  }
+  return item;
+};
+
+/**
+ * The synchronisation section: the counters of this node's sync agent
+ * and its last transfers, newest first.
+ *
+ * @param {import('../status-feed.js').Status} status
+ * @param {Date} at
+ */
+const synchronisation = (status, at) => {
+  const { sync } = status;
+  const container = element('div', 'sync');
+  container.append(
+    facts([
+      ['Announced', String(sync.announced)],
+      ['Received', String(sync.received)],
+      ['Skipped', `${sync.skipped} already held`],
+      ['Pending', String(sync.pending)],
+      ['Failed', String(sync.failed)],
+      ['Last error', sync.lastError ?? 'none'],
+    ]),
+  );
+  if (sync.transfers.length === 0) {
+    container.append(statusMessage('No change sets transferred yet.'));
+  } else {
+    const list = element('ul', 'transfer-list');
+    list.setAttribute('role', 'list');
+    list.setAttribute('aria-label', 'Last transfers');
+    list.append(
+      ...sync.transfers.map((transfer) => transferItem(status, transfer, at)),
+    );
+    container.append(list);
+  }
+  return container;
+};
+
+/**
  * @param {import('../status-feed.js').StatusPeer} peer
  * @param {Date} at
  */
@@ -226,9 +363,11 @@ const peerCard = (peer, at) => {
  * The network view: what this node is (name, role, id, domain, hub, what
  * its hub transport is doing), every node of the environment with the
  * discovery flag, the server-side probe, this browser's own probe and the
- * connected clients of the hub, and the peers discovery knows with their
- * addresses and probe results. Follows the shared status feed, which
- * polls `/status` every five seconds while the view is open.
+ * connected clients of the hub, the change set synchronisation (counters
+ * and the last transfers, each with the node it came from or went to),
+ * and the peers discovery knows with their addresses and probe results.
+ * Follows the shared status feed, which polls `/status` every five
+ * seconds while the view is open.
  */
 class NetworkView extends HTMLElement {
   /** @type {(() => void) | null} */
@@ -284,6 +423,7 @@ class NetworkView extends HTMLElement {
       viewTitle(),
       section('This node', thisNode(status, at)),
       section('Nodes of the environment', nodes),
+      section('Synchronisation', synchronisation(status, at)),
       section('Discovered peers', peers),
     );
   }

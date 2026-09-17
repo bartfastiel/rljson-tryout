@@ -57,10 +57,22 @@ Per-row `Db.insert` against bulk `Core.import`, fresh store, `IoMem`:
   insert notifications, so after a bulk import `detectDagBranch` had to
   rescan the table (147 ms for 12 000 history rows, 0 ms after the per-row
   path) and no `Db` observer would have seen the rows. Given the absolute
-  numbers, the store writes the generated rows through the same `writeRow`
+  numbers, the store wrote the generated rows through the same `writeRow`
   the API paths use, one `Db.insert` per row plus one change set per
-  entity through `Core.import`, and keeps the bulk path as a measured
-  alternative rather than code.
+  entity through `Core.import`, and kept the bulk path as a measured
+  alternative rather than code. Slice D3 moved every seed write, the
+  hand-written rows included, to `Core.import` per row after all, for a
+  reason the numbers had nothing to do with: `Db.insert` issues the
+  `timeId` of the history row itself and offers no way to pass one in, and
+  once nodes exchange change sets two nodes seeding the same rows under
+  different history rows hold two tips per seed entity. The seed now
+  stamps its history rows from a fixed epoch plus a counter (`seedTimeId`)
+  and gives every hand-written entity a change set as well, so that every
+  node seeding a size writes identical rows, history rows and change sets
+  (`docs/findings/change-set-sync.md`). The per-row `Core.import` costs
+  about what `Db.insert` did (`medium` seeds in about the same 80 ms in
+  memory); what is lost is the incremental DAG tip set and the insert
+  notifications for seeded rows, which nothing reads yet.
 - `Core.import` with validation on accepted the 2 000 animals whose
   `speciesRef`, `breederRef` and `traitsRefs` pointed at hashes no table
   holds: `Core.import` throws only for validator errors other than
@@ -148,9 +160,11 @@ same suite passes at both sizes.
 ## What it means for rljson users
 
 - `Db.insert` per row is fast enough on `IoMem` to seed tens of thousands
-  of rows in a second or two; reach for `Core.import` only when the
-  per-write bookkeeping of `Db` (history rows, DAG tips, notifications) is
-  not wanted, and then write the InsertHistory rows yourself.
+  of rows in a second or two; reach for `Core.import` when the per-write
+  bookkeeping of `Db` (history rows, DAG tips, notifications) is not
+  wanted, or when the history rows must be the same on every node that
+  seeds, and then write the InsertHistory rows yourself with your own
+  `timeId`s.
 - Never read through `dump` or `dumpTable` on a hot path of an `IoMem`
   store that is also written to: each such read after a write costs a full
   re-hash of the store. `Io.readRows` with an empty `where` is the cheap
@@ -162,7 +176,8 @@ same suite passes at both sizes.
 - Change set granularity for a seed: one change set per entity (a species,
   an animal with its junction rows, an invoice with its items) mirrors what
   the API paths write and keeps every change set small enough to pull as a
-  unit; the generated `large` seed is 7 771 change sets.
+  unit; the hand-written seed is 44 change sets, the generated `medium`
+  seed adds 400, the generated `large` seed 7 771.
 
 ## Candidates for upstream issues
 

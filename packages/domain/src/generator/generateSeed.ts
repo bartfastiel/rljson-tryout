@@ -1,9 +1,6 @@
 import { hashed } from '../hashing.ts';
-import {
-  invoiceId,
-  invoiceItemId,
-  invoiceNumber,
-} from '../invoiceNumbering.ts';
+import { invoiceNumber } from '../invoiceNumbering.ts';
+import { invoiceRows } from '../invoiceRows.ts';
 import { animalsSeed } from '../seed/animals.ts';
 import { breedersSeed } from '../seed/breeders.ts';
 import { customersSeed } from '../seed/customers.ts';
@@ -374,26 +371,15 @@ const generateInvoices = (
     const year = draft.issuedOn.slice(0, 4);
     const sequence = (sequenceByYear.get(year) ?? 0) + 1;
     sequenceByYear.set(year, sequence);
-    const number = invoiceNumber(draft.issuedOn, sequence);
-    const invoice = hashed({
-      id: invoiceId(number),
-      invoiceNumber: number,
+    const rows = invoiceRows({
+      invoiceNumber: invoiceNumber(draft.issuedOn, sequence),
       customerRef: draft.customer._hash,
       issuedOn: draft.issuedOn,
       status: draft.status,
+      lines: draft.lines,
     });
-    invoices.push(invoice);
-    for (const [position, line] of draft.lines.entries()) {
-      invoiceItems.push(
-        hashed({
-          id: invoiceItemId(number, position + 1),
-          invoiceRef: invoice._hash,
-          animalRef: line.animal._hash,
-          quantity: line.quantity,
-          unitPriceCents: line.animal.priceCents,
-        }),
-      );
-    }
+    invoices.push(rows.invoice);
+    invoiceItems.push(...rows.items);
   }
 
   return { invoices, invoiceItems };

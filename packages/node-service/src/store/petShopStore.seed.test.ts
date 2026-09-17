@@ -87,6 +87,14 @@ const handWrittenCounts = {
     (count, entry) => count + entry.items.length,
     0,
   ),
+  changeSets:
+    speciesSeed.length +
+    traitsSeed.length +
+    personsSeed.length +
+    breedersSeed.length +
+    customersSeed.length +
+    animalsSeed.length +
+    invoicesSeed.length,
 };
 
 const changeSetIds = async (store: PetShopStore): Promise<string[]> => {
@@ -140,7 +148,7 @@ describe.each(storageKinds)(
           handWrittenCounts.animalTraits + generated.animalTraits.length,
         invoicesSeeded: handWrittenCounts.invoices + plan.invoices,
         changeSetsSeeded:
-          handWrittenCounts.invoices +
+          handWrittenCounts.changeSets +
           plan.species +
           plan.traits +
           generated.persons.length +
@@ -168,6 +176,8 @@ describe.each(storageKinds)(
         `issue-invoice-${generated.invoices[0].invoiceNumber}`,
       );
       expect(ids).toContain('issue-invoice-2026-0001');
+      expect(ids).toContain('seed-species-duck');
+      expect(ids).toContain('seed-animals-donald-the-third');
     });
 
     it('serves the generated rows through every list with their references resolved', async () => {

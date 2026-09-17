@@ -6,7 +6,9 @@ import {
   timeId,
   type BuffetsTable,
   type ComponentsTable,
+  type InsertHistoryRow,
   type InsertHistoryTable,
+  type Rljson,
   type TableCfg,
 } from '@rljson/rljson';
 import {
@@ -23,23 +25,23 @@ import {
   breedersTableCfg,
   changeSetsInsertHistoryTableCfg,
   changeSetsTableCfg,
+  createSeedClock,
   currentRows,
   customersInsertHistoryTableCfg,
   customersSeed,
   customersTableCfg,
   generatedSeedFor,
   hashed,
-  invoiceId,
-  invoiceItemId,
   invoiceItemsInsertHistoryTableCfg,
   invoiceItemsTableCfg,
   invoiceNumber,
+  invoiceRows,
   invoicesInsertHistoryTableCfg,
-  invoicesSeed,
   invoicesTableCfg,
   issueInvoiceChangeSetId,
   nextInvoiceSequence,
   seedChangeSetId,
+  seedInvoices,
   seedPlans,
   personsInsertHistoryTableCfg,
   personsSeed,
@@ -67,6 +69,7 @@ import {
   type HashedSpeciesRow,
   type HashedTraitRow,
   type InvoiceStatus,
+  type SeedClock,
   type SeedSize,
   type VersionHistoryRow,
 } from '@rljson-tryout/domain';
@@ -80,6 +83,29 @@ import {
 } from './traitRelation.ts';
 
 const changeSetsRoute = Route.fromFlat(changeSetsTableCfg.key);
+
+/**
+ * The `origin` of the InsertHistory rows this store writes itself rather
+ * than through `Db.insert` (which writes `db.insert`): the seed's rows and
+ * change sets, the change sets of the API paths, and the change sets
+ * received from another node.
+ */
+const seedOrigin = 'seed';
+const apiOrigin = 'core.import';
+const syncOrigin = 'sync';
+
+const historyTableKeyOf = (tableKey: string): string =>
+  `${tableKey}InsertHistory`;
+
+/**
+ * Whether a value from the network or a request may enter an
+ * `Io.readRows` `where` clause as a `timeId`: digits, a colon and the four
+ * characters of the nanoid alphabet, the shape `timeId()` of
+ * `@rljson/rljson` issues and `seedTimeId` reproduces. Same reason as
+ * `isSafeWhereValue`.
+ */
+const isSafeTimeId = (value: string): boolean =>
+  /^\d+:[A-Za-z0-9_-]{4}$/u.test(value);
 
 /**
  * Every domain table of roadmap section 2.6 with its InsertHistory
@@ -506,11 +532,53 @@ type SeedRow =
   | HashedInvoiceItemRow;
 
 /**
+ * The rows one part of the seed consists of, hashed, in the order the
+ * tables reference each other: the hand-written Duckburg seed is one such
+ * part, the generated rows of `medium` and `large` another
+ * (`GeneratedSeed`), and `seedIfEmpty` writes both through the same path.
+ */
+type SeedPart = GeneratedSeed;
+
+/**
+ * The hand-written seed as one part: every pre-hashed row of the domain
+ * package plus the six invoices as rows (`seedInvoices`).
+ */
+const handWrittenSeedPart: SeedPart = {
+  species: [...speciesSeed],
+  traits: [...traitsSeed],
+  persons: [...personsSeed],
+  breeders: [...breedersSeed],
+  customers: [...customersSeed],
+  animals: [...animalsSeed],
+  animalTraits: [...animalTraitsSeed],
+  invoices: seedInvoices.map((seed) => seed.invoice),
+  invoiceItems: seedInvoices.flatMap((seed) => seed.items),
+};
+
+/**
+ * A row of any table as the synchronisation of slice D3 pulls it from
+ * another node and writes it into this one: its content hash plus
+ * whatever columns the table has. The store writes it exactly as received
+ * (`writeReceivedRow`), never re-hashed and never with a new InsertHistory
+ * row, because the history rows of a change set are among its items.
+ */
+export type SyncRow = { _hash: string } & Record<string, unknown>;
+
+/**
+ * Called with every change set this store writes on its own account (an
+ * invoice issued, an animal edited, the seed), in write order. A change
+ * set received from another node is written without this call: it was
+ * announced by the node that wrote it.
+ */
+export type ChangeSetListener = (changeSet: HashedChangeSetRow) => void;
+
+/**
  * What `PetShopStore.seedIfEmpty` reports: the size it was asked for and
  * how many rows of each kind it wrote, hand-written and generated together,
  * all zero when the store already held rows. `invoicesSeeded` counts
- * invoices, not their items; `changeSetsSeeded` counts the change sets
- * written for invoices and generated entities.
+ * invoices, not their items; `changeSetsSeeded` counts the change sets,
+ * one per seeded entity (a species, a trait, a person, a breeder, a
+ * customer, an animal with its junction rows, an invoice with its items).
  */
 export type SeedReport = {
   seedSize: SeedSize;
@@ -824,6 +892,12 @@ export class PetShopStore {
    */
   private readonly tableCfgs = tablePairs.flat();
 
+  private readonly tableCfgsByKey = new Map(
+    this.tableCfgs.map((tableCfg) => [tableCfg.key, tableCfg]),
+  );
+
+  private readonly changeSetListeners = new Set<ChangeSetListener>();
+
   constructor(io: Io, options: PetShopStoreOptions = {}) {
     this.localIo = io;
     this.io = new IoSwitch(io);
@@ -847,6 +921,19 @@ export class PetShopStore {
   /** Whether row reads currently fall through to the network. */
   get readsThroughNetwork(): boolean {
     return this.io.cascading;
+  }
+
+  /**
+   * Registers a listener for every change set this store writes on its
+   * own account, which is what the `SyncAgent` announces to the other
+   * nodes (roadmap section 3.4). Returns the function that unregisters
+   * it.
+   */
+  onChangeSetWritten(listener: ChangeSetListener): () => void {
+    this.changeSetListeners.add(listener);
+    return () => {
+      this.changeSetListeners.delete(listener);
+    };
   }
 
   /**
@@ -898,18 +985,24 @@ export class PetShopStore {
    * Seeds an empty store with the given size (roadmap section 2.4) and
    * reports how many rows of each kind it wrote; a store that already
    * holds rows is left alone and reported with zero counts. The
-   * hand-written seed (every size but `none`) goes in first, through the
-   * same code path as before the generator existed: species, traits,
-   * persons, breeders, customers, then animals, the derived `animalTraits`
-   * junction rows and finally the invoices, each table after the tables its
-   * rows reference by hash. Every row is inserted on its own because
-   * `Db.insert` records only the first row of a multi-row insert in the
-   * InsertHistory. Seed invoices go through `issueInvoice`'s own write path
-   * (`writeInvoice`), so each one is written together with its items and
-   * its change set exactly like an invoice issued through the API. The
-   * generated rows of `medium` and `large` follow through
-   * `writeGeneratedSeed`. `invoicesSeeded` counts invoices, not rows;
-   * `changeSetsSeeded` counts the change sets of both parts.
+   * hand-written seed (every size but `none`) goes in first, the
+   * generated rows of `medium` and `large` after it, both through
+   * `writeSeedPart`: species, traits, persons, breeders, customers, then
+   * animals with their `animalTraits` junction rows and finally the
+   * invoices with their items, each table after the tables its rows
+   * reference by hash, one change set per entity.
+   *
+   * The seed is deterministic down to its InsertHistory rows and change
+   * sets: every history row gets its `timeId` from one `SeedClock`
+   * (`seedTimeId`, a fixed epoch plus a counter) instead of the clock of
+   * the node, so that two nodes seeding the same size hold identical
+   * rows, identical history rows and identical change set hashes, and a
+   * seed change set one node announces is a no-op on every other node
+   * (`docs/findings/change-set-sync.md`). The hand-written part comes
+   * first on every size, so a `small` store is a prefix of a `medium`
+   * one. Rows and history rows are written through `Core.import` rather
+   * than `Db.insert`, which issues its own `timeId`s and offers no way to
+   * pass one in (`docs/findings/seed-generator.md`).
    */
   async seedIfEmpty(size: SeedSize = 'small'): Promise<SeedReport> {
     const report: SeedReport = {
@@ -929,96 +1022,65 @@ export class PetShopStore {
       return report;
     }
 
-    report.speciesSeeded = await this.seedTable(speciesTableCfg, speciesSeed);
-    report.traitsSeeded = await this.seedTable(traitsTableCfg, traitsSeed);
-    report.personsSeeded = await this.seedTable(personsTableCfg, personsSeed);
-    report.breedersSeeded = await this.seedTable(
-      breedersTableCfg,
-      breedersSeed,
+    const clock = createSeedClock();
+    const parts = [handWrittenSeedPart, generatedSeedFor(size)].filter(
+      (part): part is SeedPart => part !== null,
     );
-    report.customersSeeded = await this.seedTable(
-      customersTableCfg,
-      customersSeed,
-    );
-    report.animalsSeeded = await this.seedTable(animalsTableCfg, animalsSeed);
-    report.animalTraitsSeeded = await this.seedTable(
-      animalTraitsTableCfg,
-      animalTraitsSeed,
-    );
-    for (const entry of invoicesSeed) {
-      await this.writeInvoice(entry, entry.issuedOn, entry.status);
-    }
-    report.invoicesSeeded = invoicesSeed.length;
-    report.changeSetsSeeded = invoicesSeed.length;
-
-    const generated = generatedSeedFor(size);
-    if (generated !== null) {
-      report.changeSetsSeeded += await this.writeGeneratedSeed(generated);
-      report.speciesSeeded += generated.species.length;
-      report.traitsSeeded += generated.traits.length;
-      report.personsSeeded += generated.persons.length;
-      report.breedersSeeded += generated.breeders.length;
-      report.customersSeeded += generated.customers.length;
-      report.animalsSeeded += generated.animals.length;
-      report.animalTraitsSeeded += generated.animalTraits.length;
-      report.invoicesSeeded += generated.invoices.length;
+    for (const part of parts) {
+      report.changeSetsSeeded += await this.writeSeedPart(part, clock);
+      report.speciesSeeded += part.species.length;
+      report.traitsSeeded += part.traits.length;
+      report.personsSeeded += part.persons.length;
+      report.breedersSeeded += part.breeders.length;
+      report.customersSeeded += part.customers.length;
+      report.animalsSeeded += part.animals.length;
+      report.animalTraitsSeeded += part.animalTraits.length;
+      report.invoicesSeeded += part.invoices.length;
     }
 
     return report;
   }
 
-  private async seedTable(
-    tableCfg: TableCfg,
-    rows: readonly SeedRow[],
-  ): Promise<number> {
-    const route = Route.fromFlat(tableCfg.key);
-    for (const row of rows) {
-      await this.db.insert(route, {
-        [tableCfg.key]: { _type: 'components', _data: [row] },
-      });
-    }
-
-    return rows.length;
-  }
-
   /**
-   * Writes the generated rows of a seed size the way the API paths write
-   * their rows: one `Db.insert` per row, so every row gets its InsertHistory
-   * row and the version rule of roadmap section 2.6 applies to generated
-   * data too, and one change set per logical entity naming every row it
-   * consists of, InsertHistory rows included (roadmap section 3.4): a
-   * species, a trait, a person, a breeder, a customer, an animal with its
-   * `animalTraits` junction rows, and an invoice with its items under the
-   * same `issue-invoice-<number>` id `issueInvoice` uses. Measured against
-   * `Core.import` of whole tables in `docs/findings/seed-generator.md`:
-   * the per-row path costs a few seconds for the large seed and keeps
-   * `Db`'s own bookkeeping (DAG tips, insert notifications) in step, which
-   * a bulk import bypasses. Returns the number of change sets written.
+   * Writes one part of the seed: one change set per logical entity naming
+   * every row it consists of, InsertHistory rows included (roadmap
+   * section 3.4): a species, a trait, a person, a breeder, a customer, an
+   * animal with its `animalTraits` junction rows, and an invoice with its
+   * items under the same `issue-invoice-<number>` id `issueInvoice` uses.
+   * Every row gets its own history row with the next `timeId` of the
+   * clock, so the version rule of roadmap section 2.6 applies to seeded
+   * data exactly as to written data. Returns the number of change sets
+   * written.
    */
-  private async writeGeneratedSeed(generated: GeneratedSeed): Promise<number> {
+  private async writeSeedPart(
+    part: SeedPart,
+    clock: SeedClock,
+  ): Promise<number> {
     let changeSets = 0;
     const single = async (tableCfg: TableCfg, rows: readonly SeedRow[]) => {
       for (const row of rows) {
-        await this.writeSeedEntity(seedChangeSetId(tableCfg.key, row.id), [
-          [tableCfg, row],
-        ]);
+        await this.writeSeedEntity(
+          seedChangeSetId(tableCfg.key, row.id),
+          [[tableCfg, row]],
+          clock,
+        );
         changeSets += 1;
       }
     };
 
-    await single(speciesTableCfg, generated.species);
-    await single(traitsTableCfg, generated.traits);
-    await single(personsTableCfg, generated.persons);
-    await single(breedersTableCfg, generated.breeders);
-    await single(customersTableCfg, generated.customers);
+    await single(speciesTableCfg, part.species);
+    await single(traitsTableCfg, part.traits);
+    await single(personsTableCfg, part.persons);
+    await single(breedersTableCfg, part.breeders);
+    await single(customersTableCfg, part.customers);
 
     const pairingsByAnimalRef = new Map<string, HashedAnimalTraitRow[]>();
-    for (const pairing of generated.animalTraits) {
+    for (const pairing of part.animalTraits) {
       const pairings = pairingsByAnimalRef.get(pairing.animalRef) ?? [];
       pairings.push(pairing);
       pairingsByAnimalRef.set(pairing.animalRef, pairings);
     }
-    for (const animal of generated.animals) {
+    for (const animal of part.animals) {
       await this.writeSeedEntity(
         seedChangeSetId(animalsTableCfg.key, animal.id),
         [
@@ -1027,12 +1089,13 @@ export class PetShopStore {
             (pairing): [TableCfg, SeedRow] => [animalTraitsTableCfg, pairing],
           ),
         ],
+        clock,
       );
       changeSets += 1;
     }
 
-    const itemsByInvoiceRef = groupByInvoiceRef(generated.invoiceItems);
-    for (const invoice of generated.invoices) {
+    const itemsByInvoiceRef = groupByInvoiceRef(part.invoiceItems);
+    for (const invoice of part.invoices) {
       await this.writeSeedEntity(
         issueInvoiceChangeSetId(invoice.invoiceNumber),
         [
@@ -1041,6 +1104,7 @@ export class PetShopStore {
             (item): [TableCfg, SeedRow] => [invoiceItemsTableCfg, item],
           ),
         ],
+        clock,
       );
       changeSets += 1;
     }
@@ -1049,18 +1113,62 @@ export class PetShopStore {
   }
 
   /**
-   * Writes the rows of one generated entity through `writeRow` and one
-   * change set naming all of them, in the given order.
+   * Writes the rows of one seed entity, each with a history row stamped
+   * by the clock, and one change set naming all of them, stamped by the
+   * clock as well, in the given order.
    */
   private async writeSeedEntity(
     changeSetId: string,
     rows: readonly (readonly [TableCfg, SeedRow])[],
+    clock: SeedClock,
   ): Promise<void> {
     const items: ChangeSetItem[] = [];
     for (const [tableCfg, row] of rows) {
-      items.push(...(await this.writeRow(tableCfg, row)).changeSetItems);
+      items.push(...(await this.writeSeedRow(tableCfg, row, clock.next())));
     }
-    await this.writeChangeSet(changeSetId, items);
+    await this.recordChangeSet(hashed({ id: changeSetId, items }), {
+      timeId: clock.next(),
+      origin: seedOrigin,
+      announce: true,
+    });
+  }
+
+  /**
+   * Writes one seed row and its InsertHistory row with the given `timeId`
+   * through `Core.import`, the way `Db._writeInsertHistory` writes a
+   * history row, and reports the two change set items naming them. The
+   * history row has the shape `Db.insert` would write (`timeId`,
+   * `<table>Ref`, `route`, `origin`, `previous: []`), with `origin` set
+   * to `seed`.
+   */
+  private async writeSeedRow(
+    tableCfg: TableCfg,
+    row: SeedRow,
+    rowTimeId: string,
+  ): Promise<ChangeSetItem[]> {
+    const historyTableKey = historyTableKeyOf(tableCfg.key);
+    const historyRow: InsertHistoryRow<string> = {
+      timeId: rowTimeId,
+      route: Route.fromFlat(tableCfg.key).flat,
+      origin: seedOrigin,
+      previous: [],
+    };
+    // The reference column is named after the table (`animalsRef`), a key
+    // the type only knows as a pattern.
+    (historyRow as Record<string, unknown>)[`${tableCfg.key}Ref`] = row._hash;
+    await this.db.core.import(
+      { [tableCfg.key]: { _type: 'components', _data: [row] } },
+      { validate: false },
+    );
+    await this.db.core.import(
+      { [historyTableKey]: { _type: 'insertHistory', _data: [historyRow] } },
+      { validate: false },
+    );
+
+    return [
+      { table: tableCfg.key, ref: row._hash },
+      { table: historyTableKey, ref: hashed(historyRow)._hash },
+    ];
   }
 
   /**
@@ -1874,27 +1982,18 @@ export class PetShopStore {
         tables.invoices.rows.map((row) => row.invoiceNumber),
       ),
     );
-    const invoice = hashed({
-      id: invoiceId(number),
+    const { invoice, items } = invoiceRows({
       invoiceNumber: number,
       customerRef: customer._hash,
       issuedOn,
       status,
+      lines,
     });
     const written = await this.writeRow(invoicesTableCfg, invoice);
     const changeSetItems = [...written.changeSetItems];
-    const items: HashedInvoiceItemRow[] = [];
-    for (const [index, line] of lines.entries()) {
-      const item = hashed({
-        id: invoiceItemId(number, index + 1),
-        invoiceRef: invoice._hash,
-        animalRef: line.animal._hash,
-        quantity: line.quantity,
-        unitPriceCents: line.animal.priceCents,
-      });
+    for (const item of items) {
       const writtenItem = await this.writeRow(invoiceItemsTableCfg, item);
       changeSetItems.push(...writtenItem.changeSetItems);
-      items.push(item);
     }
     const changeSet = await this.writeChangeSet(
       issueInvoiceChangeSetId(number),
@@ -1949,21 +2048,40 @@ export class PetShopStore {
   }
 
   /**
+   * Writes one change set an API path produced (an invoice issued, an
+   * animal edited) with a history row stamped now, and announces it to
+   * the listeners of `onChangeSetWritten`.
+   */
+  private writeChangeSet(
+    id: string,
+    items: ChangeSetItem[],
+  ): Promise<HashedChangeSetRow> {
+    return this.recordChangeSet(hashed({ id, items }), {
+      timeId: timeId(),
+      origin: apiOrigin,
+      announce: true,
+    });
+  }
+
+  /**
    * Writes one change set and its InsertHistory row. `Db.insert` cannot
    * write a `buffets` table in `@rljson/db` 0.0.42 (no controller for the
    * type), so both rows go through `Core.import`, the same call
    * `Db._writeInsertHistory` uses internally, with the validator switched
    * off: it would demand every referenced table in the payload, and the
-   * referenced rows were just written by `writeRow`. `IoMem` still checks
-   * the column types on write. The history row mirrors what `Db.insert`
-   * writes for a components row, with `origin` naming the call that wrote
-   * it (`docs/findings/change-sets.md`).
+   * referenced rows were written before. `IoMem` still checks the column
+   * types on write. The history row mirrors what `Db.insert` writes for a
+   * components row, with `origin` naming what wrote it
+   * (`docs/findings/change-sets.md`). Writing a change set the store
+   * already holds is a no-op for the row (content addressed) and appends
+   * a history row. With `announce`, the listeners of `onChangeSetWritten`
+   * are told about it, in write order; a received change set is recorded
+   * without announcing it.
    */
-  private async writeChangeSet(
-    id: string,
-    items: ChangeSetItem[],
+  private async recordChangeSet(
+    changeSet: HashedChangeSetRow,
+    options: { timeId: string; origin: string; announce: boolean },
   ): Promise<HashedChangeSetRow> {
-    const changeSet = hashed({ id, items });
     await this.db.core.import(
       {
         [changeSetsTableCfg.key]: { _type: 'buffets', _data: [changeSet] },
@@ -1976,10 +2094,10 @@ export class PetShopStore {
           _type: 'insertHistory',
           _data: [
             {
-              timeId: timeId(),
+              timeId: options.timeId,
               changeSetsRef: changeSet._hash,
               route: changeSetsRoute.flat,
-              origin: 'core.import',
+              origin: options.origin,
               previous: [],
             },
           ],
@@ -1987,8 +2105,156 @@ export class PetShopStore {
       },
       { validate: false },
     );
+    if (options.announce) {
+      for (const listener of this.changeSetListeners) {
+        listener(changeSet);
+      }
+    }
 
     return changeSet;
+  }
+
+  /**
+   * Whether this store holds the change set with this hash completely:
+   * written by itself or received with every item, which is when a
+   * change set gets its InsertHistory row here. The change set row alone
+   * proves nothing, since a pull that broke off after the change set row
+   * leaves that row behind. Read from the local store only.
+   */
+  async holdsChangeSet(hash: string): Promise<boolean> {
+    if (!isSafeWhereValue(hash)) {
+      return false;
+    }
+    const rljson = await this.localIo.readRows({
+      table: changeSetsInsertHistoryTableCfg.key,
+      where: { changeSetsRef: hash },
+    });
+    return rljson[changeSetsInsertHistoryTableCfg.key]._data.length > 0;
+  }
+
+  /**
+   * Whether the local store holds the row with this hash in this table,
+   * without asking the network.
+   */
+  async hasLocalRow(table: string, hash: string): Promise<boolean> {
+    if (!this.tableCfgsByKey.has(table) || !isSafeWhereValue(hash)) {
+      return false;
+    }
+    const rljson = await this.localIo.readRows({
+      table,
+      where: { _hash: hash },
+    });
+    return rljson[table]._data.length > 0;
+  }
+
+  /**
+   * Whether the local store holds the InsertHistory row with this
+   * `timeId` in the history table of `table`, without asking the network.
+   */
+  async hasLocalHistoryRow(
+    table: string,
+    historyTimeId: string,
+  ): Promise<boolean> {
+    const historyTableKey = historyTableKeyOf(table);
+    if (
+      !this.tableCfgsByKey.has(historyTableKey) ||
+      !isSafeTimeId(historyTimeId)
+    ) {
+      return false;
+    }
+    const rljson = await this.localIo.readRows({
+      table: historyTableKey,
+      where: { timeId: historyTimeId },
+    });
+    return rljson[historyTableKey]._data.length > 0;
+  }
+
+  /**
+   * The row with this hash in this table, read through the cascade: the
+   * local store first, then the hub and through the hub every other
+   * client, the row cached locally on the way back
+   * (`docs/findings/hub-transport.md`). `undefined` when no node holds it
+   * or the table is not one of this store's; throws when a peer could not
+   * answer (a closed socket, a timeout), which is the difference between
+   * "nobody has it" and "nobody could say", the difference the
+   * `SyncAgent` needs to decide between giving a change set up and
+   * retrying it. Unlike `readMatching`, this read is not silenced.
+   */
+  async pullRow(table: string, hash: string): Promise<SyncRow | undefined> {
+    if (!this.tableCfgsByKey.has(table) || !isSafeWhereValue(hash)) {
+      return undefined;
+    }
+    const rljson = await this.io.readRows({ table, where: { _hash: hash } });
+    return (rljson[table]._data as SyncRow[]).find((row) => row._hash === hash);
+  }
+
+  /**
+   * The InsertHistory row with this `timeId` in the history table of
+   * `table`, read through the cascade like `pullRow`; the way a received
+   * version's `previous` is followed to a version this node has not
+   * received yet. A read by a column other than `_hash` answers with what
+   * the reachable layers had rather than throwing when one could not
+   * answer (`docs/findings/hub-transport.md`), so a missing predecessor
+   * reads as `undefined` here.
+   */
+  async pullHistoryRow(
+    table: string,
+    historyTimeId: string,
+  ): Promise<SyncRow | undefined> {
+    const historyTableKey = historyTableKeyOf(table);
+    if (
+      !this.tableCfgsByKey.has(historyTableKey) ||
+      !isSafeTimeId(historyTimeId)
+    ) {
+      return undefined;
+    }
+    const rljson = await this.io.readRows({
+      table: historyTableKey,
+      where: { timeId: historyTimeId },
+    });
+    return (rljson[historyTableKey]._data as SyncRow[]).find(
+      (row) => row.timeId === historyTimeId,
+    );
+  }
+
+  /**
+   * Writes a row another node wrote into the local store exactly as
+   * received: no new hash, no new InsertHistory row, since the history
+   * rows of a change set are among its items and a received version must
+   * keep the `timeId` and `previous` its writer gave it, or the version
+   * rule of roadmap section 2.6 would see two versions where the network
+   * has one. A row the store already holds is left as it is (rows are
+   * content addressed), so writing what the read cascade already cached
+   * costs nothing but the write. The store checks the hash of the row on
+   * the way in (`hsh` inside `IoMem.write` and `IoSqliteNode.write`) and
+   * refuses a row whose hash does not match its content; the `SyncAgent`
+   * checks before it calls. Throws for a table this store does not have.
+   */
+  async writeReceivedRow(table: string, row: SyncRow): Promise<void> {
+    const tableCfg = this.tableCfgsByKey.get(table);
+    if (tableCfg === undefined) {
+      throw new Error(`This store has no table "${table}".`);
+    }
+    await this.localIo.write({
+      data: {
+        [table]: { _type: tableCfg.type, _data: [row] },
+      } as unknown as Rljson,
+    });
+  }
+
+  /**
+   * Records a change set received from another node once every item of
+   * it is in the local store: the change set row (a no-op when the read
+   * cascade already cached it) and a history row stamped now with the
+   * origin `sync`, which is what makes `holdsChangeSet` true. Not
+   * announced: the node that wrote it did that.
+   */
+  async recordReceivedChangeSet(changeSet: HashedChangeSetRow): Promise<void> {
+    await this.recordChangeSet(changeSet, {
+      timeId: timeId(),
+      origin: syncOrigin,
+      announce: false,
+    });
   }
 
   /**

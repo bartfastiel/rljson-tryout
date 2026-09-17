@@ -29,7 +29,13 @@ export {
   type SeedSize,
 } from './generator/seedSizes.ts';
 export { storyLength } from './generator/stories.ts';
-export { hashed } from './hashing.ts';
+export { hashMatches, hashed } from './hashing.ts';
+export {
+  invoiceRows,
+  type InvoiceDraft,
+  type InvoiceLine,
+  type InvoiceRows,
+} from './invoiceRows.ts';
 export {
   invoiceId,
   invoiceItemId,
@@ -43,11 +49,20 @@ export { breedersSeed } from './seed/breeders.ts';
 export { customersSeed } from './seed/customers.ts';
 export {
   invoicesSeed,
+  seedInvoices,
   type InvoiceSeedEntry,
   type InvoiceSeedItem,
+  type SeedInvoice,
 } from './seed/invoices.ts';
 export { personsSeed } from './seed/persons.ts';
 export { speciesSeed } from './seed/species.ts';
+export {
+  createSeedClock,
+  isSeedTimeId,
+  seedEpochMilliseconds,
+  seedTimeId,
+  type SeedClock,
+} from './seedTimeId.ts';
 export { traitsSeed } from './seed/traits.ts';
 export {
   animalTraitId,

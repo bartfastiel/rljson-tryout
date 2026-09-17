@@ -12,6 +12,7 @@ import type {
   PeerSnapshot,
   RoleOrchestrator,
 } from '../network/roleOrchestrator.ts';
+import type { SyncAgent, SyncSnapshot } from '../network/syncAgent.ts';
 import type { PetShopStore } from '../store/petShopStore.ts';
 
 /**
@@ -26,7 +27,8 @@ export type StatusNode = DirectoryEntry & { seenInTopology: boolean };
  * The answer of `GET /status` (roadmap section 2.5): this node's identity
  * and role, the hub it follows or is, the peers discovery knows, every
  * node of the environment with one flag from discovery and one from the
- * server-side probe, the state of the hub transport, and the row counts
+ * server-side probe, the state of the hub transport, the change set
+ * synchronisation (counters and the last transfers), and the row counts
  * of the store.
  */
 export type StatusReport = {
@@ -40,6 +42,7 @@ export type StatusReport = {
   peers: StatusPeer[];
   nodes: StatusNode[];
   transport: TransportSnapshot;
+  sync: SyncSnapshot;
   storage: StorageKind;
   seedSize: SeedSize;
   tables: Record<string, number>;
@@ -53,6 +56,7 @@ export type StatusSources = Readonly<{
   store: Pick<PetShopStore, 'tableRowCounts'>;
   orchestrator: Pick<RoleOrchestrator, 'snapshot'>;
   directory: Pick<NodeDirectory, 'entries' | 'nameOf'>;
+  syncAgent: Pick<SyncAgent, 'snapshot'>;
 }>;
 
 export const buildStatusReport = async ({
@@ -60,6 +64,7 @@ export const buildStatusReport = async ({
   store,
   orchestrator,
   directory,
+  syncAgent,
 }: StatusSources): Promise<StatusReport> => {
   const network = orchestrator.snapshot();
   const peers = network.peers.map((peer) => ({
@@ -90,6 +95,7 @@ export const buildStatusReport = async ({
     peers,
     nodes,
     transport: network.transport,
+    sync: syncAgent.snapshot(),
     storage: configuration.storage,
     seedSize: configuration.seedSize,
     tables: await store.tableRowCounts(),

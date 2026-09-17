@@ -1,7 +1,9 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 
 import type { Bs } from '@rljson/bs';
-import { Route } from '@rljson/rljson';
+import { Connector, Db } from '@rljson/db';
+import { createSocketPair } from '@rljson/io';
+import { Route, syncEvents, type SyncConfig } from '@rljson/rljson';
 import {
   Client,
   Server,
@@ -21,13 +23,49 @@ import {
 import type { Configuration } from '../configuration.ts';
 import { BorrowedIo } from '../store/borrowedIo.ts';
 import { domainTableCfgs, type PetShopStore } from '../store/petShopStore.ts';
+import {
+  AnnouncementOrigins,
+  ConnectorChannel,
+  type AnnouncementChannel,
+} from './announcementChannel.ts';
 
 /**
  * The one route every node relays (roadmap section 3.4): a hub of
  * `@rljson/server` multicasts references of exactly one route, and this
- * project announces change set hashes on it from slice D3 on.
+ * project announces change set hashes on it (slice D3).
  */
 export const changeSetsRoute = Route.fromFlat('changeSets');
+
+const changeSetsEvents = syncEvents(changeSetsRoute.flat);
+
+/**
+ * The sync protocol flags this node's connectors run with: the payload of
+ * every announcement carries the stable client identity, which this
+ * project sets to the node id, so that a receiver knows which node wrote
+ * the change set it pulls (`docs/findings/change-set-sync.md`). Causal
+ * ordering and acknowledgements stay off until slices D9 and D10.
+ */
+const syncConfig: SyncConfig = { includeClientIdentity: true };
+
+/**
+ * What a role transition knows about the nodes involved, from discovery:
+ * this node's own id (the identity its announcements carry) and the id of
+ * the hub (the peer a client's announcements go to). Either is `null`
+ * when unknown, which only the tests do; the connector then announces
+ * under a generated identity.
+ */
+export type RoleContext = Readonly<{
+  selfNodeId: string | null;
+  hubNodeId: string | null;
+}>;
+
+const unknownContext: RoleContext = { selfNodeId: null, hubNodeId: null };
+
+/**
+ * Called with the announcement channel of the role this node just took,
+ * and with `null` when it gave the role up.
+ */
+export type ChannelListener = (channel: AnnouncementChannel | null) => void;
 
 /**
  * What `/status` reports under `transport`: nothing while the node runs
@@ -82,12 +120,17 @@ type HubState = {
   httpServer: HttpServer;
   socketServer: SocketIoServer;
   server: Server;
+  connector: Connector;
+  channel: ConnectorChannel;
 };
 
 type ClientState = {
   role: 'client';
   hubAddress: string;
+  context: RoleContext;
   socket: ClientSocket;
+  bridge: SocketIoBridge;
+  origins: AnnouncementOrigins;
   client: Client | null;
   connected: boolean;
 };
@@ -125,6 +168,12 @@ const serverLoggerOver = (logger: FastifyBaseLogger): ServerLogger => ({
  * them. The hub port is bound by the socket.io server itself, which also
  * answers the TCP probes of the other nodes (`docs/findings/network-discovery.md`).
  *
+ * Each role also brings the node's announcement channel (slice D3): on
+ * the hub a `Connector` over a loopback socket pair the `Server` holds as
+ * a broadcast-only client, on a client the `Connector` of its `Client`;
+ * `subscribe` hands the channel of the current role to the `SyncAgent`
+ * and `null` when the node has none.
+ *
  * Transitions are queued: a role flapping faster than a bind, a connect or
  * a teardown completes still ends in the state of the last call, and the
  * stores are never handed to two roles at once.
@@ -141,6 +190,8 @@ export class HubTransport {
   private lastError: string | null = null;
   private queue: Promise<void> = Promise.resolve();
   private retry: NodeJS.Timeout | null = null;
+  private channel: AnnouncementChannel | null = null;
+  private readonly channelListeners = new Set<ChannelListener>();
 
   constructor(
     configuration: Pick<Configuration, 'hubPort'>,
@@ -164,14 +215,17 @@ export class HubTransport {
    * the socket.io server itself binds every interface. A node that is
    * already the hub keeps its server.
    */
-  becomeHub(hubAddress: string | null): Promise<void> {
+  becomeHub(
+    hubAddress: string | null,
+    context: RoleContext = unknownContext,
+  ): Promise<void> {
     return this.transition(async () => {
       if (this.state.role === 'hub') {
         this.state.hubAddress = hubAddress;
         return;
       }
       await this.tearDown();
-      await this.startHub(hubAddress);
+      await this.startHub(hubAddress, context);
     });
   }
 
@@ -183,7 +237,10 @@ export class HubTransport {
    * `Client` is attached the moment the first connection succeeds. A node
    * that is already a client of this address keeps its connection.
    */
-  becomeClient(hubAddress: string): Promise<void> {
+  becomeClient(
+    hubAddress: string,
+    context: RoleContext = unknownContext,
+  ): Promise<void> {
     return this.transition(async () => {
       if (
         this.state.role === 'client' &&
@@ -192,7 +249,7 @@ export class HubTransport {
         return;
       }
       await this.tearDown();
-      await this.startClient(hubAddress);
+      await this.startClient(hubAddress, context);
     });
   }
 
@@ -205,13 +262,34 @@ export class HubTransport {
     return this.becomeStandalone();
   }
 
+  /**
+   * Subscribes to the announcement channel of the current role: the
+   * listener is called right away with the current channel (`null` while
+   * the node has none) and again on every change. Returns the function
+   * that unsubscribes.
+   */
+  subscribe(listener: ChannelListener): () => void {
+    this.channelListeners.add(listener);
+    listener(this.channel);
+    return () => {
+      this.channelListeners.delete(listener);
+    };
+  }
+
+  private publishChannel(channel: AnnouncementChannel | null): void {
+    this.channel = channel;
+    for (const listener of this.channelListeners) {
+      listener(channel);
+    }
+  }
+
   snapshot(): TransportSnapshot {
     const state = this.state;
     if (state.role === 'hub') {
       return {
         role: 'hub',
         hubAddress: state.hubAddress,
-        connectedClients: state.server.clients.size,
+        connectedClients: HubTransport.connectedClientsOf(state.server),
         lastError: this.lastError,
       };
     }
@@ -237,6 +315,16 @@ export class HubTransport {
       : null;
   }
 
+  /**
+   * The clients connected over a socket: the `Server` counts its
+   * broadcast-only loopback socket (the hub's own channel) among its
+   * clients too, without an `IoPeer` behind it.
+   */
+  private static connectedClientsOf(server: Server): number {
+    return [...server.clients.values()].filter((client) => client.io !== null)
+      .length;
+  }
+
   private boundPortOf(httpServer: HttpServer): number | null {
     const address = httpServer.address();
     return address === null || typeof address === 'string'
@@ -253,7 +341,10 @@ export class HubTransport {
     return next;
   }
 
-  private async startHub(hubAddress: string | null): Promise<void> {
+  private async startHub(
+    hubAddress: string | null,
+    context: RoleContext,
+  ): Promise<void> {
     const server = new Server(
       changeSetsRoute,
       new BorrowedIo(this.store.localIo),
@@ -262,6 +353,7 @@ export class HubTransport {
     );
     await server.init();
     await server.createTables({ withInsertHistory: [...domainTableCfgs] });
+    const { connector, channel } = await this.openHubChannel(server, context);
 
     const httpServer = createServer();
     const socketServer = new SocketIoServer(httpServer, {
@@ -275,17 +367,60 @@ export class HubTransport {
       await this.listen(httpServer);
     } catch (error) {
       await socketServer.close();
+      connector.tearDown();
       await server.tearDown();
       throw error;
     }
 
-    this.state = { role: 'hub', hubAddress, httpServer, socketServer, server };
+    this.state = {
+      role: 'hub',
+      hubAddress,
+      httpServer,
+      socketServer,
+      server,
+      connector,
+      channel,
+    };
     this.lastError = null;
     this.store.readThrough(() => server.io);
     this.logger.info(
       { port: this.boundPort(), hubAddress },
       'hub transport serving',
     );
+    this.publishChannel(channel);
+  }
+
+  /**
+   * The hub's own announcement channel. A `Server` of `@rljson/server`
+   * has no connector: it relays what its clients announce. So the hub
+   * takes part as one more client of itself, over a loopback socket pair:
+   * the `Server` holds one end as a broadcast-only client (no `IoPeer`,
+   * since the hub's rows are its local layer already) and a `Connector`
+   * over the other end announces to every client and hears every
+   * client's announcement the `Server` forwards. The connector's `Db` is
+   * a view of the local store that nothing writes through; the connector
+   * needs one for its observers only. Modelled after the loopback the
+   * `addBroadcastSocket` documentation describes.
+   */
+  private async openHubChannel(
+    server: Server,
+    context: RoleContext,
+  ): Promise<{ connector: Connector; channel: ConnectorChannel }> {
+    const [agentSide, serverSide] = createSocketPair();
+    agentSide.connect();
+    const origins = new AnnouncementOrigins(agentSide, changeSetsEvents);
+    await server.addBroadcastSocket(serverSide);
+    const connector = new Connector(
+      new Db(new BorrowedIo(this.store.localIo)),
+      changeSetsRoute,
+      agentSide,
+      syncConfig,
+      context.selfNodeId ?? undefined,
+    );
+    return {
+      connector,
+      channel: new ConnectorChannel(connector, origins, null),
+    };
   }
 
   /**
@@ -343,9 +478,16 @@ export class HubTransport {
     try {
       await server.addSocket(new SocketIoBridge(socket));
       this.logger.info(
-        { socketId: socket.id, address, connectedClients: server.clients.size },
+        {
+          socketId: socket.id,
+          address,
+          connectedClients: HubTransport.connectedClientsOf(server),
+        },
         'client connected to hub',
       );
+      if (this.state.role === 'hub' && this.state.server === server) {
+        this.state.channel.peerJoined();
+      }
     } catch (error) {
       this.lastError = `client ${address} could not be added: ${errorMessage(error)}`;
       this.logger.error(
@@ -356,17 +498,26 @@ export class HubTransport {
     }
   }
 
-  private async startClient(hubAddress: string): Promise<void> {
+  private async startClient(
+    hubAddress: string,
+    context: RoleContext,
+  ): Promise<void> {
     const socket = connectToHub(`http://${hubAddress}`, {
       transports: ['websocket'],
       reconnection: true,
       timeout: this.connectTimeoutMs,
       forceNew: true,
     });
+    // The origins listen on the bridge before the `Client` builds its
+    // `Connector` on it, so that they see every announcement first.
+    const bridge = new SocketIoBridge(socket);
     const state: ClientState = {
       role: 'client',
       hubAddress,
+      context,
       socket,
+      bridge,
+      origins: new AnnouncementOrigins(bridge, changeSetsEvents),
       client: null,
       connected: false,
     };
@@ -421,11 +572,16 @@ export class HubTransport {
     let client: Client | null = null;
     try {
       client = new Client(
-        new SocketIoBridge(state.socket),
+        state.bridge,
         new BorrowedIo(this.store.localIo),
         this.blobs,
         changeSetsRoute,
-        { logger: serverLoggerOver(this.logger), ownsStores: false },
+        {
+          logger: serverLoggerOver(this.logger),
+          ownsStores: false,
+          syncConfig,
+          clientIdentity: state.context.selfNodeId ?? undefined,
+        },
       );
       await client.init();
       await client.createTables({ withInsertHistory: [...domainTableCfgs] });
@@ -446,6 +602,15 @@ export class HubTransport {
     this.lastError = null;
     this.store.readThrough(() => client.io ?? this.store.localIo);
     this.logger.info({ hubAddress: state.hubAddress }, 'connected to hub');
+    if (client.connector !== undefined) {
+      this.publishChannel(
+        new ConnectorChannel(
+          client.connector,
+          state.origins,
+          state.context.hubNodeId,
+        ),
+      );
+    }
   }
 
   /** Records a transport failure once per distinct message. */
@@ -464,9 +629,13 @@ export class HubTransport {
     const state = this.state;
     this.state = { role: 'standalone' };
     this.store.readThrough(null);
+    if (this.channel !== null) {
+      this.publishChannel(null);
+    }
 
     if (state.role === 'hub') {
       const port = this.boundPortOf(state.httpServer);
+      state.connector.tearDown();
       await state.server.tearDown();
       await state.socketServer.close();
       this.logger.info({ port }, 'hub transport stopped');

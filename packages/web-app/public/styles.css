@@ -573,6 +573,100 @@ a.card {
   font-size: 0.875rem;
 }
 
+.sync .facts {
+  margin-bottom: var(--space-4);
+}
+
+.transfer-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transfer {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  font-size: 0.875rem;
+}
+
+.transfer-incoming {
+  border-left-color: var(--color-paid);
+}
+
+.transfer-outgoing {
+  border-left-color: var(--color-accent);
+}
+
+.transfer p {
+  margin: 0;
+}
+
+.transfer-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.transfer-direction {
+  font-weight: 600;
+}
+
+.transfer-status {
+  margin-left: auto;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+  text-transform: capitalize;
+}
+
+.transfer-status-completed {
+  color: var(--color-paid);
+  background: var(--color-paid-tint);
+}
+
+.transfer-status-pending {
+  color: var(--color-open);
+  background: var(--color-open-tint);
+}
+
+.transfer-status-failed {
+  color: var(--color-error);
+  background: var(--color-error-tint);
+}
+
+.transfer-change-set {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.transfer-hash {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.transfer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.transfer-error {
+  color: var(--color-error);
+  overflow-wrap: anywhere;
+}
+
 /*
  * The background story is the reading-comfort surface of this view: at
  * least 17px so it stays comfortable on a phone, a relaxed line height, and

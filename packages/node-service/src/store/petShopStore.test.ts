@@ -77,7 +77,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         animalsSeeded: 10,
         animalTraitsSeeded: expectedAnimalTraits,
         invoicesSeeded: 6,
-        changeSetsSeeded: 6,
+        changeSetsSeeded: 44,
       });
       expect(await store.listSpecies()).toHaveLength(3);
       expect(await store.listTraits()).toHaveLength(8);

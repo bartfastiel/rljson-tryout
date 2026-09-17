@@ -276,7 +276,11 @@ describe('RoleOrchestrator with discovery enabled', () => {
       orchestrator.snapshot().peers.map((peer) => peer.role),
     ).toStrictEqual(['client', 'client']);
     expect(transport.calls).toStrictEqual([
-      { kind: 'hub', hubAddress: '10.0.0.13:3000' },
+      {
+        kind: 'hub',
+        hubAddress: '10.0.0.13:3000',
+        context: { selfNodeId, hubNodeId: selfNodeId },
+      },
     ]);
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -306,8 +310,16 @@ describe('RoleOrchestrator with discovery enabled', () => {
     });
     expect(orchestrator.snapshot().peers[0]?.role).toBe('hub');
     expect(transport.calls).toStrictEqual([
-      { kind: 'hub', hubAddress: '10.0.0.13:3000' },
-      { kind: 'client', hubAddress: '10.0.0.14:3000' },
+      {
+        kind: 'hub',
+        hubAddress: '10.0.0.13:3000',
+        context: { selfNodeId, hubNodeId: selfNodeId },
+      },
+      {
+        kind: 'client',
+        hubAddress: '10.0.0.14:3000',
+        context: { selfNodeId, hubNodeId: 'bbbbbbbb-peer' },
+      },
     ]);
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -333,8 +345,16 @@ describe('RoleOrchestrator with discovery enabled', () => {
     await settle();
 
     expect(transport.calls).toStrictEqual([
-      { kind: 'client', hubAddress: '10.0.0.14:3000' },
-      { kind: 'client', hubAddress: '10.0.0.15:3000' },
+      {
+        kind: 'client',
+        hubAddress: '10.0.0.14:3000',
+        context: { selfNodeId, hubNodeId: 'bbbbbbbb-peer' },
+      },
+      {
+        kind: 'client',
+        hubAddress: '10.0.0.15:3000',
+        context: { selfNodeId, hubNodeId: 'cccccccc-peer' },
+      },
     ]);
     expect(orchestrator.snapshot().transport).toMatchObject({
       role: 'client',

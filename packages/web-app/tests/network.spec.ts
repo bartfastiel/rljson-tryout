@@ -81,6 +81,52 @@ const threeNodeStatus = {
     connectedToHub: true,
     lastError: null,
   },
+  sync: {
+    announced: 45,
+    received: 2,
+    skipped: 44,
+    pending: 1,
+    failed: 0,
+    lastError: null,
+    transfers: [
+      {
+        direction: 'incoming',
+        peerNodeId: 'id-node2',
+        changeSetHash: 'Q2hhbmdlU2V0SGFzaE9uZQ',
+        changeSetId: 'issue-invoice-2026-0007',
+        tables: {
+          invoices: 1,
+          invoicesInsertHistory: 1,
+          invoiceItems: 1,
+          invoiceItemsInsertHistory: 1,
+        },
+        durationMs: 12,
+        at: '2026-09-17T10:04:58.000Z',
+        status: 'completed',
+      },
+      {
+        direction: 'outgoing',
+        peerNodeId: 'id-node2',
+        changeSetHash: 'T3V0Z29pbmdIYXNoVHdv',
+        changeSetId: 'update-animal-bowser-the-guard-dog-1789654560429:vqqc',
+        tables: { animals: 1, animalsInsertHistory: 1 },
+        durationMs: 0,
+        at: '2026-09-17T10:04:40.000Z',
+        status: 'completed',
+      },
+      {
+        direction: 'incoming',
+        peerNodeId: null,
+        changeSetHash: 'UGVuZGluZ0hhc2hUaHJlZQ',
+        changeSetId: null,
+        tables: {},
+        durationMs: 5000,
+        at: '2026-09-17T10:04:20.000Z',
+        status: 'pending',
+        error: 'pull of changeSets@UGVuZGluZ0hhc2hUaHJlZQ exceeded 5000 ms',
+      },
+    ],
+  },
   storage: 'memory',
   tables: { species: 3, animals: 10 },
 };
@@ -280,6 +326,51 @@ test.describe('with three nodes in the environment', () => {
 
     await expectNoHorizontalScroll(page);
   });
+
+  test('shows the synchronisation counters and the last transfers with their nodes', async ({
+    page,
+  }) => {
+    await page.goto('/#/network');
+
+    const section = page.locator('.network-section').filter({
+      has: page.getByRole('heading', { level: 2, name: 'Synchronisation' }),
+    });
+    await expect(section).toContainText('Announced45');
+    await expect(section).toContainText('Received2');
+    await expect(section).toContainText('Skipped44 already held');
+    await expect(section).toContainText('Pending1');
+    await expect(section).toContainText('Failed0');
+    await expect(section).toContainText('Last errornone');
+
+    const transfers = section.getByRole('list', { name: 'Last transfers' });
+    const items = transfers.locator('.transfer');
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(0)).toHaveClass(/transfer-incoming/);
+    await expect(items.nth(0)).toContainText('Received from node2');
+    await expect(items.nth(0)).toContainText('issue-invoice-2026-0007');
+    await expect(items.nth(0)).toContainText('Q2hhbmdl');
+    await expect(items.nth(0)).toContainText('4 rows in 4 tables');
+    await expect(items.nth(0)).toContainText('12 ms');
+    await expect(items.nth(0).locator('.transfer-status')).toHaveText(
+      'completed',
+    );
+    await expect(items.nth(0).locator('.transfer-rows')).toHaveAttribute(
+      'title',
+      'invoices: 1, invoicesInsertHistory: 1, invoiceItems: 1, invoiceItemsInsertHistory: 1',
+    );
+    await expect(items.nth(1)).toHaveClass(/transfer-outgoing/);
+    await expect(items.nth(1)).toContainText('Announced to node2');
+    await expect(items.nth(1)).toContainText('2 rows in 2 tables');
+    await expect(items.nth(2)).toContainText('Received from the hub');
+    await expect(items.nth(2).locator('.transfer-status')).toHaveText(
+      'pending',
+    );
+    await expect(items.nth(2)).toContainText(
+      'pull of changeSets@UGVuZGluZ0hhc2hUaHJlZQ exceeded 5000 ms',
+    );
+
+    await expectNoHorizontalScroll(page);
+  });
 });
 
 test.describe('with a single node', () => {
@@ -307,9 +398,10 @@ test.describe('with a single node', () => {
     await expect(page.locator('.node-card').first()).toContainText(
       'node-under-test (this node)',
     );
-    await expect(page.getByRole('status')).toHaveText(
+    await expect(page.getByRole('status')).toHaveText([
+      'No change sets transferred yet.',
       'No peers discovered yet.',
-    );
+    ]);
   });
 });
 

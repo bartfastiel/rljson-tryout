@@ -9,6 +9,7 @@ import type { Configuration } from '../configuration.ts';
 import { HubTransport } from '../network/hubTransport.ts';
 import { NodeDirectory } from '../network/nodeDirectory.ts';
 import { RoleOrchestrator } from '../network/roleOrchestrator.ts';
+import { SyncAgent, type SyncAgentOptions } from '../network/syncAgent.ts';
 import { buildServer } from '../server.ts';
 import type { PetShopStore } from '../store/petShopStore.ts';
 
@@ -66,26 +67,62 @@ export const buildTestTransport = (
   );
 
 /**
+ * The sync agent's timings for tests: pulls give up after two seconds,
+ * pending change sets are retried every 200 ms and the hub repeats its
+ * announcements shortly after a client joined, so that a scenario sees a
+ * retry or a repeat within its own timeout.
+ */
+export const testSyncAgentOptions: SyncAgentOptions = Object.freeze({
+  pullTimeoutMs: 2_000,
+  retryIntervalMs: 200,
+  replayDelaysMs: [100, 400],
+});
+
+/**
+ * A sync agent over the given store and transport with a silent logger,
+ * started, with the test timings.
+ */
+export const buildTestSyncAgent = (
+  store: PetShopStore,
+  transport: HubTransport,
+  options: SyncAgentOptions = {},
+): SyncAgent => {
+  const agent = new SyncAgent(store, transport, silentLogger(), {
+    ...testSyncAgentOptions,
+    ...options,
+  });
+  agent.start();
+  return agent;
+};
+
+/**
  * A server over the given store with a silent logger and network
  * components that are built but not started: `/status` then reports the
  * role `starting` with no node id and a standalone transport, and nothing
- * polls, binds or connects.
+ * polls, binds or connects. The sync agent is started, since it only
+ * listens to the store and the transport, and stopped with the server.
  */
 export const buildTestServer = (
   store: PetShopStore,
   overrides: Partial<Configuration> = {},
   transport: HubTransport = buildTestTransport(store, overrides),
+  syncAgent: SyncAgent = buildTestSyncAgent(store, transport),
 ): FastifyInstance => {
   const configuration: Configuration = Object.freeze({
     ...testConfiguration,
     ...overrides,
   });
   const logger = silentLogger();
-  return buildServer({
+  const server = buildServer({
     configuration,
     store,
     orchestrator: new RoleOrchestrator(configuration, logger, transport),
     directory: new NodeDirectory(configuration, logger),
+    syncAgent,
     logger,
   });
+  server.addHook('onClose', async () => {
+    await syncAgent.stop();
+  });
+  return server;
 };

@@ -16,6 +16,7 @@ import {
 } from '../testing/fakeDiscoveryManager.ts';
 import {
   buildTestServer,
+  buildTestSyncAgent,
   buildTestTransport,
   silentLogger,
   testConfiguration,
@@ -88,17 +89,15 @@ const serverOverFakeNetwork = async () => {
   const logger = silentLogger();
   let manager: FakeDiscoveryManager | undefined;
   const store = await seededStore();
-  const orchestrator = new RoleOrchestrator(
-    configuration,
-    logger,
-    buildTestTransport(store, configuration),
-    {
-      createDiscoveryManager: (config) => {
-        manager = new FakeDiscoveryManager(config, fakeNodeInfo('id-node1'));
-        return manager;
-      },
+  const transport = buildTestTransport(store, configuration);
+  const syncAgent = buildTestSyncAgent(store, transport);
+  cleanups.push(() => syncAgent.stop());
+  const orchestrator = new RoleOrchestrator(configuration, logger, transport, {
+    createDiscoveryManager: (config) => {
+      manager = new FakeDiscoveryManager(config, fakeNodeInfo('id-node1'));
+      return manager;
     },
-  );
+  });
   cleanups.push(() => orchestrator.stop());
   const fetchStub = vi.fn(async (input: string | URL | Request) => {
     const url = String(input);
@@ -117,7 +116,14 @@ const serverOverFakeNetwork = async () => {
   });
   cleanups.push(() => directory.stop());
   const server = closing(
-    buildServer({ configuration, store, orchestrator, directory, logger }),
+    buildServer({
+      configuration,
+      store,
+      orchestrator,
+      directory,
+      syncAgent,
+      logger,
+    }),
   );
   await orchestrator.start();
   await directory.start();
@@ -164,6 +170,15 @@ describe('GET /status', () => {
         },
       ],
       transport: { role: 'standalone', hubAddress: null, lastError: null },
+      sync: {
+        announced: 0,
+        received: 0,
+        skipped: 0,
+        pending: 0,
+        failed: 0,
+        lastError: null,
+        transfers: [],
+      },
       storage: 'memory',
       seedSize: 'small',
       tables: expect.objectContaining({

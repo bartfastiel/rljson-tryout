@@ -134,20 +134,27 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         );
 
         And(
-          'the client still lists "donald-the-third" at its old price',
+          'the client lists "donald-the-third" at 61000 cents once the change set arrived',
           async () => {
+            expect(oldPriceCents).not.toBe(61_000);
+            await until(async () => {
+              const response = await client!.server.inject({
+                method: 'GET',
+                url: '/api/animals/donald-the-third',
+              });
+              return (
+                response.json<AnimalDetailResponse>().hash === newVersion.hash
+              );
+            });
+
             const response = await client!.server.inject({
               method: 'GET',
               url: '/api/animals/donald-the-third',
             });
-
             expect(response.json<AnimalDetailResponse>()).toMatchObject({
-              priceCents: oldPriceCents,
+              hash: newVersion.hash,
+              priceCents: 61_000,
             });
-            expect(response.json<AnimalDetailResponse>().hash).not.toBe(
-              newVersion.hash,
-            );
-            expect(oldPriceCents).not.toBe(61_000);
           },
         );
       },
