@@ -79,8 +79,8 @@ resource "kubernetes_deployment_v1" "node" {
       spec {
         automount_service_account_token = false
 
-        # The root filesystem is read-only, so the node identity discovery
-        # persists under DATA_DIR lives on a volume; for the in-memory
+        # The root filesystem is read-only, so DATA_DIR, where discovery
+        # persists the node identity, has to be a volume; for the in-memory
         # store an emptyDir is enough, it lasts as long as the pod does.
         volume {
           name = "data"

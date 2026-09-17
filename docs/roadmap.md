@@ -335,21 +335,22 @@ Triggers: `pull_request` and `push` to `main`. Jobs:
 2. `image`: build and push `node-service` (and later `chaos-node`) tagged
    with the commit sha; on `main` additionally `main`. Needs
    `packages: write`.
-   `integration` (needs `image`, skipped for forks and Dependabot like the
-   deploy jobs): pulls that image and runs `pnpm --filter
-@rljson-tryout/node-service test:integration`, the Gherkin features that
-   need the three-node Docker Compose setup of `deploy/compose`, and
-   uploads the compose logs on failure.
-3. `terraform-cluster`: `plan` on pull requests, `apply` on `main`.
+3. `integration` (needs `image`, skipped for forks and Dependabot like the
+   deploy jobs, bounded by `timeout-minutes`): pulls that image and runs
+   `pnpm --filter @rljson-tryout/node-service test:integration`, the
+   Gherkin features that need the three-node Docker Compose setup of
+   `deploy/compose`, and uploads the compose logs on failure.
+4. `terraform-cluster`: `plan` on pull requests, `apply` on `main`.
    Workspace `default`. Needs `id-token: write` for AWS and `HCLOUD_TOKEN`.
-4. `terraform-workloads`: on `main` workspace `production`, on pull requests
+5. `terraform-workloads`: on `main` workspace `production`, on pull requests
    workspace `pr-<n>` with `apply` (this is the preview, skipped when the
    pull request is no longer open by the time the job starts), image tag
    from job 2, `TF_VAR_letsencrypt_email` from the repository secret.
-5. `smoke`: waits until `https://<host>/health` returns the deployed commit
-   sha, for production and preview alike, and checks that `/status`
-   reports a settled discovery role; on a pull request it then comments
-   the preview links (updating the same comment on later runs).
+6. `smoke`: waits until `https://<host>/health` returns the deployed commit
+   sha, for production and preview alike, and until `/status` reports a
+   settled discovery role (`standalone`, `hub` or `client`; `starting` is
+   a transient it waits out); on a pull request it then comments the
+   preview links (updating the same comment on later runs).
 
 `concurrency` groups: `cluster`, `workloads-production`, `workloads-pr-<n>`.
 Pull requests from forks get no secrets; that is acceptable.

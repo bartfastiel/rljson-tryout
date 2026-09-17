@@ -79,6 +79,16 @@ Shape of the library (what the roadmap's section 3.3 did not say):
   of `failThreshold` only delays the `peer-unreachable` event and the
   `_wasReachable` flag. `electHub` reads the raw probes, so one failed
   probe already removes a peer from the candidates.
+- The library exposes no "last heard from" per peer (`BroadcastLayer`
+  keeps one internally for its timeout but does not publish it), so the
+  `lastSeen` of a peer in `/status` is derived from the events: it is set
+  on `peer-joined` and advanced on every `topology-changed` for every peer
+  still in the table, which happens on every probe cycle at the latest.
+  It therefore means "discovery still lists this peer at that time", not
+  "this peer announced itself at that time": a peer that stops
+  broadcasting keeps a fresh `lastSeen` until the 15 s broadcast timeout
+  drops it with `peer-left`. `probe.measuredAt` and `probe.reachable` are
+  the signal for whether a peer actually answered.
 
 Broadcast inside a Docker bridge network:
 

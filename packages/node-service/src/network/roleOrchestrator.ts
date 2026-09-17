@@ -34,6 +34,12 @@ export type PeerProbeSnapshot = Readonly<{
  * One other node of the domain as discovery knows it: its identity, where
  * to reach its hub port, the role it holds in the current topology, when
  * this node first and last saw it, and the latest TCP probe against it.
+ * `lastSeen` means "still known to discovery at that time": it advances
+ * with every topology recompute (every probe cycle at the latest) for as
+ * long as the peer is in the peer table, and a peer that stopped
+ * announcing keeps advancing until the broadcast timeout drops it. It is
+ * not a heartbeat; `probe.measuredAt` and `probe.reachable` say whether
+ * the peer actually answered.
  */
 export type PeerSnapshot = Readonly<{
   nodeId: string;
@@ -122,8 +128,14 @@ export class RoleOrchestrator {
    * the broadcast socket, loads or creates the persistent node id and
    * starts announcing and probing. With discovery disabled the node gets a
    * fresh id for this process and stays `standalone`; no socket is opened.
+   * A second call changes nothing: the manager, its sockets and the node
+   * id of the first call stay in place.
    */
   async start(): Promise<void> {
+    if (this.selfNodeId !== null) {
+      return;
+    }
+
     if (this.configuration.discovery === 'disabled') {
       this.selfNodeId = randomUUID();
       this.logger.info(
@@ -164,15 +176,23 @@ export class RoleOrchestrator {
     );
   }
 
+  /**
+   * Stops discovery and releases the hub port; the port is released even
+   * when the manager fails to stop, so that a restart of this process can
+   * bind it again.
+   */
   async stop(): Promise<void> {
     const manager = this.manager;
     this.manager = null;
-    if (manager !== null) {
-      await manager.stop();
-      this.logger.info('discovery stopped');
+    try {
+      if (manager !== null) {
+        await manager.stop();
+        this.logger.info('discovery stopped');
+      }
+    } finally {
+      await this.hubPortTransition;
+      await this.hubPortListener.stop();
     }
-    await this.hubPortTransition;
-    await this.hubPortListener.stop();
   }
 
   snapshot(): NetworkSnapshot {

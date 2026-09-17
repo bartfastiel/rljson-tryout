@@ -117,7 +117,9 @@ with `role` one of `starting`, `standalone` (no other node of the domain
 is known, or discovery is disabled), `hub` and `client`; `peers` lists
 every node discovery knows (`nodeId`, `name` when known, `hostname`,
 `addresses`, `port`, `role`, `startedAt`, `firstSeen`, `lastSeen`,
-`probe: { reachable, latencyMs, measuredAt } | null`); `nodes` lists every
+`probe: { reachable, latencyMs, measuredAt } | null`; a peer's `lastSeen`
+advances for as long as discovery still lists it, not per heartbeat, so
+`probe.measuredAt` and `probe.reachable` tell whether it answered); `nodes` lists every
 URL of `NODE_URLS` (this node included and flagged `self`) with the name,
 node id and role it reported to this node's poll of its `/status`,
 `reachable` from that server-side poll, `seenInTopology` from discovery
@@ -171,9 +173,12 @@ nodes know each other by their container-internal URLs
 (`http://node1:8080` and so on), so the links in the header work between
 the containers but not from a browser on the host, which the header shows
 as a red browser probe marker next to a green discovery outline. Set
-`NODE_SERVICE_IMAGE` to run a pushed image instead of building one. The
-Gherkin feature `packages/node-service/features/network.feature` ("three
-nodes start, exactly one becomes hub") drives exactly this setup:
+`NODE_SERVICE_IMAGE` to run a pushed image instead of building one, together
+with `NODE_SERVICE_PULL_POLICY=missing` unless the image was pulled before
+(the compose file never pulls by default, so a local build is never
+overwritten by a registry image of the same name). The Gherkin feature
+`packages/node-service/features/network.feature` ("three nodes start,
+exactly one becomes hub") drives exactly this setup:
 
 ```sh
 pnpm --filter @rljson-tryout/node-service test:integration

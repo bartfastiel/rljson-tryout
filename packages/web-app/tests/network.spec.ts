@@ -167,7 +167,7 @@ test.describe('with three nodes in the environment', () => {
     );
   });
 
-  test('keeps the header usable: no page-wide scrolling, links at least 44 pixels tall', async ({
+  test('keeps every node of the header visible without scrolling, at least 44 pixels tall', async ({
     page,
   }) => {
     await page.goto('/');
@@ -175,15 +175,17 @@ test.describe('with three nodes in the environment', () => {
     await expect(bar.getByRole('link')).toHaveCount(2);
 
     await expectNoHorizontalScroll(page);
-    for (const link of await bar.getByRole('link').all()) {
-      const box = await boundingBoxOf(link);
+    const viewportWidth = viewportOf(page).width;
+    const entries = [
+      bar.locator('.node-badge-active'),
+      ...(await bar.getByRole('link').all()),
+    ];
+    for (const entry of entries) {
+      const box = await boundingBoxOf(entry);
       expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewportWidth);
     }
-    // The active badge stays in view even when the bar has to scroll.
-    const badge = await boundingBoxOf(bar.locator('.node-badge-active'));
-    expect(badge.height).toBeGreaterThanOrEqual(44);
-    expect(badge.x).toBeGreaterThanOrEqual(0);
-    expect(badge.x + badge.width).toBeLessThanOrEqual(viewportOf(page).width);
   });
 
   test('lists this node and every node of the environment on the network view', async ({

@@ -104,18 +104,25 @@ for base_url in "${urls[@]}"; do
 
   # Discovery has settled when the node reports a role other than
   # `starting`: `standalone` while it is the only node of its domain,
-  # `hub` or `client` once it has peers.
+  # `hub` or `client` once it has peers. `starting` is a legitimate
+  # transient (a node defers while an earlier peer has not answered a
+  # probe yet), so the role is polled with the same patience as the commit.
   status_url="${base_url}/status"
-  status_body="$(probe "${status_url}" || true)"
-  status_role="$(printf '%s' "${status_body}" | jq -r '.role // empty' 2> /dev/null || true)"
-  case "${status_role}" in
-    standalone | hub | client)
-      echo "${status_url} reports: $(printf '%s' "${status_body}" | jq -c '{nodeName, nodeId, role, hubAddress}')"
-      ;;
-    *)
-      fail "${status_url} does not report a settled role (standalone, hub or client), got: ${status_body}"
-      ;;
-  esac
+  deadline=$((SECONDS + timeout_seconds))
+  while true; do
+    status_body="$(probe "${status_url}" || true)"
+    status_role="$(printf '%s' "${status_body}" | jq -r '.role // empty' 2> /dev/null || true)"
+    case "${status_role}" in
+      standalone | hub | client)
+        break
+        ;;
+    esac
+    if ((SECONDS >= deadline)); then
+      fail "${status_url} did not report a settled role (standalone, hub or client) within ${timeout_seconds} seconds, got: ${status_body}"
+    fi
+    sleep 10
+  done
+  echo "${status_url} reports: $(printf '%s' "${status_body}" | jq -c '{nodeName, nodeId, role, hubAddress}')"
 
   species_url="${base_url}/api/species"
   species_body="$(probe "${species_url}" || true)"

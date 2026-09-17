@@ -203,6 +203,10 @@ jobs:
     needs: image
     if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
+    # The test itself is bounded by its vitest timeouts; this bounds the
+    # image pull and the install too, so a hung Docker daemon cannot hold
+    # the runner for hours.
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read

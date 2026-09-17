@@ -378,6 +378,51 @@ describe('RoleOrchestrator with discovery enabled', () => {
     await orchestrator.stop();
   });
 
+  it('keeps the first manager and node id when started twice', async () => {
+    let managersCreated = 0;
+    const { orchestrator } = orchestratorOverFake();
+    const { logger } = recordingLogger();
+    const counting = new RoleOrchestrator(configuration(), logger, {
+      createDiscoveryManager: (config: NetworkConfig) => {
+        managersCreated += 1;
+        return new FakeDiscoveryManager(config, fakeNodeInfo(selfNodeId));
+      },
+    });
+
+    await counting.start();
+    await counting.start();
+    await orchestrator.start();
+    const nodeId = orchestrator.snapshot().nodeId;
+    await orchestrator.start();
+
+    expect(managersCreated).toBe(1);
+    expect(orchestrator.snapshot().nodeId).toBe(nodeId);
+    await counting.stop();
+    await orchestrator.stop();
+  });
+
+  it('releases the hub port even when the manager fails to stop', async () => {
+    const { logger } = recordingLogger();
+    const hubPortListener = new HubPortListener();
+    let manager: FakeDiscoveryManager | undefined;
+    const orchestrator = new RoleOrchestrator(configuration(), logger, {
+      createDiscoveryManager: (config: NetworkConfig) => {
+        manager = new FakeDiscoveryManager(config, fakeNodeInfo(selfNodeId));
+        manager.stop = () => Promise.reject(new Error('socket already gone'));
+        return manager;
+      },
+      hubPortListener,
+    });
+    await orchestrator.start();
+    manager?.elect(selfNodeId, '10.0.0.13:3000');
+    await settle();
+    expect(hubPortListener.isListening()).toBe(true);
+
+    await expect(orchestrator.stop()).rejects.toThrow('socket already gone');
+
+    expect(hubPortListener.isListening()).toBe(false);
+  });
+
   it('stops the manager and reports standalone afterwards', async () => {
     const { orchestrator, manager, records } = orchestratorOverFake();
     await orchestrator.start();

@@ -31,6 +31,18 @@ const hasSettled = (status: StatusReport): boolean =>
   status.peers.length === composeNodes.length - 1 &&
   status.peers.every((peer) => peer.probe?.reachable === true);
 
+/**
+ * Every node knows every other node and all of them name the same hub. A
+ * node that missed the earliest node's first announcement is a second hub
+ * for one broadcast interval, so per-node settling alone is not enough.
+ */
+const allAgree = (statuses: StatusReport[]): boolean =>
+  statuses.every(hasSettled) &&
+  statuses.every(
+    (status) =>
+      status.hubNodeId !== null && status.hubNodeId === statuses[0].hubNodeId,
+  );
+
 const sleep = (milliseconds: number): Promise<void> =>
   new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 
@@ -67,7 +79,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
         for (;;) {
           try {
             statuses = await fetchAllStatuses();
-            if (statuses.every(hasSettled)) {
+            if (allAgree(statuses)) {
               break;
             }
           } catch (error) {

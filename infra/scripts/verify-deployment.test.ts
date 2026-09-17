@@ -22,6 +22,7 @@ type Scenario = {
   allowStagingCertificate?: string;
   redirect?: string;
   status?: string;
+  statusReadyAfter?: number;
   species?: string;
   webApp?: string;
 };
@@ -51,6 +52,7 @@ function runScript(scenario: Scenario): Outcome {
       FAKE_ISSUER:
         scenario.issuer ?? "issuer=C = US, O = Let's Encrypt, CN = YR2",
       FAKE_REDIRECT: redirect,
+      FAKE_STATUS_READY_AFTER: String(scenario.statusReadyAfter ?? 0),
       FAKE_STATUS:
         scenario.status ??
         '{"nodeName":"node1","nodeId":"id-node1","role":"standalone","hubAddress":null}',
@@ -256,17 +258,32 @@ describe('verify-deployment.sh', () => {
     );
   });
 
+  it('polls /status while the node still reports the role starting', () => {
+    const outcome = runScript({ deploymentUrls: nodeUrl, statusReadyAfter: 2 });
+
+    expect(outcome.status, outcome.output).toBe(0);
+    expect(outcome.calls.filter((call) => call === 'sleep 10')).toHaveLength(2);
+    expect(
+      outcome.calls.filter((call) => call.endsWith(`${nodeUrl}/status`)),
+    ).toHaveLength(3);
+    expect(outcome.output).toContain('"role":"standalone"');
+  });
+
   it.each([
     ['a node still starting', '{"nodeName":"node1","role":"starting"}'],
     ['no role', '{"nodeName":"node1"}'],
     ['an empty body', ''],
     ['no JSON', 'Service Unavailable'],
-  ])('fails when /status reports %s', (_, status) => {
-    const outcome = runScript({ deploymentUrls: nodeUrl, status });
+  ])('fails when /status keeps reporting %s until the timeout', (_, status) => {
+    const outcome = runScript({
+      deploymentUrls: nodeUrl,
+      status,
+      timeoutSeconds: 0,
+    });
 
     expect(outcome.status).toBe(1);
     expect(outcome.output).toContain(
-      `::error::${nodeUrl}/status does not report a settled role (standalone, hub or client), got: ${status}`,
+      `::error::${nodeUrl}/status did not report a settled role (standalone, hub or client) within 0 seconds, got: ${status}`,
     );
     expect(outcome.output).not.toContain('lists');
   });
