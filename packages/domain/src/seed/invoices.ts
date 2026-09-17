@@ -1,4 +1,8 @@
+import { invoiceRows, type InvoiceRows } from '../invoiceRows.ts';
+import { invoiceNumber, nextInvoiceSequence } from '../invoiceNumbering.ts';
 import type { InvoiceStatus } from '../tables/invoices.ts';
+import { animalsSeed } from './animals.ts';
+import { customersSeed } from './customers.ts';
 
 /**
  * One line of a seed invoice: which animal, how many.
@@ -11,14 +15,12 @@ export type InvoiceSeedItem = {
 /**
  * One invoice the seed issues, described the way `POST /api/invoices`
  * describes an invoice (customer and animals by `id`) plus the issue date
- * and the status the seed backdates it to. The seed is not a list of
- * pre-hashed rows like `customersSeed`, because an invoice is not one row:
- * it is an `invoices` row, one `invoiceItems` row per line and one
- * `changeSets` row naming all of them, and the store's own issuing code
- * is the only place that writes those together (roadmap section 3.4).
- * Feeding the seed through that same path keeps the change set discipline
- * for seed data too and derives the rows deterministically from the
- * customer and animal hashes.
+ * and the status the seed backdates it to. An invoice is not one row: it
+ * is an `invoices` row, one `invoiceItems` row per line and one
+ * `changeSets` row naming all of them, so the entries are turned into rows
+ * by `seedInvoices` below through the same `invoiceRows` builder the
+ * store's issuing code uses, which derives the rows deterministically from
+ * the customer and animal hashes.
  */
 export type InvoiceSeedEntry = {
   customerId: string;
@@ -85,3 +87,57 @@ export const invoicesSeed: readonly InvoiceSeedEntry[] = [
     ],
   },
 ];
+
+/**
+ * The rows of one seed invoice, numbered and hashed.
+ */
+export type SeedInvoice = InvoiceRows & { entry: InvoiceSeedEntry };
+
+const customerRefFor = (customerId: string): string => {
+  const customer = customersSeed.find((row) => row.id === customerId);
+  if (customer === undefined) {
+    throw new Error(`No seeded customer with id "${customerId}".`);
+  }
+  return customer._hash;
+};
+
+const animalFor = (animalId: string): { _hash: string; priceCents: number } => {
+  const animal = animalsSeed.find((row) => row.id === animalId);
+  if (animal === undefined) {
+    throw new Error(`No seeded animal with id "${animalId}".`);
+  }
+  return animal;
+};
+
+/**
+ * The six seed invoices as rows: numbered in entry order the way
+ * `issueInvoice` numbers them one after another (`2026-0001` to
+ * `2026-0006`), issued to the seeded customer version and selling the
+ * seeded animal versions at their seed price, hashed the same on every
+ * node. `PetShopStore.seedIfEmpty` writes exactly these rows.
+ */
+export const seedInvoices: readonly SeedInvoice[] = invoicesSeed.reduce<
+  SeedInvoice[]
+>((invoices, entry) => {
+  const number = invoiceNumber(
+    entry.issuedOn,
+    nextInvoiceSequence(
+      entry.issuedOn,
+      invoices.map((invoice) => invoice.invoice.invoiceNumber),
+    ),
+  );
+  invoices.push({
+    entry,
+    ...invoiceRows({
+      invoiceNumber: number,
+      customerRef: customerRefFor(entry.customerId),
+      issuedOn: entry.issuedOn,
+      status: entry.status,
+      lines: entry.items.map((item) => ({
+        animal: animalFor(item.animalId),
+        quantity: item.quantity,
+      })),
+    }),
+  });
+  return invoices;
+}, []);
