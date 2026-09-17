@@ -21,7 +21,7 @@ variable "base_domain" {
 }
 
 variable "letsencrypt_email" {
-  description = "Contact address of the ACME account at Let's Encrypt; the pipeline passes the repository variable LETSENCRYPT_EMAIL."
+  description = "Contact address of the ACME account at Let's Encrypt; the pipeline passes the repository secret LETSENCRYPT_EMAIL."
   type        = string
   sensitive   = true
 

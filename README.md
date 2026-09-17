@@ -169,7 +169,7 @@ Traefik redirects `http://` to `https://` permanently. The production
 workspace also installs cert-manager (Helm chart from
 `charts.jetstack.io`) with the ClusterIssuers `letsencrypt-staging` and
 `letsencrypt-production` (ACME HTTP-01 through the `traefik` ingress
-class, account email from the repository variable `LETSENCRYPT_EMAIL`, passed
+class, account email from the repository secret `LETSENCRYPT_EMAIL`, passed
 as `TF_VAR_letsencrypt_email`). Every ingress carries a
 `cert-manager.io/cluster-issuer` annotation and a `tls` block, so
 cert-manager keeps one certificate per host. The root module names the
@@ -177,7 +177,7 @@ issuer; it starts with `letsencrypt-staging`, whose certificates no browser
 trusts (`curl -k`), and switches to `letsencrypt-production` once a staging
 certificate has been issued on the live cluster. To reproduce under another
 domain, set the Terraform variable `base_domain` (and `image_repository`
-for another registry) and the repository variable `LETSENCRYPT_EMAIL`;
+for another registry) and the repository secret `LETSENCRYPT_EMAIL`;
 nothing else in the stage knows the domain.
 
 ## License

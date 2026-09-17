@@ -101,8 +101,8 @@ docs/
 | Preview hostnames     | `node1-pr-<n>.rljson-tryout.wer-ist-daniel-schwarz.de`, apex `pr-<n>.rljson-tryout…`                                                                                                                       |
 | Terraform state       | S3 bucket `bartfastiel-rljson-tryout-tfstate`, region `eu-central-1`, keys `cluster/terraform.tfstate` and `workloads/terraform.tfstate` (workspaces add their prefix)                                     |
 | AWS access from CI    | OIDC, role ARN in repository variable `AWS_ROLE_ARN`, no access keys                                                                                                                                       |
-| Repository secrets    | `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY`                                                                                                                                                         |
-| Repository variables  | `AWS_ROLE_ARN`, `LETSENCRYPT_EMAIL`                                                                                                                                                                        |
+| Repository secrets    | `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY`, `LETSENCRYPT_EMAIL`                                                                                                                                    |
+| Repository variables  | `AWS_ROLE_ARN`                                                                                                                                                                                             |
 | SonarCloud            | organization `bartfastiel-github`, project key `bartfastiel_rljson-tryout`, automatic analysis off                                                                                                         |
 | Secret expiry         | `SONAR_TOKEN` and `ANTHROPIC_API_KEY` expire on 2026-12-16, `HCLOUD_TOKEN` does not expire                                                                                                                 |
 | Kubernetes namespaces | `petshop` for production, `pr-<n>` for previews                                                                                                                                                            |
@@ -331,7 +331,7 @@ Triggers: `pull_request` and `push` to `main`. Jobs:
    Workspace `default`. Needs `id-token: write` for AWS and `HCLOUD_TOKEN`.
 4. `terraform-workloads`: on `main` workspace `production`, on pull requests
    workspace `pr-<n>` with `apply` (this is the preview), image tag from job
-   2, `TF_VAR_letsencrypt_email` from the repository variable. Comments the
+   2, `TF_VAR_letsencrypt_email` from the repository secret. Comments the
    preview links on the pull request (update the same comment on later runs).
 5. `smoke`: waits until `https://<host>/health` returns the deployed commit
    sha, for production and preview alike.
