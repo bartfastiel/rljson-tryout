@@ -410,8 +410,12 @@ merged.
       without being bound to the repository first (a one-time human step),
       so branch protection cannot require a Sonar status check; the quality
       gate is instead enforced inside the `checks` job with
-      `SonarSource/sonarqube-quality-gate-action` after the scan step, and
-      branch protection keeps requiring only `checks`.
+      `SonarSource/sonarqube-quality-gate-action` after the scan step, run
+      only on pull requests (a long-lived branch like `main` has no
+      new-code period on its first analysis, so the gate reports status
+      `NONE` there and the scan alone keeps running on `main` for the
+      baseline and the badges), and branch protection keeps requiring only
+      `checks`.
 - [x] **A3 Node service with health endpoint.** Depends on: A1. Package
       `node-service`: Fastify server, `GET /health` per 2.5 with version from
       `package.json` and commit from `GIT_COMMIT` env, configuration module for

@@ -28,11 +28,13 @@ this file only repeats what a contributor needs to remember day to day.
 - Behaviour that a user or another node can observe gets a Gherkin feature
   (`features/*.feature`, steps in `features/steps/`).
 - Coverage of new code stays above 80 percent; the `checks` job runs a
-  SonarCloud analysis and fails the pull request when its quality gate does
-  not pass. SonarCloud pull request decoration (a separate check and inline
-  comments from the SonarCloud GitHub app) needs that app bound to the
-  repository, a one-time step for a human; until then the gate result only
-  shows in the `checks` job log.
+  SonarCloud analysis on every push and pull request, and on a pull request
+  it additionally fails when the quality gate does not pass (a long-lived
+  branch like `main` has no new-code period on its first analysis, so the
+  gate step only runs where merging is decided). SonarCloud pull request
+  decoration (a separate check and inline comments from the SonarCloud
+  GitHub app) needs that app bound to the repository, a one-time step for a
+  human; until then the gate result only shows in the `checks` job log.
 
 ## English and naming
 
