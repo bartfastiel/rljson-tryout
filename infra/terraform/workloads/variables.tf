@@ -3,8 +3,8 @@ variable "image" {
   type        = string
 
   validation {
-    condition     = can(regex("^[a-z0-9./-]+:[A-Za-z0-9_.-]+$", var.image))
-    error_message = "The image must be a lower-case registry path followed by a colon and a tag."
+    condition     = can(regex("^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+:[A-Za-z0-9_.-]+$", var.image))
+    error_message = "The image must be a lower-case registry host with optional port, at least one path segment, a colon and a tag."
   }
 }
 

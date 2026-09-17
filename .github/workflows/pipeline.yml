@@ -354,7 +354,14 @@ jobs:
       - name: Expose the deployment URLs
         id: deployment
         if: github.event_name == 'push'
-        run: echo "urls=$(terraform output -json node_urls | jq -r 'join(" ")') $(terraform output -raw apex_url)" >> "$GITHUB_OUTPUT"
+        run: |
+          node_urls="$(terraform output -json node_urls | jq -r 'join(" ")')"
+          apex_url="$(terraform output -raw apex_url)"
+          if [ -z "${node_urls}" ] || [ -z "${apex_url}" ]; then
+            echo "::error::The Terraform outputs node_urls and apex_url must not be empty."
+            exit 1
+          fi
+          echo "urls=${node_urls} ${apex_url}" >> "$GITHUB_OUTPUT"
 
   smoke:
     name: smoke

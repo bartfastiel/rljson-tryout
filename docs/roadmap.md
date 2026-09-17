@@ -385,8 +385,9 @@ the cluster.
   (`mcr.microsoft.com/mssql/server:2022-latest`, `MSSQL_PID=Express`,
   `MSSQL_MEMORY_LIMIT_MB=1536`, 4 Gi claim) controlled by `enable_mssql`
   (true in production, false in previews).
-- Variables: `environment_name`, `image_tag`, `hostname_suffix`,
-  `enable_mssql`, `letsencrypt_email`, `seed_size`, `rljson_domain`.
+- Variables: `environment_name`, `image` (the full reference the `image`
+  job pushed), `hostname_suffix`, `enable_mssql`, `letsencrypt_email`,
+  `seed_size`, `rljson_domain`.
 
 ## 5. Slices
 
@@ -529,9 +530,9 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       one merge without manual steps and the smoke job proves it. The
       change is the field `startedAt` in `/health`. The verification lives
       in `infra/scripts/verify-deployment.sh`, which takes the URLs and the
-      expected commit from the environment so that the `smoke` job and the
-      manual `up` workflow share it; it also proves `/api/species` and the
-      web app at `/`. The `image` job hands its full image reference to
+      expected commit from the environment, so the `smoke` job and the
+      manual workflows of A13a reuse it; it also proves `/api/species` and
+      the web app at `/`. The `image` job hands its full image reference to
       `terraform-workloads` through a job output, so the registry path is
       spelled once. The concurrency groups `cluster` and
       `workloads-production` existed since A6 and A9; the workflow-level

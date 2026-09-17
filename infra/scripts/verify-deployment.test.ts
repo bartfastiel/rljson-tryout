@@ -64,21 +64,21 @@ function posixPath(path: string): string {
 }
 
 function runScript(scenario: Scenario): Outcome {
-  const binDirectory = join(temporaryDirectory, 'bin');
+  const fakeBinariesDirectory = join(temporaryDirectory, 'bin');
   const stateDirectory = join(temporaryDirectory, 'state');
   const logFile = join(temporaryDirectory, 'calls.log');
-  for (const directory of [binDirectory, stateDirectory]) {
+  for (const directory of [fakeBinariesDirectory, stateDirectory]) {
     mkdirSync(directory, { recursive: true });
   }
   for (const name of ['curl', 'openssl', 'sleep']) {
-    const target = join(binDirectory, name);
+    const target = join(fakeBinariesDirectory, name);
     copyFileSync(join(testDoublesDirectory, `${name}.sh`), target);
     chmodSync(target, 0o755);
   }
 
   const environment: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    PATH: `${binDirectory}${delimiter}${process.env['PATH'] ?? ''}`,
+    PATH: `${fakeBinariesDirectory}${delimiter}${process.env['PATH'] ?? ''}`,
     FAKE_LOG: posixPath(logFile),
     FAKE_STATE_DIRECTORY: posixPath(stateDirectory),
     FAKE_HEALTH_COMMIT: expectedCommit,
@@ -208,18 +208,19 @@ describe('verify-deployment.sh', () => {
     );
   });
 
-  it('fails when /api/species is empty or not an array', () => {
-    const empty = runScript({ deploymentUrls: nodeUrl, species: '[]' });
-    const object = runScript({
-      deploymentUrls: nodeUrl,
-      species: '{"error":"x"}',
-    });
+  it.each([
+    ['an empty array', '[]'],
+    ['an object', '{"error":"x"}'],
+    ['an empty body', ''],
+    ['no JSON', 'Service Unavailable'],
+  ])('fails when /api/species answers with %s', (_, species) => {
+    const outcome = runScript({ deploymentUrls: nodeUrl, species });
 
-    expect(empty.status).toBe(1);
-    expect(empty.output).toContain(
-      `::error::${nodeUrl}/api/species does not answer with a non-empty JSON array`,
+    expect(outcome.status).toBe(1);
+    expect(outcome.output).toContain(
+      `::error::${nodeUrl}/api/species does not answer with a non-empty JSON array, got: ${species}`,
     );
-    expect(object.status).toBe(1);
+    expect(outcome.output).not.toContain('lists');
   });
 
   it('fails when / does not serve the web app', () => {
@@ -239,6 +240,14 @@ describe('verify-deployment.sh', () => {
 
     expect(outcome.status).toBe(1);
     expect(outcome.output).toContain('DEPLOYMENT_URLS must list');
+    expect(outcome.calls).toHaveLength(0);
+  });
+
+  it('refuses to run when the deployment URLs are only whitespace', () => {
+    const outcome = runScript({ deploymentUrls: '  ' });
+
+    expect(outcome.status).toBe(1);
+    expect(outcome.output).toContain('::error::DEPLOYMENT_URLS holds no URL');
     expect(outcome.calls).toHaveLength(0);
   });
 });

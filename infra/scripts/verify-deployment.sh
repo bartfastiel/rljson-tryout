@@ -19,12 +19,24 @@ fail() {
   exit 1
 }
 
-for base_url in ${DEPLOYMENT_URLS}; do
+# shellcheck disable=SC2206 # the variable is a space separated list by contract
+urls=(${DEPLOYMENT_URLS})
+if [ "${#urls[@]}" -eq 0 ]; then
+  fail "DEPLOYMENT_URLS holds no URL"
+fi
+
+# The single-shot probes retry on transport errors; -sS keeps curl quiet
+# except for the error message that explains an empty answer.
+probe() {
+  curl -sS --retry 3 --retry-connrefused --max-time 10 "$@"
+}
+
+for base_url in "${urls[@]}"; do
   host="${base_url#https://}"
   health_url="${base_url}/health"
   deadline=$((SECONDS + timeout_seconds))
   while true; do
-    payload="$(curl -s --max-time 10 "${health_url}" || true)"
+    payload="$(curl -sS --max-time 10 "${health_url}" || true)"
     commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2> /dev/null || true)"
     if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
       break
@@ -48,7 +60,7 @@ for base_url in ${DEPLOYMENT_URLS}; do
   esac
 
   plain_http_url="http://${host}/health"
-  redirect="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
+  redirect="$(probe -o /dev/null -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
   case "${redirect}" in
     "301 ${health_url}" | "307 ${health_url}" | "308 ${health_url}")
       echo "${plain_http_url} redirects: ${redirect}"
@@ -59,14 +71,17 @@ for base_url in ${DEPLOYMENT_URLS}; do
   esac
 
   species_url="${base_url}/api/species"
-  species_count="$(curl -s --max-time 10 "${species_url}" | jq 'if type == "array" then length else -1 end' 2> /dev/null || echo -1)"
+  species_body="$(probe "${species_url}" || true)"
+  # An empty body makes jq print nothing, so the count defaults to -1.
+  species_count="$(printf '%s' "${species_body}" | jq 'if type == "array" then length else -1 end' 2> /dev/null || true)"
+  species_count="${species_count:--1}"
   if [ "${species_count}" -lt 1 ]; then
-    fail "${species_url} does not answer with a non-empty JSON array"
+    fail "${species_url} does not answer with a non-empty JSON array, got: ${species_body}"
   fi
   echo "${species_url} lists ${species_count} species"
 
   web_app_url="${base_url}/"
-  web_app_answer="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{content_type}' "${web_app_url}" || true)"
+  web_app_answer="$(probe -o /dev/null -w '%{http_code} %{content_type}' "${web_app_url}" || true)"
   case "${web_app_answer}" in
     "200 text/html"*)
       echo "${web_app_url} serves the web app: ${web_app_answer}"
