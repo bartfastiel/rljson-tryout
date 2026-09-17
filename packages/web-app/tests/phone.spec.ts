@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
-  animalCards,
   boundingBoxOf,
+  cardListItems,
   mainNavigation,
   viewportOf,
 } from './support.ts';
@@ -35,7 +35,7 @@ test('keeps the navigation at the bottom while the content scrolls', async ({
 }) => {
   await page.setViewportSize({ width: 375, height: 500 });
   await page.goto('/');
-  await expect(animalCards(page)).toHaveCount(10);
+  await expect(cardListItems(page)).toHaveCount(10);
 
   await page.evaluate(() => window.scrollTo(0, 200));
   await page.waitForFunction(() => window.scrollY === 200);
@@ -46,7 +46,7 @@ test('keeps the navigation at the bottom while the content scrolls', async ({
 
 test('does not scroll horizontally at 375 pixels', async ({ page }) => {
   await page.goto('/');
-  await expect(animalCards(page)).toHaveCount(10);
+  await expect(cardListItems(page)).toHaveCount(10);
 
   await expectNoHorizontalScroll(page);
 });
@@ -56,7 +56,7 @@ test('does not scroll horizontally on the animals view at 360 by 780 pixels', as
 }) => {
   await page.setViewportSize({ width: 360, height: 780 });
   await page.goto('/');
-  await expect(animalCards(page)).toHaveCount(10);
+  await expect(cardListItems(page)).toHaveCount(10);
 
   await expectNoHorizontalScroll(page);
 });

@@ -21,10 +21,11 @@ export const viewportOf = (page: Page): { width: number; height: number } => {
 export const mainNavigation = (page: Page): Locator =>
   page.getByRole('navigation', { name: 'Main' });
 
-export const speciesCards = (page: Page): Locator =>
-  page.getByRole('main').getByRole('listitem');
-
-export const animalCards = (page: Page): Locator =>
+/**
+ * The card list items of whichever view is currently shown in `main`
+ * (species cards on the species view, animal cards on the animals view).
+ */
+export const cardListItems = (page: Page): Locator =>
   page.getByRole('main').getByRole('listitem');
 
 export const speciesFilterChips = (page: Page): Locator =>
