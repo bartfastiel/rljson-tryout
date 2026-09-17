@@ -25,10 +25,7 @@
   <body>
     <header class="app-header">
       <a class="app-title" href="#/animals">Duckburg Pet Shop</a>
-      <p class="node-badge">
-        <span class="visually-hidden">Connected to node</span>
-        <span id="node-name"></span>
-      </p>
+      <node-bar class="node-bar"></node-bar>
     </header>
     <nav class="app-navigation" aria-label="Main">
       <ul>
@@ -106,6 +103,26 @@
               />
             </svg>
             <span>Invoices</span>
+          </a>
+        </li>
+        <li>
+          <a href="#/network" data-view="network">
+            <svg
+              viewBox="0 0 24 24"
+              width="24"
+              height="24"
+              aria-hidden="true"
+              focusable="false"
+              fill="currentColor"
+            >
+              <circle cx="12" cy="5" r="3" />
+              <circle cx="5" cy="18" r="3" />
+              <circle cx="19" cy="18" r="3" />
+              <path
+                d="M11.1 7.8h1.8v3.4l5.2 4.3-1.2 1.4L12 12.9l-4.9 4-1.2-1.4 5.2-4.3z"
+              />
+            </svg>
+            <span>Network</span>
           </a>
         </li>
       </ul>

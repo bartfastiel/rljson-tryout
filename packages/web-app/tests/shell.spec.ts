@@ -15,14 +15,14 @@ test('loads with the application name in the tab title and the header', async ({
   await expect(page.getByRole('banner')).toContainText('Duckburg Pet Shop');
 });
 
-test('shows the node name from /health in the header', async ({ page }) => {
+test('shows the node name from /status in the header', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByRole('banner')).toContainText('node-under-test');
 });
 
-test('labels the node as unknown when /health fails', async ({ page }) => {
-  await page.route('**/health', (route) => route.fulfill({ status: 503 }));
+test('labels the node as unknown when /status fails', async ({ page }) => {
+  await page.route('**/status', (route) => route.fulfill({ status: 503 }));
 
   await page.goto('/');
 
@@ -70,6 +70,9 @@ test('shows a not found page with a way back for an unknown route', async ({
   await expect(
     mainNavigation(page).getByRole('link', { name: 'Invoices' }),
   ).not.toHaveAttribute('aria-current');
+  await expect(
+    mainNavigation(page).getByRole('link', { name: 'Network' }),
+  ).not.toHaveAttribute('aria-current');
 
   await page.getByRole('link', { name: 'Back to Animals' }).click();
 
@@ -84,7 +87,7 @@ test('gives every navigation item a tap target of at least 44 by 44 CSS pixels',
 }) => {
   await page.goto('/');
   const links = mainNavigation(page).getByRole('link');
-  await expect(links).toHaveCount(4);
+  await expect(links).toHaveCount(5);
 
   for (const link of await links.all()) {
     const box = await boundingBoxOf(link);

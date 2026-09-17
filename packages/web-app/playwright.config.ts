@@ -72,6 +72,9 @@ export default defineConfig({
       HTTP_PORT: port,
       NODE_NAME: 'node-under-test',
       LOG_LEVEL: 'warn',
+      // The end-to-end tests exercise one node; discovery would bind the
+      // hub and broadcast ports of the machine running them.
+      DISCOVERY: 'disabled',
     },
   },
 });

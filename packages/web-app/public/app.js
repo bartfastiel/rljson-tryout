@@ -5,8 +5,9 @@ import './components/breeders-list.js';
 import './components/invoice-detail.js';
 import './components/invoice-form.js';
 import './components/invoices-list.js';
+import './components/network-view.js';
+import './components/node-bar.js';
 import './components/species-list.js';
-import { fetchJson } from './api.js';
 import { requiredElement } from './dom.js';
 import { pathSegmentsFromHash } from './hash-route.js';
 import { notFoundView } from './not-found-view.js';
@@ -31,6 +32,10 @@ const views = {
   invoices: {
     title: 'Invoices',
     render: () => document.createElement('invoices-list'),
+  },
+  network: {
+    title: 'Network',
+    render: () => document.createElement('network-view'),
   },
 };
 
@@ -116,16 +121,5 @@ const render = () => {
   main.replaceChildren(page.element);
 };
 
-const showNodeName = async () => {
-  const nodeName = requiredElement('#node-name');
-  try {
-    const health = /** @type {{ name: string }} */ (await fetchJson('/health'));
-    nodeName.textContent = health.name;
-  } catch {
-    nodeName.textContent = 'unknown node';
-  }
-};
-
 window.addEventListener('hashchange', render);
 render();
-await showNodeName();
