@@ -73,7 +73,8 @@ Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
 answers `GET /health` with `{ status, name, version, commit, startedAt }`.
 At start the node seeds its in-memory rljson store with three Duckburg
 species, eight Duckburg-flavoured traits, six Duckburg persons, four
-breeders and ten Duckburg animals and serves them as `GET /api/species`
+breeders, ten Duckburg animals and, derived from the animals' traits, the
+`animalTraits` junction table, and serves them as `GET /api/species`
 (`[{ id, hash, name, latinName, description }]`), `GET /api/traits`
 (`[{ id, hash, name, description }]`), `GET /api/breeders`
 (`[{ id, hash, farmName, suppliesSince, person: { id, name, city } | null }]`,
@@ -91,13 +92,14 @@ Stop it with `Ctrl-C`; it closes the server and exits cleanly.
 
 Environment variables the service understands so far:
 
-| Variable            | Default                   | Meaning                                                             |
-| ------------------- | ------------------------- | ------------------------------------------------------------------- |
-| `NODE_NAME`         | `node1`                   | Display name, reported by `/health`                                 |
-| `HTTP_PORT`         | `8080`                    | Port to listen on, must be an integer 0 to 65535                    |
-| `LOG_LEVEL`         | `info`                    | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`) |
-| `GIT_COMMIT`        | `unknown`                 | Commit shown by `/health`, set by the container build               |
-| `WEB_APP_DIRECTORY` | `packages/web-app/public` | Directory served at `/`; must exist (`/app/public` in the image)    |
+| Variable            | Default                   | Meaning                                                                                                                                                                                   |
+| ------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_NAME`         | `node1`                   | Display name, reported by `/health`                                                                                                                                                       |
+| `HTTP_PORT`         | `8080`                    | Port to listen on, must be an integer 0 to 65535                                                                                                                                          |
+| `LOG_LEVEL`         | `info`                    | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`)                                                                                                                       |
+| `GIT_COMMIT`        | `unknown`                 | Commit shown by `/health`, set by the container build                                                                                                                                     |
+| `WEB_APP_DIRECTORY` | `packages/web-app/public` | Directory served at `/`; must exist (`/app/public` in the image)                                                                                                                          |
+| `TRAIT_RELATION`    | `multi-reference`         | How the store reads which traits an animal carries: `multi-reference` (`animals.traitsRefs`) or `junction` (the `animalTraits` table, [docs/findings/n-to-m.md](docs/findings/n-to-m.md)) |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, pull request and
 commit conventions.

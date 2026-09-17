@@ -27,6 +27,7 @@ describe('readConfiguration', () => {
       logLevel: 'info',
       gitCommit: 'unknown',
       webAppDirectory: webAppPublicDirectory,
+      traitRelationMode: 'multi-reference',
     });
   });
 
@@ -37,6 +38,7 @@ describe('readConfiguration', () => {
       LOG_LEVEL: 'debug',
       GIT_COMMIT: 'abc1234',
       WEB_APP_DIRECTORY: temporaryDirectory,
+      TRAIT_RELATION: 'junction',
     });
 
     expect(configuration).toStrictEqual({
@@ -45,6 +47,7 @@ describe('readConfiguration', () => {
       logLevel: 'debug',
       gitCommit: 'abc1234',
       webAppDirectory: temporaryDirectory,
+      traitRelationMode: 'junction',
     });
   });
 
@@ -93,6 +96,26 @@ describe('readConfiguration', () => {
     expect(() => readConfiguration({ LOG_LEVEL: 'verbose' })).toThrow(
       /LOG_LEVEL must be one of/,
     );
+  });
+
+  it('defaults the trait relation mode to multi-reference', () => {
+    expect(readConfiguration({}).traitRelationMode).toBe('multi-reference');
+  });
+
+  it('accepts both documented trait relation modes', () => {
+    expect(
+      readConfiguration({ TRAIT_RELATION: 'multi-reference' })
+        .traitRelationMode,
+    ).toBe('multi-reference');
+    expect(
+      readConfiguration({ TRAIT_RELATION: 'junction' }).traitRelationMode,
+    ).toBe('junction');
+  });
+
+  it('throws a clear error for an invalid trait relation mode', () => {
+    expect(() =>
+      readConfiguration({ TRAIT_RELATION: 'materialized-view' }),
+    ).toThrow(/TRAIT_RELATION must be one of/);
   });
 
   it('resolves a relative web app directory against the working directory', () => {

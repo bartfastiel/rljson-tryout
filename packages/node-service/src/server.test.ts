@@ -19,6 +19,7 @@ const testConfiguration: Configuration = Object.freeze({
   logLevel: 'error',
   gitCommit: 'test-commit',
   webAppDirectory: resolve(packageDirectory, '..', '..', 'web-app', 'public'),
+  traitRelationMode: 'multi-reference',
 });
 
 describe('buildServer', () => {

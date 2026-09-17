@@ -50,12 +50,18 @@ describe('PetShopStore', () => {
   it('seeds the domain species, traits, persons, breeders and animals into an empty store', async () => {
     const seeded = await store.seedIfEmpty();
 
+    const expectedAnimalTraits = animalsSeed.reduce(
+      (sum, animal) => sum + animal.traitsRefs.length,
+      0,
+    );
+
     expect(seeded).toStrictEqual({
       speciesSeeded: 3,
       traitsSeeded: 8,
       personsSeeded: 6,
       breedersSeeded: 4,
       animalsSeeded: 10,
+      animalTraitsSeeded: expectedAnimalTraits,
     });
     expect(await store.listSpecies()).toHaveLength(3);
     expect(await store.listTraits()).toHaveLength(8);
@@ -74,6 +80,7 @@ describe('PetShopStore', () => {
       personsSeeded: 0,
       breedersSeeded: 0,
       animalsSeeded: 0,
+      animalTraitsSeeded: 0,
     });
     expect(await store.listSpecies()).toHaveLength(3);
     expect(await store.listTraits()).toHaveLength(8);
@@ -632,5 +639,93 @@ describe('PetShopStore', () => {
         { id: traitsSeed[0]!.id, name: traitsSeed[0]!.name },
       ]);
     });
+  });
+});
+
+/**
+ * Slice B6's acceptance criterion: the `multi-reference` mode (reading
+ * `animals.traitsRefs`, slice B5's default) and the `junction` mode (reading
+ * `animalTraits`) must answer every trait query identically. Two stores are
+ * seeded independently, one per mode; the seed is deterministic
+ * (`docs/findings/db-basics.md` and `packages/domain/src/seed/*`), so both
+ * hold the same content and any difference in the results comes from the
+ * `TraitRelation` implementation, not from the data.
+ */
+describe('trait relation modes agree', () => {
+  it('list the same animals for every seeded trait', async () => {
+    const multiReferenceStore = new PetShopStore({
+      traitRelationMode: 'multi-reference',
+    });
+    const junctionStore = new PetShopStore({ traitRelationMode: 'junction' });
+    await multiReferenceStore.initialize();
+    await junctionStore.initialize();
+    await multiReferenceStore.seedIfEmpty();
+    await junctionStore.seedIfEmpty();
+
+    try {
+      expect(traitsSeed.length).toBeGreaterThan(0);
+
+      for (const trait of traitsSeed) {
+        const multiReferenceAnimals = (
+          await multiReferenceStore.listAnimals({ traitId: trait.id })
+        )
+          .map((animal) => animal.id)
+          .sort();
+        const junctionAnimals = (
+          await junctionStore.listAnimals({ traitId: trait.id })
+        )
+          .map((animal) => animal.id)
+          .sort();
+
+        expect(junctionAnimals).toStrictEqual(multiReferenceAnimals);
+      }
+
+      const multiReferenceUnknown = await multiReferenceStore.listAnimals({
+        traitId: 'telekinesis',
+      });
+      const junctionUnknown = await junctionStore.listAnimals({
+        traitId: 'telekinesis',
+      });
+      expect(junctionUnknown).toStrictEqual(multiReferenceUnknown);
+    } finally {
+      await multiReferenceStore.close();
+      await junctionStore.close();
+    }
+  });
+
+  it('resolve the same traits for every seeded animal', async () => {
+    const multiReferenceStore = new PetShopStore({
+      traitRelationMode: 'multi-reference',
+    });
+    const junctionStore = new PetShopStore({ traitRelationMode: 'junction' });
+    await multiReferenceStore.initialize();
+    await junctionStore.initialize();
+    await multiReferenceStore.seedIfEmpty();
+    await junctionStore.seedIfEmpty();
+
+    try {
+      expect(animalsSeed.length).toBeGreaterThan(0);
+
+      for (const animal of animalsSeed) {
+        const multiReferenceDetail = await multiReferenceStore.getAnimal(
+          animal.id,
+        );
+        const junctionDetail = await junctionStore.getAnimal(animal.id);
+
+        expect(multiReferenceDetail).toBeDefined();
+        expect(
+          [...junctionDetail!.traits].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+        ).toStrictEqual(
+          [...multiReferenceDetail!.traits].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+        );
+      }
+    } finally {
+      await multiReferenceStore.close();
+      await junctionStore.close();
+    }
   });
 });
