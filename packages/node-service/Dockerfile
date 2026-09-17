@@ -40,12 +40,17 @@ ARG GIT_COMMIT
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV NODE_ENV=production
 ENV WEB_APP_DIRECTORY=/app/public
+# The node identity (and, from slice C1 on, the SQLite file and the blobs)
+# live here; Kubernetes mounts a volume at this path.
+ENV DATA_DIR=/data
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/packages/node-service/dist/main.mjs ./dist/main.mjs
 COPY --from=build --chown=node:node /repo/packages/web-app/public ./public
 COPY --from=build --chown=node:node /repo/runtime-package.json ./package.json
+RUN mkdir /data && chown node:node /data
 USER node
-EXPOSE 8080
+# HTTP API and web app, hub transport and probe target, UDP discovery.
+EXPOSE 8080 3000 41234/udp
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
     CMD node -e "fetch('http://127.0.0.1:8080/health').then(r => process.exit(r.ok ? 0 : 1))"
 CMD ["node", "dist/main.mjs"]
