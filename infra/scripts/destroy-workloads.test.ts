@@ -17,7 +17,7 @@ const scriptPath = fileURLToPath(
   new URL('./destroy-workloads.sh', import.meta.url),
 );
 const testDoublesDirectory = fileURLToPath(
-  new URL('./test-doubles/', import.meta.url),
+  new URL('./test-doubles/destroy-workloads/', import.meta.url),
 );
 
 // On Windows the first bash on PATH may be the one of the Windows Subsystem
@@ -39,6 +39,7 @@ type Scenario = {
   kubeconfigPresent?: boolean;
   apiServerAnswers?: boolean;
   failDestroyIn?: string;
+  failWorkspaceList?: boolean;
 };
 
 type Outcome = {
@@ -84,6 +85,7 @@ function runScript(scenario: Scenario): Outcome {
         scenario.kubeconfigPresent === false ? 'no' : 'yes',
       FAKE_API_ANSWERS: scenario.apiServerAnswers === false ? 'no' : 'yes',
       FAKE_FAIL_DESTROY_IN: scenario.failDestroyIn ?? '',
+      FAKE_FAIL_WORKSPACE_LIST: scenario.failWorkspaceList ? 'yes' : 'no',
       GITHUB_STEP_SUMMARY: posixPath(summaryFile),
     },
   });
@@ -227,6 +229,20 @@ describe('destroy-workloads.sh', () => {
     expect(outcome.summary).toContain(
       '| production | not touched because pr-2 failed |',
     );
+  });
+
+  it('reports a failure before the first workspace without an empty table', () => {
+    const outcome = runScript({
+      workspaces: ['default', 'production'],
+      failWorkspaceList: true,
+    });
+
+    expect(outcome.status).toBe(1);
+    expect(terraformCalls(outcome)).toEqual([]);
+    expect(outcome.summary).toContain(
+      'The script failed with exit code 1 before any workspace was touched, see the log.',
+    );
+    expect(outcome.summary).not.toContain('| Workspace | Result |');
   });
 
   it('does nothing when only the default workspace exists', () => {

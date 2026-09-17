@@ -6,6 +6,7 @@ set -euo pipefail
 #   FAKE_WORKSPACES          space separated names `workspace list` shows
 #   FAKE_KUBECONFIG_PRESENT  yes when the cluster state has the output
 #   FAKE_FAIL_DESTROY_IN     workspace whose destroy exits 1
+#   FAKE_FAIL_WORKSPACE_LIST yes makes `workspace list` exit 1
 #   FAKE_STATE_DIRECTORY     where the selected workspace is remembered
 
 log() {
@@ -23,6 +24,10 @@ fi
 
 case "${1:-} ${2:-}" in
   "workspace list")
+    if [ "${FAKE_FAIL_WORKSPACE_LIST:-no}" = yes ]; then
+      echo "Error: the fake workspace list fails on purpose" >&2
+      exit 1
+    fi
     for workspace in ${FAKE_WORKSPACES}; do
       if [ "${workspace}" = "$(current_workspace)" ]; then
         echo "* ${workspace}"

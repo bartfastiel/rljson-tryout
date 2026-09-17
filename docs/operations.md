@@ -140,8 +140,8 @@ Lost with a `Down`:
   that matters is five duplicate certificates per exact hostname set per
   week on the production issuer, so more than five `Down` and `Up` cycles in
   a week leave production without a valid certificate until the window
-  passes; the staging issuer, which slice A10 uses until it switches, has
-  far higher limits.
+  passes. The `letsencrypt-staging` issuer stays installed with far higher
+  limits; point the ingresses at it for experiments with frequent cycles.
 
 ## Recovering from trouble
 
@@ -167,7 +167,11 @@ terraform force-unlock <lock ID from the error>
 `force-unlock` removes the lock file the S3 backend keeps next to the state
 object; the state itself is untouched. Rerun the failed workflow
 afterwards. A cancelled cluster apply may also have left the server half
-provisioned; the next `Up` or `Down` reconciles it from the state.
+provisioned; the next `Up` or `Down` reconciles it from the state, unless
+the kill came between the Hetzner API call and the state write: then a
+server named `rljson-tryout` exists that no state knows, and the next `Up`
+fails with a name clash. Delete that server in the Hetzner Cloud console
+(the primary IP stays, its auto delete is off) and start `Up` again.
 
 ### The cluster was destroyed outside Terraform
 

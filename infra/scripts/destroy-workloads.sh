@@ -59,7 +59,7 @@ count_resources() {
   terraform state list 2> /dev/null | grep -vc '^data\.' || true
 }
 
-summary="## Workloads"$'\n\n'"| Workspace | Result |"$'\n'"| --- | --- |"
+summary_rows=()
 current_workspace=""
 remaining_workspaces=()
 
@@ -68,17 +68,28 @@ remaining_workspaces=()
 # which workspaces are gone and which were not touched.
 finish() {
   local exit_code=$?
-  local untouched
+  local untouched row summary
   if [ -n "${current_workspace}" ]; then
     echo "::endgroup::"
     if [ "${exit_code}" -ne 0 ]; then
       terraform workspace select default > /dev/null 2>&1 || true
-      summary+=$'\n'"| ${current_workspace} | failed with exit code ${exit_code}, see the log |"
+      summary_rows+=("| ${current_workspace} | failed with exit code ${exit_code}, see the log |")
       for untouched in "${remaining_workspaces[@]}"; do
-        summary+=$'\n'"| ${untouched} | not touched because ${current_workspace} failed |"
+        summary_rows+=("| ${untouched} | not touched because ${current_workspace} failed |")
       done
       echo "::error::Destroying workspace ${current_workspace} failed with exit code ${exit_code}."
     fi
+  fi
+  summary="## Workloads"$'\n'
+  if [ "${#summary_rows[@]}" -gt 0 ]; then
+    summary+=$'\n'"| Workspace | Result |"$'\n'"| --- | --- |"
+    for row in "${summary_rows[@]}"; do
+      summary+=$'\n'"${row}"
+    done
+  elif [ "${exit_code}" -ne 0 ]; then
+    summary+=$'\n'"The script failed with exit code ${exit_code} before any workspace was touched, see the log."
+  else
+    summary+=$'\n'"No workspace besides default existed."
   fi
   printf '%s\n' "${summary}" >> "${summary_file}"
 }
@@ -92,7 +103,6 @@ mapfile -t ordered < <(printf '%s\n' "${previews}" "${others}" "${production}" |
 
 if [ "${#ordered[@]}" -eq 0 ]; then
   echo "No workloads workspace besides default exists; nothing to destroy."
-  summary="## Workloads"$'\n\n'"No workspace besides default existed."
   exit 0
 fi
 
@@ -124,7 +134,7 @@ for index in "${!ordered[@]}"; do
     result="${resource_count} resources destroyed, workspace deleted"
   fi
   echo "${current_workspace}: ${result}"
-  summary+=$'\n'"| ${current_workspace} | ${result} |"
+  summary_rows+=("| ${current_workspace} | ${result} |")
   echo "::endgroup::"
   current_workspace=""
 done
