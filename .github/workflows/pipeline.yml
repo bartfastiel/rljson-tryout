@@ -242,43 +242,13 @@ jobs:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: terraform apply -input=false -no-color tfplan
 
-      # k3s runs the API server with anonymous authentication off, so the
-      # expected answer is a 401 Status body; a version body is accepted too.
       - name: Wait for the Kubernetes API server
         if: github.event_name == 'push'
-        run: |
-          server_ipv4="$(terraform output -raw server_ipv4)"
-          version_url="https://${server_ipv4}:6443/version"
-          deadline=$((SECONDS + 720))
-          body=""
-          until printf '%s' "${body}" | grep -Eq '"gitVersion"|"code": ?40[13]'; do
-            if ((SECONDS >= deadline)); then
-              echo "::error::${version_url} did not answer within twelve minutes. Last body: ${body}"
-              exit 1
-            fi
-            sleep 10
-            body="$(curl -sk --max-time 10 "${version_url}" || true)"
-          done
-          echo "${version_url} answered:"
-          printf '%s\n' "${body}"
+        run: ../../scripts/wait-for-kubernetes-api.sh
 
-      # The kubeconfig grants cluster administrator rights: it lives in a
-      # file with mode 600 for the duration of this step and is never printed.
       - name: Verify the kubeconfig
         if: github.event_name == 'push'
-        run: |
-          kubeconfig_file="$(mktemp)"
-          chmod 600 "${kubeconfig_file}"
-          trap 'rm -f "${kubeconfig_file}"' EXIT
-          terraform output -raw kubeconfig > "${kubeconfig_file}"
-          kubectl --kubeconfig "${kubeconfig_file}" wait node --all --for=condition=Ready --timeout=180s
-          nodes="$(kubectl --kubeconfig "${kubeconfig_file}" get nodes -o wide)"
-          printf '%s\n' "${nodes}"
-          ready_count="$(printf '%s\n' "${nodes}" | tail -n +2 | awk '$2 == "Ready"' | wc -l)"
-          if [ "${ready_count}" -ne 1 ]; then
-            echo "::error::Expected exactly one node in Ready, found ${ready_count}."
-            exit 1
-          fi
+        run: ../../scripts/verify-kubeconfig.sh
 
   terraform-workloads:
     name: terraform-workloads

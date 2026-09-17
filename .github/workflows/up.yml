@@ -19,8 +19,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Fails within seconds, before any server exists, when the run cannot
+  # succeed: started from another branch, or the pipeline of this commit
+  # has not pushed the image (yet).
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "${REF}" != "refs/heads/main" ]; then
+            echo "::error::Up runs only from main; this run was started from ${REF}."
+            exit 1
+          fi
+
+      - name: Check that the image of this commit exists
+        env:
+          IMAGE: ghcr.io/bartfastiel/rljson-tryout/node-service:${{ github.sha }}
+        run: |
+          if ! docker manifest inspect "${IMAGE}" > /dev/null; then
+            echo "::error::${IMAGE} does not exist; wait for the pipeline of this commit to push it."
+            exit 1
+          fi
+          echo "${IMAGE} exists."
+
   cluster:
     name: cluster
+    needs: preflight
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -52,41 +79,11 @@ jobs:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: terraform apply -input=false -no-color tfplan
 
-      # k3s runs the API server with anonymous authentication off, so the
-      # expected answer is a 401 Status body; a version body is accepted too.
       - name: Wait for the Kubernetes API server
-        run: |
-          server_ipv4="$(terraform output -raw server_ipv4)"
-          version_url="https://${server_ipv4}:6443/version"
-          deadline=$((SECONDS + 720))
-          body=""
-          until printf '%s' "${body}" | grep -Eq '"gitVersion"|"code": ?40[13]'; do
-            if ((SECONDS >= deadline)); then
-              echo "::error::${version_url} did not answer within twelve minutes. Last body: ${body}"
-              exit 1
-            fi
-            sleep 10
-            body="$(curl -sk --max-time 10 "${version_url}" || true)"
-          done
-          echo "${version_url} answered:"
-          printf '%s\n' "${body}"
+        run: ../../scripts/wait-for-kubernetes-api.sh
 
-      # The kubeconfig grants cluster administrator rights: it lives in a
-      # file with mode 600 for the duration of this step and is never printed.
       - name: Verify the kubeconfig
-        run: |
-          kubeconfig_file="$(mktemp)"
-          chmod 600 "${kubeconfig_file}"
-          trap 'rm -f "${kubeconfig_file}"' EXIT
-          terraform output -raw kubeconfig > "${kubeconfig_file}"
-          kubectl --kubeconfig "${kubeconfig_file}" wait node --all --for=condition=Ready --timeout=180s
-          nodes="$(kubectl --kubeconfig "${kubeconfig_file}" get nodes -o wide)"
-          printf '%s\n' "${nodes}"
-          ready_count="$(printf '%s\n' "${nodes}" | tail -n +2 | awk '$2 == "Ready"' | wc -l)"
-          if [ "${ready_count}" -ne 1 ]; then
-            echo "::error::Expected exactly one node in Ready, found ${ready_count}."
-            exit 1
-          fi
+        run: ../../scripts/verify-kubeconfig.sh
 
   workloads:
     name: workloads
@@ -110,11 +107,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      # Fails within seconds instead of after a rollout timeout when the
-      # pipeline of this commit has not pushed the image (yet).
-      - name: Check that the image of this commit exists
-        run: docker manifest inspect "ghcr.io/bartfastiel/rljson-tryout/node-service:${TF_VAR_image_tag}" > /dev/null
-
       - name: Start the Terraform session
         uses: ./.github/actions/terraform-session
         with:
@@ -128,39 +120,7 @@ jobs:
       - name: Apply
         run: terraform apply -input=false -no-color tfplan
 
-      # Traefik answers https with its self-signed default certificate until
-      # cert-manager issues real ones, hence -k; http must redirect there.
       - name: Verify the deployed commit
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
-        run: |
-          urls="$(terraform output -json node_urls | jq -r '.[]') $(terraform output -raw apex_url)"
-          for base_url in ${urls}; do
-            health_url="${base_url}/health"
-            deadline=$((SECONDS + 300))
-            while true; do
-              payload="$(curl -sk --max-time 10 "${health_url}" || true)"
-              commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2>/dev/null || true)"
-              if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
-                break
-              fi
-              if ((SECONDS >= deadline)); then
-                echo "::error::${health_url} did not report commit ${EXPECTED_COMMIT} within five minutes. Last payload: ${payload}"
-                exit 1
-              fi
-              sleep 10
-            done
-            echo "${health_url} answered:"
-            printf '%s\n' "${payload}"
-            plain_http_url="http://${base_url#https://}/health"
-            redirect="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
-            case "${redirect}" in
-              "301 ${health_url}" | "307 ${health_url}" | "308 ${health_url}")
-                echo "${plain_http_url} redirects: ${redirect}"
-                ;;
-              *)
-                echo "::error::${plain_http_url} does not redirect to ${health_url}, got: ${redirect}"
-                exit 1
-                ;;
-            esac
-          done
+        run: ../../scripts/verify-deployment.sh
