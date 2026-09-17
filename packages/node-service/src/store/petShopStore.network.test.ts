@@ -142,9 +142,9 @@ describe('PetShopStore reading through the network', () => {
   it('refuses to send an unsafe id or hash into a where clause', async () => {
     const { client } = await hubAndClient();
 
-    expect(await client.getInvoice("invoice-2026-0001' OR '1'='1")).toBe(
-      undefined,
-    );
+    expect(
+      await client.getInvoice("invoice-2026-0001' OR '1'='1"),
+    ).toBeUndefined();
     expect(
       await client.getAnimal('donald-the-third', { version: 'a b' }),
     ).toBeUndefined();
