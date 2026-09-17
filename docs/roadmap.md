@@ -450,6 +450,9 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       step. Deviation: the workflow-step proof of the role moves to A6, whose
       first `terraform init` in CI assumes the role; this slice only bootstraps
       the AWS side and confirms the script is idempotent by running it twice.
+      A6 found that GitHub issues the immutable subject
+      `repo:<owner>@<owner id>/<name>@<repository id>:...` for this repository,
+      so the script now trusts the prefix the GitHub API reports.
 - [x] **A6 Server with k3s.** Depends on: A5. Stage 1 per 4.3 with an
       ephemeral address and without the kubeconfig provisioner;
       `terraform-cluster` job. Done when
