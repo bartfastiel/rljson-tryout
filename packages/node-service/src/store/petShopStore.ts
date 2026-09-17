@@ -41,6 +41,16 @@ export type AnimalFilter = {
 };
 
 /**
+ * One animal as `PetShopStore.getAnimal` returns it: everything
+ * `AnimalWithSpecies` has, plus the full `backgroundStory`. `GET
+ * /api/animals` never includes this field so that the list stays light; only
+ * the detail endpoint does (roadmap section 2.5).
+ */
+export type AnimalDetail = AnimalWithSpecies & {
+  backgroundStory: string;
+};
+
+/**
  * The node's data: an rljson `Db` over an in-memory `IoMem`. Later slices
  * put SQLite and SQL Server behind the same `Db`.
  */
@@ -174,6 +184,59 @@ export class PetShopStore {
         : entries.filter((entry) => entry.speciesId === filter.speciesId);
 
     return filtered.sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  /**
+   * The current version of one animal with its species joined and its full
+   * `backgroundStory`, or `undefined` when no animal has this id.
+   *
+   * Filtering `db.get(animalsRoute, { id })` directly looks like the obvious
+   * approach (`docs/findings/db-basics.md`, "Get") and works for columns
+   * such as `bornOn`, but not for `id`: `ComponentController._referenceColumns`
+   * resolves to the *referenced* table's columns instead of the referencing
+   * table's own ref columns, so a `where` key that happens to also be a
+   * column of the `species` table (`id`, `name`, `_hash`) is wrongly treated
+   * as a foreign-key lookup into `species` and matches nothing (see
+   * "Filtering by id" in `docs/findings/db-basics.md`). This method
+   * therefore reuses `listAnimals`'s explicit fallback instead: read both
+   * tables in full and join them with a local `Map`, then find the animal by
+   * `id` in JavaScript. An animal whose `speciesRef` does not resolve gets
+   * `speciesId` and `speciesName` of `null`, the same tolerance
+   * `listAnimals` has.
+   */
+  async getAnimal(id: string): Promise<AnimalDetail | undefined> {
+    const [{ rljson: animalsContainer }, { rljson: speciesContainer }] =
+      await Promise.all([
+        this.db.get(animalsRoute, {}),
+        this.db.get(speciesRoute, {}),
+      ]);
+    const animalsTable = animalsContainer[
+      animalsTableCfg.key
+    ] as ComponentsTable<HashedAnimalRow>;
+    const speciesTable = speciesContainer[
+      speciesTableCfg.key
+    ] as ComponentsTable<HashedSpeciesRow>;
+
+    const animal = animalsTable._data.find((row) => row.id === id);
+    if (animal === undefined) {
+      return undefined;
+    }
+
+    const speciesByHash = new Map(
+      speciesTable._data.map((species) => [species._hash, species]),
+    );
+    const species = speciesByHash.get(animal.speciesRef);
+
+    return {
+      id: animal.id,
+      hash: animal._hash,
+      name: animal.name,
+      speciesId: species?.id ?? null,
+      speciesName: species?.name ?? null,
+      bornOn: animal.bornOn,
+      priceCents: animal.priceCents,
+      backgroundStory: animal.backgroundStory,
+    };
   }
 
   async close(): Promise<void> {

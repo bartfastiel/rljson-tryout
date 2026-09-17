@@ -18,6 +18,7 @@
     "fastify": "^5.12.5"
   },
   "devDependencies": {
+    "@amiceli/vitest-cucumber": "^8.0.0",
     "esbuild": "^0.28.2"
   }
 }

@@ -9,9 +9,11 @@ import {
  * One version of an animal as it is written to the `animals` table. The
  * content hash is added by hashing, see `HashedAnimalRow`. `speciesRef` is
  * the `_hash` of the referenced row in the `species` table: the species
- * version this animal belonged to at the time this row was written. This
- * table has no background story and no traits yet; those columns arrive in
- * slices B4 and B5.
+ * version this animal belonged to at the time this row was written.
+ * `backgroundStory` is free-form English text of any length; slice B4 is
+ * what proves a multi-thousand-character value round-trips through the
+ * store and the HTTP API unchanged. This table has no traits yet; that
+ * column arrives in slice B5.
  */
 export type AnimalRow = {
   id: string;
@@ -19,6 +21,7 @@ export type AnimalRow = {
   speciesRef: string;
   bornOn: string;
   priceCents: number;
+  backgroundStory: string;
 };
 
 /**
@@ -34,12 +37,11 @@ const stringColumn = (
 ): ColumnCfg => ({ key, type: 'string', titleLong, titleShort });
 
 /**
- * The `animals` table from roadmap section 2.6, without `breederRef`,
- * `backgroundStory` and `traitsRefs` yet. It is a root table: it has no
- * parent and `id` is the stable identity of an animal across versions.
- * `speciesRef` is a reference column: the rljson validator resolves it
- * against the `species` table and reports a dangling value as a broken
- * reference.
+ * The `animals` table from roadmap section 2.6, without `breederRef` and
+ * `traitsRefs` yet. It is a root table: it has no parent and `id` is the
+ * stable identity of an animal across versions. `speciesRef` is a reference
+ * column: the rljson validator resolves it against the `species` table and
+ * reports a dangling value as a broken reference.
  */
 export const animalsTableCfg: TableCfg = {
   key: 'animals',
@@ -65,6 +67,7 @@ export const animalsTableCfg: TableCfg = {
       titleLong: 'Price in cents',
       titleShort: 'Price',
     },
+    stringColumn('backgroundStory', 'Background story', 'Story'),
   ],
 };
 

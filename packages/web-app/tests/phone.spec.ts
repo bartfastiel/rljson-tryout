@@ -1,19 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 import {
   boundingBoxOf,
   cardListItems,
+  expectNoHorizontalScroll,
   mainNavigation,
   viewportOf,
 } from './support.ts';
-
-const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
-  const widths = await page.evaluate(() => ({
-    document: document.documentElement.scrollWidth,
-    viewport: window.innerWidth,
-  }));
-  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
-};
 
 test('docks the navigation to the bottom edge of the viewport', async ({
   page,
@@ -57,6 +50,22 @@ test('does not scroll horizontally on the animals view at 360 by 780 pixels', as
   await page.setViewportSize({ width: 360, height: 780 });
   await page.goto('/');
   await expect(cardListItems(page)).toHaveCount(10);
+
+  await expectNoHorizontalScroll(page);
+});
+
+test('reads the long background story comfortably on a phone', async ({
+  page,
+}) => {
+  await page.goto('/#/animals/sir-quackington');
+
+  const firstParagraph = page.locator('.animal-story p').first();
+  await expect(firstParagraph).toBeVisible();
+
+  const fontSize = await firstParagraph.evaluate((element) =>
+    parseFloat(getComputedStyle(element).fontSize),
+  );
+  expect(fontSize).toBeGreaterThanOrEqual(17);
 
   await expectNoHorizontalScroll(page);
 });
