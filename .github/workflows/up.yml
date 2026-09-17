@@ -25,6 +25,10 @@ jobs:
   preflight:
     name: preflight
     runs-on: ubuntu-latest
+    env:
+      IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/node-service
+    outputs:
+      image: ${{ steps.image-reference.outputs.image }}
     steps:
       - name: Check the branch
         env:
@@ -35,9 +39,16 @@ jobs:
             exit 1
           fi
 
+      # The same reference the pipeline's image job exposes: registry paths
+      # are lower-case, the repository name in the env block keeps the
+      # owner's spelling.
+      - name: Determine the image reference
+        id: image-reference
+        run: echo "image=${IMAGE_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
       - name: Check that the image of this commit exists
         env:
-          IMAGE: ghcr.io/bartfastiel/rljson-tryout/node-service:${{ github.sha }}
+          IMAGE: ${{ steps.image-reference.outputs.image }}
         run: |
           if ! docker manifest inspect "${IMAGE}" > /dev/null; then
             echo "::error::${IMAGE} does not exist; wait for the pipeline of this commit to push it."
@@ -87,7 +98,7 @@ jobs:
 
   workloads:
     name: workloads
-    needs: cluster
+    needs: [preflight, cluster]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -100,8 +111,7 @@ jobs:
       run:
         working-directory: infra/terraform/workloads
     env:
-      # The pipeline pushed this tag when the commit landed on main.
-      TF_VAR_image_tag: ${{ github.sha }}
+      TF_VAR_image: ${{ needs.preflight.outputs.image }}
       TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
     steps:
       - name: Check out repository
@@ -120,7 +130,16 @@ jobs:
       - name: Apply
         run: terraform apply -input=false -no-color tfplan
 
-      - name: Verify the deployed commit
+      # The same checks as the pipeline's smoke job, fed from the Terraform
+      # outputs of this workspace.
+      - name: Verify the deployment
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
-        run: ../../scripts/verify-deployment.sh
+        run: |
+          node_urls="$(terraform output -json node_urls | jq -r 'join(" ")')"
+          apex_url="$(terraform output -raw apex_url)"
+          if [ -z "${node_urls}" ] || [ -z "${apex_url}" ]; then
+            echo "::error::The Terraform outputs node_urls and apex_url must not be empty."
+            exit 1
+          fi
+          DEPLOYMENT_URLS="${node_urls} ${apex_url}" ../../scripts/verify-deployment.sh

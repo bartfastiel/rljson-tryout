@@ -64,8 +64,9 @@ jobs:
         working-directory: infra/terraform/workloads
     env:
       # The stage requires these variables and validates them even for a
-      # destroy, which never uses them; the image tag can be anything.
-      TF_VAR_image_tag: unused
+      # destroy, which never uses them; the image only has to look like an
+      # image reference.
+      TF_VAR_image: unused.invalid/node-service:unused
       TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
     steps:
       - name: Check out repository

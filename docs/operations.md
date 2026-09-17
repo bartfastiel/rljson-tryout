@@ -17,7 +17,8 @@ the pipeline (secrets `HCLOUD_TOKEN` and `LETSENCRYPT_EMAIL`, variable
 `workloads-production` with the pipeline, so they queue behind a deployment
 that is in flight instead of racing it, and a common group `lifecycle` keeps
 `Up` and `Down` from ever overlapping each other. The verification steps
-are the pipeline's own, shared through `infra/scripts/`.
+are the pipeline's own (`wait-for-kubernetes-api.sh`, `verify-kubeconfig.sh`
+and the smoke job's `verify-deployment.sh` under `infra/scripts/`).
 
 Two things to keep in mind while the system is down:
 
@@ -99,16 +100,16 @@ landed, so start `Up` only when the last pipeline run on `main` is green.
 The first job `preflight` fails within seconds, before any server exists,
 when the run was started from another branch or the image is missing.
 
-| Job         | Step                                                                                    | Duration                                                               |
-| ----------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `preflight` | Checks the branch and that the image of the commit exists in GHCR                       | seconds                                                                |
-| `cluster`   | Checkout, AWS role, Terraform, `init`                                                   | about 20 seconds                                                       |
-| `cluster`   | `terraform apply`: key pair, SSH key, firewall, server                                  | server created after about 15 seconds                                  |
-| `cluster`   | Still `apply`: SSH hand-off waits for cloud-init, k3s and a `Ready` node                | one to three minutes                                                   |
-| `cluster`   | Waits for the API server, verifies the kubeconfig with `kubectl`                        | about 20 seconds                                                       |
-| `workloads` | Checkout, AWS role, Terraform, `init`, workspace `production`                           | about 30 seconds                                                       |
-| `workloads` | `terraform apply`: cert-manager, issuers, namespace, deployment, service, ingresses     | one to two minutes, the rollout waits for the image pull and readiness |
-| `workloads` | Polls `/health` for the commit, waits for the Let's Encrypt issuer, checks the redirect | up to two minutes, the certificate is ordered when the ingress appears |
+| Job         | Step                                                                                              | Duration                                                               |
+| ----------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `preflight` | Checks the branch and that the image of the commit exists in GHCR                                 | seconds                                                                |
+| `cluster`   | Checkout, AWS role, Terraform, `init`                                                             | about 20 seconds                                                       |
+| `cluster`   | `terraform apply`: key pair, SSH key, firewall, server                                            | server created after about 15 seconds                                  |
+| `cluster`   | Still `apply`: SSH hand-off waits for cloud-init, k3s and a `Ready` node                          | one to three minutes                                                   |
+| `cluster`   | Waits for the API server, verifies the kubeconfig with `kubectl`                                  | about 20 seconds                                                       |
+| `workloads` | Checkout, AWS role, Terraform, `init`, workspace `production`                                     | about 30 seconds                                                       |
+| `workloads` | `terraform apply`: cert-manager, issuers, namespace, deployment, service, ingresses               | one to two minutes, the rollout waits for the image pull and readiness |
+| `workloads` | Smoke checks: `/health` reports the commit over trusted https, issuer, redirect, species, web app | up to two minutes, the certificate is ordered when the ingress appears |
 
 An `Up` takes five to eight minutes. Preview environments are not
 recreated; they come back with the next push to their pull request.
