@@ -8,3 +8,9 @@ output "ssh_private_key" {
   value       = tls_private_key.main.private_key_openssh
   sensitive   = true
 }
+
+output "kubeconfig" {
+  description = "Kubeconfig with cluster administrator rights, pointing at the public address of the server."
+  value       = replace(ssh_sensitive_resource.kubeconfig.result, "127.0.0.1", hcloud_server.main.ipv4_address)
+  sensitive   = true
+}
