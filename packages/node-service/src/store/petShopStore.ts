@@ -712,11 +712,13 @@ export class PetShopStore {
 
   /**
    * Opens the store and creates every domain table together with its
-   * InsertHistory companion. Must run before any other method. Safe to
-   * run against a store that already holds these tables and their rows,
-   * which is what every restart of a `sqlite` node does: both `Io`
-   * implementations treat `createOrExtendTable` for an unchanged table
-   * configuration as a no-op (`docs/findings/stores.md`).
+   * InsertHistory companion. Must run once, before any other method, and
+   * only once per instance: `IoSqliteNode.init()` opens a new connection
+   * on every call and leaks the previous one. Safe to run against a
+   * file that already holds these tables and their rows, which is what
+   * every restart of a `sqlite` node does: both `Io` implementations
+   * treat `createOrExtendTable` for an unchanged table configuration as a
+   * no-op (`docs/findings/stores.md`).
    */
   async initialize(): Promise<void> {
     await this.io.init();
