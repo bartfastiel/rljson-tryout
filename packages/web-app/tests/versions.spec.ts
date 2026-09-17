@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
+  animalSearchField,
   boundingBoxOf,
   cardListItems,
   expectNoHorizontalScroll,
@@ -86,6 +87,7 @@ test('edits the price through the form and sees it in the detail, the list and t
 
   await page.getByRole('link', { name: 'Back to Animals' }).click();
 
+  await animalSearchField(page).fill(name);
   const card = cardListItems(page).filter({ hasText: name });
   await expect(card).toHaveCount(1);
   await expect(card.locator('.animal-price')).toContainText(priceText);

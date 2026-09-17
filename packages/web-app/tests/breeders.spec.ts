@@ -1,14 +1,20 @@
 import { expect, test } from '@playwright/test';
 
-import { cardListItems, mainNavigation } from './support.ts';
+import {
+  animalCountLine,
+  animalCounts,
+  cardListItems,
+  listedCount,
+  mainNavigation,
+} from './support.ts';
 
-test('lists the four breeders with farm name, person, city and supplies since', async ({
+test('lists every breeder with farm name, person, city and supplies since', async ({
   page,
 }) => {
   await page.goto('/#/breeders');
 
   const cards = cardListItems(page);
-  await expect(cards).toHaveCount(4);
+  await expect(cards).toHaveCount(await listedCount(page, '/api/breeders'));
   for (const name of [
     "Grandma Duck's Farm",
     'Gearloose Workshop Hatchery',
@@ -53,7 +59,9 @@ test('a card links to the animals list filtered to that breeder', async ({
   await expect(page).toHaveURL(/#\/animals\?breeder=grandma-ducks-farm$/);
   const filtered = cardListItems(page);
   await expect(filtered).not.toHaveCount(0);
-  await expect(filtered).not.toHaveCount(10);
+  await expect(animalCountLine(page)).not.toHaveText(
+    new RegExp(`of ${(await animalCounts(page)).total} animals`),
+  );
 });
 
 test('shows an error with a retry button when the node answers 500', async ({
@@ -86,7 +94,9 @@ test('shows an error with a retry button when the node answers 500', async ({
   nodeIsBroken = false;
   await alert.getByRole('button', { name: 'Retry' }).click();
 
-  await expect(cardListItems(page)).toHaveCount(4);
+  await expect(cardListItems(page)).toHaveCount(
+    await listedCount(page, '/api/breeders'),
+  );
   await expect(alert).toHaveCount(0);
 });
 

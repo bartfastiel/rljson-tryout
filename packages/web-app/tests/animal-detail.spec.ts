@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  animalCounts,
   animalDetailTraitChips,
   cardListItems,
   speciesFilterChips,
@@ -117,7 +118,9 @@ test('shows the not-found view for an unknown animal id', async ({ page }) => {
   await page.getByRole('link', { name: 'Back to Animals' }).click();
 
   await expect(page).toHaveURL(/#\/animals$/);
-  await expect(cardListItems(page)).toHaveCount(10);
+  await expect(cardListItems(page)).toHaveCount(
+    (await animalCounts(page)).firstPage,
+  );
 });
 
 test('shows an error with a retry button when the node answers 500', async ({
@@ -187,5 +190,7 @@ test('the back link returns to the full list when opened without a filter', asyn
   await page.getByRole('link', { name: /Back to Animals/ }).click();
 
   await expect(page).toHaveURL(/#\/animals$/);
-  await expect(cardListItems(page)).toHaveCount(10);
+  await expect(cardListItems(page)).toHaveCount(
+    (await animalCounts(page)).firstPage,
+  );
 });

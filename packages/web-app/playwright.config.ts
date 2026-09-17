@@ -75,6 +75,10 @@ export default defineConfig({
       // The end-to-end tests exercise one node; discovery would bind the
       // hub and broadcast ports of the machine running them.
       DISCOVERY: 'disabled',
+      // The tests read the counts they assert from the node, so they hold
+      // for the small seed CI runs them against as for a bigger one chosen
+      // with `SEED_SIZE=medium pnpm --filter @rljson-tryout/web-app test:e2e`.
+      SEED_SIZE: process.env.SEED_SIZE ?? 'small',
     },
   },
 });

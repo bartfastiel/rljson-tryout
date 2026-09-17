@@ -574,6 +574,32 @@ a.card {
 }
 
 /*
+ * The search field sits above the filters of the animals view: full width,
+ * the same 44px control as every other input, with the count line below the
+ * filters telling how many of the matching animals are on the page and the
+ * "Load more" button after the cards fetching the next page.
+ */
+.search-field {
+  margin: 0 0 var(--space-4);
+}
+
+.search-input {
+  max-width: var(--text-measure);
+}
+
+.animal-count {
+  margin: 0 0 var(--space-3);
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.load-more {
+  width: 100%;
+  max-width: 20rem;
+  margin: var(--space-4) 0 0;
+}
+
+/*
  * The animals view combines up to three filter groups (species, traits and,
  * while a breeder is selected, a compact breeder summary) that must all fit
  * on a 360px phone without the page scrolling horizontally: each is one
@@ -915,6 +941,16 @@ a.card {
 .animal-picker-empty {
   padding: var(--space-3) 0;
   color: var(--color-text-muted);
+}
+
+.animal-picker-hint {
+  margin: 0 0 var(--space-2);
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.animal-picker-hint:empty {
+  display: none;
 }
 
 .stepper {

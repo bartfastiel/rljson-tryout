@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  animalCounts,
   averageCharactersPerLine,
   boundingBoxOf,
   cardListItems,
@@ -29,7 +30,7 @@ test('shows the navigation as a sidebar instead of a bottom bar', async ({
 test('lays the animal cards out in more than one column', async ({ page }) => {
   await page.goto('/');
   const cards = cardListItems(page);
-  await expect(cards).toHaveCount(10);
+  await expect(cards).toHaveCount((await animalCounts(page)).firstPage);
 
   const first = await boundingBoxOf(cards.nth(0));
   const second = await boundingBoxOf(cards.nth(1));

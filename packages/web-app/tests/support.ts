@@ -28,6 +28,74 @@ export const mainNavigation = (page: Page): Locator =>
 export const cardListItems = (page: Page): Locator =>
   page.getByRole('main').getByRole('listitem');
 
+/**
+ * The line above the animal cards that reads "<shown> of <total> animals".
+ */
+export const animalCountLine = (page: Page): Locator =>
+  page.locator('.animal-count');
+
+/**
+ * The "Load more" button below the animal cards, present only while the
+ * node holds more matching animals than the page shows.
+ */
+export const loadMoreButton = (page: Page): Locator =>
+  page.getByRole('button', { name: 'Load more' });
+
+export const animalSearchField = (page: Page): Locator =>
+  page.getByRole('searchbox', { name: 'Search animals' });
+
+/**
+ * How many animals the node holds in total and how many the first page of
+ * the unfiltered list shows, read from the node itself, so that a test
+ * holds for the small seed of CI (ten animals, one page) as for a local
+ * run against `SEED_SIZE=medium` (110 animals, fifty on the first page).
+ */
+export const animalCounts = async (
+  page: Page,
+): Promise<{ total: number; firstPage: number }> => {
+  const response = await page.request.get('/api/animals?limit=1');
+  const { total } = (await response.json()) as { total: number };
+  return { total, firstPage: Math.min(total, 50) };
+};
+
+/**
+ * The number of entries a list endpoint of the node serves.
+ */
+export const listedCount = async (page: Page, path: string): Promise<number> =>
+  ((await (await page.request.get(path)).json()) as unknown[]).length;
+
+/**
+ * The invoice form's animal picker list and its rows.
+ */
+export const pickerList = (page: Page): Locator =>
+  page.getByRole('list', { name: 'Animals to add' });
+
+export const pickerRows = (page: Page): Locator =>
+  pickerList(page).getByRole('listitem');
+
+/**
+ * Types a search into the invoice form's animal picker and waits until the
+ * list shows the node's answer to exactly that search (`data-search`), so
+ * that what follows never acts on the rows of the page before.
+ */
+export const searchPicker = async (page: Page, text: string): Promise<void> => {
+  await page.getByLabel('Search animals').fill(text);
+  await expect(pickerList(page)).toHaveAttribute('data-search', text);
+};
+
+/**
+ * Adds one animal to the invoice being built: searches the picker for its
+ * name and presses its Add button once the search has answered.
+ */
+export const addAnimalToInvoice = async (
+  page: Page,
+  name: string,
+): Promise<void> => {
+  await searchPicker(page, name);
+  await expect(pickerRows(page)).toHaveCount(1);
+  await page.getByRole('button', { name: `Add ${name}` }).click();
+};
+
 export const speciesFilterChips = (page: Page): Locator =>
   page.getByRole('navigation', { name: 'Filter by species' }).getByRole('link');
 

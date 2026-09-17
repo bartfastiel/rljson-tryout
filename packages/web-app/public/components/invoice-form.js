@@ -23,6 +23,38 @@ import { errorState, priceFormat, statusMessage } from '../view-helpers.js';
  */
 
 /**
+ * One page of animals as `GET /api/animals` returns it.
+ *
+ * @typedef {object} FormAnimalPage
+ * @property {FormAnimal[]} items
+ * @property {number} total
+ */
+
+/**
+ * How many animals the picker shows for one search: enough to pick from
+ * without scrolling past the items below, few enough that a store of
+ * thousands stays quick, and a hint says when the search should be
+ * narrowed. The debounce keeps the node from answering every keystroke.
+ */
+const pickerPageSize = 20;
+const searchDebounceMilliseconds = 300;
+
+/**
+ * The `/api/animals` path of one picker search: the node searches the
+ * name and the species name, case-insensitively, exactly as the animals
+ * view does.
+ *
+ * @param {string} search
+ */
+const pickerPath = (search) => {
+  const params = new URLSearchParams({ limit: String(pickerPageSize) });
+  if (search.trim() !== '') {
+    params.set('q', search.trim());
+  }
+  return `/api/animals?${params.toString()}`;
+};
+
+/**
  * One line of the invoice being built: an animal and how many of it.
  *
  * @typedef {object} FormLine
@@ -99,38 +131,26 @@ const customerSelect = (customers) => {
 };
 
 /**
- * Whether an animal matches a search text: a case-insensitive substring
- * of its name or species name, an empty search matching everything.
- *
- * @param {FormAnimal} animal
- * @param {string} search
- */
-const matchesSearch = (animal, search) => {
-  const needle = search.trim().toLowerCase();
-  return (
-    needle === '' ||
-    animal.name.toLowerCase().includes(needle) ||
-    (animal.speciesName ?? '').toLowerCase().includes(needle)
-  );
-};
-
-/**
  * @param {FormAnimal} animal
  */
 const animalMeta = (animal) =>
   `${animal.speciesName ?? 'Unknown species'} · ${priceFormat.format(animal.priceCents / 100)}`;
 
 /**
- * The form for a new invoice, built once when the customers and animals
- * are loaded. State lives in `lines` (the animals added so far, in the
- * order they were added); `renderPicker` and `renderLines` redraw only
- * their own part of the form, so the customer choice and the search text
- * survive every change and focus stays where the person left it.
+ * The form for a new invoice, built once when the customers and the first
+ * page of animals are loaded. State lives in `lines` (the animals added so
+ * far, in the order they were added); `renderPicker` and `renderLines`
+ * redraw only their own part of the form, so the customer choice and the
+ * search text survive every change and focus stays where the person left
+ * it. The picker asks the node for the animals matching the search text
+ * (`?q=`, at most `pickerPageSize` of them) once typing pauses, rather than
+ * filtering a full list in the browser, so it stays quick with thousands
+ * of animals in the store.
  *
  * @param {FormCustomer[]} customers
- * @param {FormAnimal[]} animals
+ * @param {FormAnimalPage} firstPage
  */
-const invoiceForm = (customers, animals) => {
+const invoiceForm = (customers, firstPage) => {
   /** @type {Map<string, FormLine>} */
   const lines = new Map();
 
@@ -163,18 +183,31 @@ const invoiceForm = (customers, animals) => {
     alert.hidden = true;
   };
 
-  const renderPicker = () => {
-    const matching = animals.filter((animal) =>
-      matchesSearch(animal, search.value),
-    );
-    if (matching.length === 0) {
+  const pickerHint = element('p', 'animal-picker-hint');
+  pickerHint.setAttribute('role', 'status');
+
+  /**
+   * Shows the node's answer to one search. The list records the search
+   * text it shows in `data-search`, so that a caller (and a test) can tell
+   * the rows of the search they typed from the rows of the page before.
+   *
+   * @param {FormAnimalPage} page
+   * @param {string} searchText
+   */
+  const renderPicker = (page, searchText) => {
+    pickerList.dataset.search = searchText;
+    pickerHint.textContent =
+      page.total > page.items.length
+        ? `Showing ${page.items.length} of ${page.total} animals, refine the search to see others.`
+        : '';
+    if (page.items.length === 0) {
       pickerList.replaceChildren(
         element('li', 'animal-picker-empty', 'No animal matches this search.'),
       );
       return;
     }
     pickerList.replaceChildren(
-      ...matching.map((animal) => {
+      ...page.items.map((animal) => {
         const text = element('div', 'animal-picker-text');
         text.append(
           element('span', 'animal-picker-name', animal.name),
@@ -335,7 +368,41 @@ const invoiceForm = (customers, animals) => {
     }
   });
 
-  search.addEventListener('input', renderPicker);
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let pendingSearch;
+  let latestSearch = '';
+  const searchAnimals = async () => {
+    const text = search.value;
+    latestSearch = text;
+    pickerList.setAttribute('aria-busy', 'true');
+    try {
+      const page = /** @type {FormAnimalPage} */ (
+        await fetchJson(pickerPath(text))
+      );
+      if (text === latestSearch) {
+        renderPicker(page, text.trim());
+      }
+    } catch (error) {
+      if (text === latestSearch) {
+        pickerList.replaceChildren(
+          element(
+            'li',
+            'animal-picker-empty',
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
+      }
+    } finally {
+      pickerList.removeAttribute('aria-busy');
+    }
+  };
+  search.addEventListener('input', () => {
+    clearTimeout(pendingSearch);
+    pendingSearch = setTimeout(
+      () => void searchAnimals(),
+      searchDebounceMilliseconds,
+    );
+  });
 
   const pickerTitle = element('h2', 'section-title', 'Add animals');
   pickerTitle.id = 'animal-picker-title';
@@ -344,6 +411,7 @@ const invoiceForm = (customers, animals) => {
   picker.append(
     pickerTitle,
     formField('animal-search', 'Search animals', search),
+    pickerHint,
     pickerList,
   );
 
@@ -360,18 +428,18 @@ const invoiceForm = (customers, animals) => {
     alert,
     submit,
   );
-  renderPicker();
+  renderPicker(firstPage, '');
   renderLines();
   return form;
 };
 
 /**
  * The form for a new invoice at `#/invoices/new`: choose a customer, add
- * animals from a searchable list, adjust quantities with a stepper per
- * line, watch the running total and submit. Fetches `/api/customers` and
- * `/api/animals` when it enters the document; a successful submit
- * navigates to the new invoice's detail page, a refused one shows the
- * node's message inline above the submit button.
+ * animals from a list the node searches, adjust quantities with a stepper
+ * per line, watch the running total and submit. Fetches `/api/customers`
+ * and the first page of `/api/animals` when it enters the document; a
+ * successful submit navigates to the new invoice's detail page, a refused
+ * one shows the node's message inline above the submit button.
  */
 class InvoiceForm extends HTMLElement {
   connectedCallback() {
@@ -388,7 +456,7 @@ class InvoiceForm extends HTMLElement {
     try {
       const [customers, animals] = await Promise.all([
         /** @type {Promise<FormCustomer[]>} */ (fetchJson('/api/customers')),
-        /** @type {Promise<FormAnimal[]>} */ (fetchJson('/api/animals')),
+        /** @type {Promise<FormAnimalPage>} */ (fetchJson(pickerPath(''))),
       ]);
       this.replaceChildren(
         backLink(),

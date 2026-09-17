@@ -41,18 +41,25 @@ export const hashQuery = (hash) => {
 };
 
 /**
- * The animal list filter a hash query carries: its `species`, `breeder`
- * and `trait` parameters and nothing else. An animal card puts them into
- * the detail's hash (`animals-list.js`), and every link of the detail and
- * of the edit form hands them back, so that "back" always returns to the
- * filtered list the card was opened from.
+ * The names of the animal list's hash query parameters: the three filters
+ * and the search text, the state `animals-list.js` reads from and writes to
+ * the hash.
+ */
+export const animalListParamNames = ['species', 'breeder', 'trait', 'q'];
+
+/**
+ * The animal list filter a hash query carries: its `species`, `breeder`,
+ * `trait` and `q` parameters and nothing else. An animal card puts them
+ * into the detail's hash (`animals-list.js`), and every link of the detail
+ * and of the edit form hands them back, so that "back" always returns to
+ * the filtered and searched list the card was opened from.
  *
  * @param {string} hash
  */
 export const animalFilterParams = (hash) => {
   const query = hashQuery(hash);
   const params = new URLSearchParams();
-  for (const name of ['species', 'breeder', 'trait']) {
+  for (const name of animalListParamNames) {
     const value = query.get(name);
     if (value !== null) {
       params.set(name, value);
