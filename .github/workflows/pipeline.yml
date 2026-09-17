@@ -260,3 +260,101 @@ jobs:
             echo "::error::Expected exactly one node in Ready, found ${ready_count}."
             exit 1
           fi
+
+  terraform-workloads:
+    name: terraform-workloads
+    needs: [checks, image, terraform-cluster]
+    # Forks and Dependabot receive no secrets, so they cannot plan.
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    # Applies on main queue up in one group; pull request plans are read-only
+    # and get a group of their own so they never displace an apply.
+    concurrency:
+      group: ${{ github.event_name == 'push' && 'workloads-production' || format('workloads-plan-{0}', github.event.pull_request.number) }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/workloads
+    env:
+      # The image job pushed this tag for the current commit.
+      TF_VAR_image_tag: ${{ github.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialise
+        run: terraform init -input=false
+
+      - name: Select the production workspace
+        run: terraform workspace select -or-create production
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -input=false -lock=false -no-color
+
+      - name: Plan for apply
+        if: github.event_name == 'push'
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Apply
+        if: github.event_name == 'push'
+        run: terraform apply -input=false -no-color tfplan
+
+      # Traefik answers https with its self-signed default certificate until
+      # cert-manager issues real ones, hence -k; http must redirect there.
+      - name: Verify the deployed commit
+        if: github.event_name == 'push'
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          urls="$(terraform output -json node_urls | jq -r '.[]') $(terraform output -raw apex_url)"
+          for base_url in ${urls}; do
+            health_url="${base_url}/health"
+            deadline=$((SECONDS + 300))
+            while true; do
+              payload="$(curl -sk --max-time 10 "${health_url}" || true)"
+              commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2>/dev/null || true)"
+              if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
+                break
+              fi
+              if ((SECONDS >= deadline)); then
+                echo "::error::${health_url} did not report commit ${EXPECTED_COMMIT} within five minutes. Last payload: ${payload}"
+                exit 1
+              fi
+              sleep 10
+            done
+            echo "${health_url} answered:"
+            printf '%s\n' "${payload}"
+            plain_http_url="http://${base_url#https://}/health"
+            redirect="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
+            case "${redirect}" in
+              "301 ${health_url}" | "307 ${health_url}" | "308 ${health_url}")
+                echo "${plain_http_url} redirects: ${redirect}"
+                ;;
+              *)
+                echo "::error::${plain_http_url} does not redirect to ${health_url}, got: ${redirect}"
+                exit 1
+                ;;
+            esac
+          done
