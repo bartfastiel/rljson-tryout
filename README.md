@@ -142,6 +142,32 @@ when the type does not exist or is sold out in the primary IP's location, so
 a cheaper cost-optimized type such as `cx33` can be tried safely: if the
 plan passes, it is available.
 
+### Workloads
+
+`infra/terraform/workloads` is the second stage. It reads the kubeconfig
+from the state of the cluster stage, configures the Kubernetes provider from
+it and calls the module `modules/petshop-environment` once for production:
+namespace `petshop`, one `Deployment` of the node service per node (so far
+only `node1` with the in-memory store), a `ClusterIP` service and a Traefik
+`Ingress` per node, plus an ingress for the apex host that routes to
+`node1`. The image is the one the `image` job pushed for the same commit,
+`ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`.
+
+Every push to `main` deploys automatically: the `terraform-workloads` job
+plans and applies workspace `production`, then polls `/health` until it
+reports the commit that was just pushed. Pull requests only plan. The
+hostnames follow `<node>.<base_domain>` with the apex host as an alias of
+`node1`; with the default `base_domain` that is
+
+- `https://node1.rljson-tryout.wer-ist-daniel-schwarz.de/health`
+- `https://rljson-tryout.wer-ist-daniel-schwarz.de/health`
+
+Traefik redirects `http://` to `https://` permanently. Until cert-manager
+issues certificates (slice A10), `https://` serves Traefik's self-signed
+default certificate, so `curl -k` is needed. To reproduce under another
+domain, set the Terraform variable `base_domain` (and `image_repository`
+for another registry); nothing else in the stage knows the domain.
+
 ## License
 
 [MIT](LICENSE)

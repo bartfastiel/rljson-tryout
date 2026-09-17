@@ -491,11 +491,20 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       the primary IP and a `terraform destroy` plus `apply` of the cluster
       brings the same address back. README part done in A6; the destroy and
       apply proof follows with the destroy workflow of A13.
-- [ ] **A9 First workload on the internet.** Depends on: A4, A7, A8. Stage 2
+- [x] **A9 First workload on the internet.** Depends on: A4, A7, A8. Stage 2
       with the module for node1 only (`STORAGE=memory`), plain HTTP ingress,
       `terraform-workloads` job for workspace `production`. Done when
       `http://node1.rljson-tryout.wer-ist-daniel-schwarz.de/health` returns the
-      commit sha of `main`.
+      commit sha of `main`. Deviation: the ingress has no TLS section, but
+      the Traefik bundled with k3s already redirects the `web` entrypoint to
+      `websecure` permanently, so `http://node1…/health` answers 301 or 308
+      towards `https://` and the commit is read from
+      `https://node1…/health` with `curl -k` (Traefik's self-signed default
+      certificate until A10 adds cert-manager); the verification step of the
+      pipeline checks both. The module takes no `rljson_domain` variable yet
+      because the service does not read `RLJSON_DOMAIN`; the variable joins
+      with the slice that introduces it, together with `STORAGE` and
+      `SEED_SIZE`.
 - [ ] **A10 TLS.** Depends on: A9. cert-manager, both issuers, ingress with
       TLS, HTTP redirect. Verify with the staging issuer first, then switch to
       production in the same pull request once the staging certificate was
