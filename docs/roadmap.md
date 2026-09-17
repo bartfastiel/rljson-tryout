@@ -470,9 +470,14 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       regular-performance `cpx32` (variable `server_type`, 0.0569 EUR per
       hour) and preconditions now fail the plan when the type or the image
       is unavailable in the primary IP's location.
-- [ ] **A7 Kubeconfig hand-off.** Depends on: A6. The `terraform_data`
+- [x] **A7 Kubeconfig hand-off.** Depends on: A6. The `terraform_data`
       provisioner and the `kubeconfig` output. Done when a workflow step runs
-      `kubectl get nodes` with the output and sees the node `Ready`.
+      `kubectl get nodes` with the output and sees the node `Ready`. Deviation:
+      an `ssh_sensitive_resource` of the `loafoe/ssh` provider replaces the
+      `terraform_data` provisioner pair; it retries the SSH connection until
+      the server answers, marks its result sensitive so a replacement plan
+      never prints the old kubeconfig, and re-runs only when the server id
+      changes.
 - [ ] **A8 Persistent address.** Depends on: A6. The server switches from
       an ephemeral address to the pre-created primary IP (data source,
       datacenter taken from it); `README.md` gets a section "Reproducing with

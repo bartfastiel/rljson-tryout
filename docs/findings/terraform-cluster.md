@@ -11,6 +11,14 @@
 - After the first failure: `data "hcloud_server_type"` for `cx33` and a
   precondition on the server that the type is `available` in the primary
   IP's location (pull request #9, first plan).
+- cloud-init with `package_update` only (no upgrade), a `HelmChartConfig`
+  for Traefik and the k3s installer from the `stable` channel; the pipeline
+  polls `https://<ip>:6443/version` every ten seconds after the apply.
+- Slice A7: `ssh_sensitive_resource` of `loafoe/ssh` 2.7.0 with the
+  generated ed25519 key, `timeout = "15m"`, `retry_delay = "5s"`, commands
+  `cloud-init status --wait`, a loop on `k3s kubectl get nodes` and
+  `cat /etc/rancher/k3s/k3s.yaml`; the pipeline writes the output to a file
+  with mode 600 and runs `kubectl wait node --all --for=condition=Ready`.
 
 ## What happened
 
@@ -31,10 +39,25 @@
   per month), `cax21` 0.0168 EUR per hour, `cpx22` 0.0312 EUR per hour,
   `cpx32` 0.0569 EUR per hour (35.49 EUR per month). The plan of 2026-09-17
   had assumed 0.0113 EUR per hour for `cx32`.
+- First boot of the `cpx32` (run 35202364603 on `main`): Hetzner reported
+  the server created 11 seconds after the API call, and the Kubernetes API
+  server answered on port 6443 with the 401 `Status` body 44 seconds after
+  that, so cloud-init, the k3s download and the API server start-up took
+  under one minute without a package upgrade. The unauthenticated answer is
+  a 401 because k3s starts kube-apiserver with `--anonymous-auth=false`.
 - The state file of this stage contains the ed25519 private key of
   `tls_private_key.main` in clear; from slice A7 on it also contains the
-  cluster's kubeconfig. Everything that can read the bucket can log in to
-  the server as root and administer the cluster.
+  cluster's kubeconfig with the cluster administrator's client certificate
+  and key. Everything that can read the bucket can log in to the server as
+  root and administer the cluster.
+- `loafoe/ssh` retries each command until the resource's `timeout`, which
+  covers the window in which the server is up but `sshd` is not yet
+  answering. Without the provider argument `debug_log` it prints every
+  command's output, including the kubeconfig, to the plugin's standard
+  output through `fmt.Printf`; Terraform forwards plugin output to its own
+  log when `TF_LOG` is set. The `ssh_resource` variant keeps `result`
+  unmarked, so a replacement plan would print the old kubeconfig;
+  `ssh_sensitive_resource` marks it sensitive.
 - The first run in CI could not assume the AWS role: GitHub issues the
   immutable subject `repo:<owner>@<owner id>/<name>@<repository id>:...`
   for repositories created after 2026-07-15, which the pattern
@@ -59,9 +82,17 @@
   from A7 on, to the cluster.
 - A bootstrap script that trusts GitHub OIDC must read the subject prefix
   from the API instead of assuming `repo:<owner>/<name>`.
+- Hand the kubeconfig over as a sensitive output and consume it from a file
+  with mode 600 that lives only for the verification step; never `echo` it,
+  never run Terraform with `TF_LOG` in CI, and set `debug_log = "/dev/null"`
+  on the `ssh` provider.
 
 ## Candidates for upstream issues
 
+- `loafoe/terraform-provider-ssh`: `Config.Debug` falls back to
+  `fmt.Printf` when `debug_log` is unset, so command output reaches the
+  plugin's standard output by default. Reproduce with any `ssh_resource`
+  whose last command prints a secret and `TF_LOG=TRACE terraform apply`.
 - `hetznercloud/terraform-provider-hcloud`: the "server type not found"
   error could name the successor type or point at the server type list.
   Reproduce with an `hcloud_server` whose `server_type` is `cx32` and

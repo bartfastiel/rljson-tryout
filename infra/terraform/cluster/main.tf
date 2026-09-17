@@ -101,3 +101,25 @@ resource "hcloud_server" "main" {
     }
   }
 }
+
+# Waits until cloud-init has finished and k3s answers, then reads the
+# kubeconfig k3s wrote for the local machine. Re-runs only when the server
+# is replaced; `cloud-init status --wait` exits non-zero on recoverable
+# warnings, which must not abort the hand-off.
+resource "ssh_sensitive_resource" "kubeconfig" {
+  host        = hcloud_server.main.ipv4_address
+  user        = "root"
+  private_key = tls_private_key.main.private_key_openssh
+  timeout     = "15m"
+  retry_delay = "5s"
+
+  triggers = {
+    server_id = tostring(hcloud_server.main.id)
+  }
+
+  commands = [
+    "cloud-init status --wait > /dev/null || true",
+    "until k3s kubectl get nodes > /dev/null 2>&1; do sleep 5; done",
+    "cat /etc/rancher/k3s/k3s.yaml",
+  ]
+}
