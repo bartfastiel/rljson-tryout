@@ -32,6 +32,6 @@ module "production" {
   base_domain      = var.base_domain
   hostname_infix   = ""
   nodes = [
-    { name = "node1", storage = "memory" },
+    { name = "node1" },
   ]
 }

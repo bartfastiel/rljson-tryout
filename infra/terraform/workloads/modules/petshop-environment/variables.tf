@@ -29,10 +29,9 @@ variable "hostname_infix" {
 }
 
 variable "nodes" {
-  description = "Nodes of this environment in display order; the first one also answers on the apex host. Only the memory storage exists so far."
+  description = "Nodes of this environment in display order; the first one also answers on the apex host. Every node runs the in-memory store."
   type = list(object({
-    name    = string
-    storage = string
+    name = string
   }))
 
   validation {
@@ -48,10 +47,5 @@ variable "nodes" {
   validation {
     condition     = alltrue([for node in var.nodes : can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", node.name))])
     error_message = "Node names must be DNS labels: lower-case letters, digits and dashes."
-  }
-
-  validation {
-    condition     = alltrue([for node in var.nodes : node.storage == "memory"])
-    error_message = "Only the storage memory is implemented."
   }
 }

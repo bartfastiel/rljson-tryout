@@ -3,11 +3,19 @@ locals {
   hostnames     = { for node in var.nodes : node.name => "${node.name}${var.hostname_infix}.${var.base_domain}" }
   apex_hostname = var.hostname_infix == "" ? var.base_domain : "${trimprefix(var.hostname_infix, "-")}.${var.base_domain}"
   apex_node     = var.nodes[0].name
-  node_labels = {
+
+  # A Deployment's selector is immutable, so these two labels never change;
+  # everything else goes into the metadata labels below.
+  selector_labels = {
     for node in var.nodes : node.name => {
       "app.kubernetes.io/name"     = "node-service"
       "app.kubernetes.io/instance" = node.name
     }
+  }
+  labels = {
+    for node in var.nodes : node.name => merge(local.selector_labels[node.name], {
+      "app.kubernetes.io/part-of" = "rljson-tryout"
+    })
   }
 }
 
@@ -18,6 +26,8 @@ resource "kubernetes_namespace_v1" "environment" {
       "app.kubernetes.io/part-of" = "rljson-tryout"
     }
   }
+
+  wait_for_default_service_account = true
 }
 
 # The image runs as the user `node` by name; the kubelet can only enforce
@@ -29,22 +39,34 @@ resource "kubernetes_deployment_v1" "node" {
   metadata {
     name      = each.key
     namespace = kubernetes_namespace_v1.environment.metadata[0].name
-    labels    = local.node_labels[each.key]
+    labels    = local.labels[each.key]
   }
 
   spec {
-    replicas = 1
+    replicas               = 1
+    revision_history_limit = 3
 
     selector {
-      match_labels = local.node_labels[each.key]
+      match_labels = local.selector_labels[each.key]
+    }
+
+    strategy {
+      type = "RollingUpdate"
+
+      rolling_update {
+        max_surge       = 1
+        max_unavailable = 0
+      }
     }
 
     template {
       metadata {
-        labels = local.node_labels[each.key]
+        labels = local.selector_labels[each.key]
       }
 
       spec {
+        automount_service_account_token = false
+
         security_context {
           run_as_non_root = true
           run_as_user     = 1000
@@ -111,6 +133,7 @@ resource "kubernetes_deployment_v1" "node" {
 
           security_context {
             allow_privilege_escalation = false
+            read_only_root_filesystem  = true
 
             capabilities {
               drop = ["ALL"]
@@ -128,12 +151,12 @@ resource "kubernetes_service_v1" "node" {
   metadata {
     name      = each.key
     namespace = kubernetes_namespace_v1.environment.metadata[0].name
-    labels    = local.node_labels[each.key]
+    labels    = local.labels[each.key]
   }
 
   spec {
     type     = "ClusterIP"
-    selector = local.node_labels[each.key]
+    selector = local.selector_labels[each.key]
 
     port {
       name        = "http"
@@ -150,7 +173,7 @@ resource "kubernetes_ingress_v1" "node" {
   metadata {
     name      = each.key
     namespace = kubernetes_namespace_v1.environment.metadata[0].name
-    labels    = local.node_labels[each.key]
+    labels    = local.labels[each.key]
   }
 
   spec {
@@ -183,7 +206,7 @@ resource "kubernetes_ingress_v1" "apex" {
   metadata {
     name      = "apex"
     namespace = kubernetes_namespace_v1.environment.metadata[0].name
-    labels    = local.node_labels[local.apex_node]
+    labels    = local.labels[local.apex_node]
   }
 
   spec {

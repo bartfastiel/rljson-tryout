@@ -347,11 +347,13 @@ jobs:
             echo "${health_url} answered:"
             printf '%s\n' "${payload}"
             plain_http_url="http://${base_url#https://}/health"
-            redirect="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "${plain_http_url}")"
+            redirect="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
             case "${redirect}" in
-              30[178]\ https://*) echo "${plain_http_url} redirects: ${redirect}" ;;
+              "301 ${health_url}" | "307 ${health_url}" | "308 ${health_url}")
+                echo "${plain_http_url} redirects: ${redirect}"
+                ;;
               *)
-                echo "::error::${plain_http_url} does not redirect to https, got: ${redirect}"
+                echo "::error::${plain_http_url} does not redirect to ${health_url}, got: ${redirect}"
                 exit 1
                 ;;
             esac

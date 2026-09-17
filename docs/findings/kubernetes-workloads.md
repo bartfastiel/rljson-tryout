@@ -18,8 +18,10 @@
   `kubernetes_service_v1` (`ClusterIP` 80 to 8080) and `kubernetes_ingress_v1`
   with `ingress_class_name = "traefik"` per node, plus one ingress for the
   apex host. The pod runs with `run_as_non_root`, `run_as_user = 1000`,
-  `run_as_group = 1000`, seccomp `RuntimeDefault`, no privilege escalation
-  and all capabilities dropped.
+  `run_as_group = 1000`, seccomp `RuntimeDefault`, no privilege escalation,
+  all capabilities dropped, a read-only root filesystem and no mounted
+  service account token; the rollout strategy is `RollingUpdate` with
+  `max_surge = 1` and `max_unavailable = 0`.
 - `terraform plan` locally with the owner's AWS credentials, then
   `terraform show -json` on a saved plan to see whether the remote state
   outputs carry the sensitive flag (the plan file was deleted afterwards
@@ -80,6 +82,18 @@
   always mirrors the configuration module of the service.
 - Treat everything derived from a remote state output as sensitive by hand;
   Terraform does not do it for you.
+- When the cluster stage replaces the server, its `kubeconfig` output
+  changes with it, the workloads provider is reconfigured from the remote
+  state on the next run, the refresh gets 404 for every resource in the
+  new cluster, the provider drops them from state and the plan is
+  `5 to add` again without any `state rm`. The failing order is the other
+  one: while the cluster state has no `kubeconfig` output (destroyed, not
+  yet recreated) every workloads command including `destroy` stops at
+  `data.terraform_remote_state.cluster.outputs.kubeconfig` with
+  "Unsupported attribute", so a destroy-all workflow must destroy the
+  workloads before the cluster, and a workloads workspace orphaned by a
+  cluster loss needs `terraform workspace delete -force` (or `state rm`)
+  rather than `destroy`.
 
 ## Candidates for upstream issues
 
