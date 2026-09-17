@@ -42,6 +42,53 @@ const isCalendarDate = (value: string): boolean => {
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim() !== '';
 
+const isWholeNonNegativeNumber = (value: unknown): boolean =>
+  Number.isInteger(value) && (value as number) >= 0;
+
+const isListOfIds = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every(isNonEmptyString);
+
+/**
+ * The reason a value of one editable field cannot be applied, `null` when
+ * it can. Only fields the changes name are checked, so every check here
+ * sees a present value.
+ */
+const fieldProblem = (field: string, value: unknown): string | null => {
+  switch (field) {
+    case 'name':
+      return isNonEmptyString(value) ? null : 'The name must not be empty.';
+    case 'priceCents':
+      return isWholeNonNegativeNumber(value)
+        ? null
+        : 'The price must be a whole number of cents, at least 0.';
+    case 'bornOn':
+      return typeof value === 'string' && isCalendarDate(value)
+        ? null
+        : 'The birth date must be a calendar date such as 2024-05-31.';
+    case 'backgroundStory':
+      return typeof value === 'string'
+        ? null
+        : 'The background story must be text.';
+    case 'speciesId':
+      return isNonEmptyString(value)
+        ? null
+        : 'The species id must not be empty.';
+    case 'breederId':
+      return isNonEmptyString(value)
+        ? null
+        : 'The breeder id must not be empty.';
+    case 'traitIds':
+      if (!isListOfIds(value)) {
+        return 'The traits must be a list of trait ids.';
+      }
+      return new Set(value).size === value.length
+        ? null
+        : 'The traits must not repeat a trait id.';
+    default:
+      return `"${field}" is not an editable field of an animal; editable fields are ${editableAnimalFields.join(', ')}.`;
+  }
+};
+
 /**
  * Every reason the given changes cannot be applied, as sentences written
  * for the person who filled in the form, an empty list when the changes
@@ -55,58 +102,14 @@ const isNonEmptyString = (value: unknown): value is string =>
 export const animalChangeProblems = (
   changes: Readonly<Record<string, unknown>>,
 ): string[] => {
-  const problems: string[] = [];
   const fields = Object.keys(changes);
-  const editable: readonly string[] = editableAnimalFields;
-
   if (fields.length === 0) {
     return ['The request names no editable field.'];
   }
-  for (const field of fields) {
-    if (!editable.includes(field)) {
-      problems.push(
-        `"${field}" is not an editable field of an animal; editable fields are ${editable.join(', ')}.`,
-      );
-    }
-  }
-  if ('name' in changes && !isNonEmptyString(changes.name)) {
-    problems.push('The name must not be empty.');
-  }
-  if (
-    'priceCents' in changes &&
-    (!Number.isInteger(changes.priceCents) ||
-      (changes.priceCents as number) < 0)
-  ) {
-    problems.push('The price must be a whole number of cents, at least 0.');
-  }
-  if (
-    'bornOn' in changes &&
-    (typeof changes.bornOn !== 'string' || !isCalendarDate(changes.bornOn))
-  ) {
-    problems.push('The birth date must be a calendar date such as 2024-05-31.');
-  }
-  if (
-    'backgroundStory' in changes &&
-    typeof changes.backgroundStory !== 'string'
-  ) {
-    problems.push('The background story must be text.');
-  }
-  if ('speciesId' in changes && !isNonEmptyString(changes.speciesId)) {
-    problems.push('The species id must not be empty.');
-  }
-  if ('breederId' in changes && !isNonEmptyString(changes.breederId)) {
-    problems.push('The breeder id must not be empty.');
-  }
-  if ('traitIds' in changes) {
-    const traitIds = changes.traitIds;
-    if (!Array.isArray(traitIds) || !traitIds.every(isNonEmptyString)) {
-      problems.push('The traits must be a list of trait ids.');
-    } else if (new Set(traitIds).size !== traitIds.length) {
-      problems.push('The traits must not repeat a trait id.');
-    }
-  }
 
-  return problems;
+  return fields
+    .map((field) => fieldProblem(field, changes[field]))
+    .filter((problem): problem is string => problem !== null);
 };
 
 /**
