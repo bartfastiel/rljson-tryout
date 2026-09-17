@@ -103,6 +103,10 @@ describe('animalsSeed', () => {
       expect(row.traitsRefs.length).toBeGreaterThanOrEqual(1);
       expect(row.traitsRefs.length).toBeLessThanOrEqual(4);
       expect(new Set(row.traitsRefs).size).toBe(row.traitsRefs.length);
+      const traitIds = row.traitsRefs.map(
+        (traitRef) => traitsSeed.find((trait) => trait._hash === traitRef)!.id,
+      );
+      expect(traitIds).toStrictEqual([...traitIds].sort());
     }
 
     const referencedHashes = new Set(
@@ -117,15 +121,15 @@ describe('animalsSeed', () => {
 
   it('has stable hashes so every node computes the same row identity', () => {
     expect(animalsSeed.map((row) => [row.id, row._hash])).toStrictEqual([
-      ['quackmore-junior', 'Pu0o2Ogr_8w-9sA_I8RHdm'],
+      ['quackmore-junior', 'ddMJRwIk1ahIljTgPWDxdi'],
       ['donald-the-third', 'O60Td7HPPQAI7sQ5v8dgX3'],
       ['daphne-duck', '_2qbAzzIgo5wCZK7EfoJto'],
-      ['sir-quackington', 'gmhgWXvjSF2tWIsKPNmPk0'],
+      ['sir-quackington', '9RMBnU5ef4K_TIYhQX5Cmy'],
       ['bowser-the-guard-dog', 'B4yKeiDryTZJG4IlykpWhw'],
-      ['nosey-the-bloodhound', '__g19NBx18BkpP9iB9X3_M'],
+      ['nosey-the-bloodhound', 'T4SDP_227xF3JquyLx4CYd'],
       ['pepper-the-poodle', 'TOPCaBAq7ZRhvfFrg18R0o'],
-      ['clara-cluck-junior', 'HMYG0RlL8bKOTDvbws4rgK'],
-      ['gadget-the-inventor', 'R2z2I1s77nNXsDt7llTPEc'],
+      ['clara-cluck-junior', 'X3hQeOcdhCQN3D4QR0bYkD'],
+      ['gadget-the-inventor', 'DrgVGtO2wCEibUdPRXc2CF'],
       ['henrietta-the-egg-champion', 'nbXemEJa6B6XjCb6um7oI-'],
     ]);
   });

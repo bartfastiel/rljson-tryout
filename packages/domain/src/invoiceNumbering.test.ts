@@ -5,6 +5,7 @@ import {
   invoiceItemId,
   invoiceNumber,
   issueInvoiceChangeSetId,
+  nextInvoiceSequence,
 } from './invoiceNumbering.ts';
 
 describe('invoiceNumber', () => {
@@ -33,5 +34,38 @@ describe('invoiceId, invoiceItemId and issueInvoiceChangeSetId', () => {
     expect(issueInvoiceChangeSetId('2026-0007')).toBe(
       'issue-invoice-2026-0007',
     );
+  });
+});
+
+describe('nextInvoiceSequence', () => {
+  it('starts at one for a year without invoices', () => {
+    expect(nextInvoiceSequence('2026-09-17', [])).toBe(1);
+    expect(nextInvoiceSequence('2027-01-01', ['2026-0001', '2026-0002'])).toBe(
+      1,
+    );
+  });
+
+  it('continues after the highest sequence of the year, not after the count', () => {
+    expect(
+      nextInvoiceSequence('2026-09-17', [
+        '2026-0001',
+        '2026-0007',
+        '2025-0009',
+      ]),
+    ).toBe(8);
+  });
+
+  it('ignores the order the numbers come in', () => {
+    expect(
+      nextInvoiceSequence('2026-09-17', [
+        '2026-0003',
+        '2026-0001',
+        '2026-0002',
+      ]),
+    ).toBe(4);
+  });
+
+  it('keeps counting beyond four digits', () => {
+    expect(nextInvoiceSequence('2026-09-17', ['2026-12345'])).toBe(12346);
   });
 });

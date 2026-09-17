@@ -53,17 +53,18 @@ const refusalMessage = async (response, path) => {
 };
 
 /**
- * Sends a JSON document to this node and returns the JSON it answers with.
- * Fails with the node's own message when the node refused the request, so
- * a form can show exactly why.
+ * Sends a JSON document to this node with the given method and returns the
+ * JSON it answers with. Fails with the node's own message when the node
+ * refused the request, so a form can show exactly why.
  *
+ * @param {'POST' | 'PUT'} method
  * @param {string} path
  * @param {unknown} body
  * @returns {Promise<unknown>}
  */
-export const postJson = async (path, body) => {
+const sendJson = async (method, path, body) => {
   const response = await fetch(path, {
-    method: 'POST',
+    method,
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -72,3 +73,22 @@ export const postJson = async (path, body) => {
   }
   return response.json();
 };
+
+/**
+ * Creates something on this node (`POST`), for example an invoice.
+ *
+ * @param {string} path
+ * @param {unknown} body
+ * @returns {Promise<unknown>}
+ */
+export const postJson = (path, body) => sendJson('POST', path, body);
+
+/**
+ * Changes something on this node (`PUT`), for example an animal, which
+ * writes a new version of it.
+ *
+ * @param {string} path
+ * @param {unknown} body
+ * @returns {Promise<unknown>}
+ */
+export const putJson = (path, body) => sendJson('PUT', path, body);

@@ -253,5 +253,26 @@ describe('/api/invoices', () => {
         message: expect.stringContaining('items') as string,
       });
     });
+
+    it('answers 400 for a quantity sent as a string instead of coercing it', async () => {
+      await store.seedIfEmpty();
+
+      const response = await server.inject({
+        method: 'POST',
+        url: '/api/invoices',
+        payload: {
+          customerId: 'scrooge-mcduck',
+          items: [{ animalId: 'donald-the-third', quantity: '1' }],
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toMatchObject({
+        statusCode: 400,
+        message: expect.stringContaining('quantity') as string,
+      });
+      const list = await server.inject({ method: 'GET', url: '/api/invoices' });
+      expect(list.json()).toHaveLength(invoicesSeed.length);
+    });
   });
 });

@@ -26,6 +26,16 @@ export type AnimalTraitRow = {
  */
 export type HashedAnimalTraitRow = Hashed<AnimalTraitRow>;
 
+/**
+ * The stable `id` of the pairing of one animal with one trait,
+ * `<animalId>--<traitId>`, the same for every version of the pairing: the
+ * seed derives it this way, and a new animal version (slice B9) writes its
+ * junction rows under the same ids so that each pairing stays one entity
+ * across animal versions (`docs/findings/entity-versions.md`).
+ */
+export const animalTraitId = (animalId: string, traitId: string): string =>
+  `${animalId}--${traitId}`;
+
 const stringColumn = (
   key: keyof AnimalTraitRow | '_hash',
   titleLong: string,

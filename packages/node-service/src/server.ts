@@ -55,7 +55,14 @@ export const buildServer = ({
   directory,
   logger,
 }: ServerDependencies): FastifyInstance => {
-  const server = Fastify({ loggerInstance: logger });
+  // Fastify's default validator coerces body values to the schema's type
+  // (`"100"` and `true` become numbers, `null` becomes `0` or `""`), which
+  // would turn an invalid value into a silently different valid one before
+  // the domain rules see it. Bodies are validated as sent instead.
+  const server = Fastify({
+    loggerInstance: logger,
+    ajv: { customOptions: { coerceTypes: false } },
+  });
   const version = readPackageVersion();
   const startedAt = new Date().toISOString();
 

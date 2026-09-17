@@ -1,7 +1,41 @@
 import { throwOnInvalidTableCfg } from '@rljson/rljson';
 import { describe, expect, it } from 'vitest';
 
-import { animalsInsertHistoryTableCfg, animalsTableCfg } from './animals.ts';
+import {
+  animalsInsertHistoryTableCfg,
+  animalsTableCfg,
+  traitsRefsOf,
+} from './animals.ts';
+
+describe('traitsRefsOf', () => {
+  it('orders the hashes by trait id, whatever order the traits come in', () => {
+    const traits = [
+      { id: 'keen-senses', _hash: 'hash-keen' },
+      { id: 'fiercely-loyal', _hash: 'hash-loyal' },
+      { id: 'inventive', _hash: 'hash-inventive' },
+    ];
+
+    expect(traitsRefsOf(traits)).toStrictEqual([
+      'hash-loyal',
+      'hash-inventive',
+      'hash-keen',
+    ]);
+    expect(traitsRefsOf([...traits].reverse())).toStrictEqual(
+      traitsRefsOf(traits),
+    );
+  });
+
+  it('leaves the given list untouched', () => {
+    const traits = [
+      { id: 'b', _hash: 'hash-b' },
+      { id: 'a', _hash: 'hash-a' },
+    ];
+
+    traitsRefsOf(traits);
+
+    expect(traits.map((trait) => trait.id)).toStrictEqual(['b', 'a']);
+  });
+});
 
 describe('animalsTableCfg', () => {
   it('is a valid rljson table configuration', () => {

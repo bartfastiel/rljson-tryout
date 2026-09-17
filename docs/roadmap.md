@@ -159,7 +159,7 @@ immutable version (`_hash`).
 | `GET /api/species/:hash/image`                                   | PNG bytes, `Content-Type: image/png`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `GET /api/traits`                                                | List of current trait versions                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `GET /api/animals?species=<id>&breeder=<id>&trait=<id>&q=<text>` | Current animal versions with species and breeder joined                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `GET /api/animals/:id`                                           | Current version with species, breeder and traits joined                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GET /api/animals/:id?version=<hash>`                            | Current version with species, breeder and traits joined; `version` selects an older one                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `GET /api/animals/:id/history`                                   | All versions with InsertHistory rows, newest first                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `PUT /api/animals/:id`                                           | Creates a new version from the current one plus the changed fields; returns it                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `GET /api/customers`, `GET /api/breeders`                        | Lists with the person joined                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -754,7 +754,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       Donald Duck join the persons seed as customers. Quantities are
       adjusted with a −/+ stepper per line rather than a number field, and
       stepping a line below one removes it.
-- [ ] **B9 Versions of an entity.** Depends on: B8. `PUT /api/animals/:id`,
+- [x] **B9 Versions of an entity.** Depends on: B8. `PUT /api/animals/:id`,
       `GET /api/animals/:id/history`, version list in the detail view, the
       "current version" rule from 2.6 implemented once in `domain` and used by
       every list endpoint, Gherkin feature for a price change. The version
@@ -763,6 +763,27 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       the detail view offers an "Edit" action alongside the version list;
       this is the first piece of CRUD the owner asked for. Done when the
       list shows the new price and the history shows both versions.
+      Deviation: `previous` of a follow-up version names the `timeId` of
+      the current version's InsertHistory row, not its hash, because
+      rljson's `previous` is typed and resolved as a list of `timeId`s and
+      `Db.detectDagBranch` counts tips by `timeId`
+      (`docs/findings/entity-versions.md`); the rule lives in
+      `packages/domain/src/entityVersions.ts` and reports conflicting ids
+      alongside the current rows, ready for D11. `GET /api/animals/:id`
+      gains `?version=<hash>` for reading an older version, which the
+      detail view uses for its read-only view of a version. The
+      `animalTraits` junction rows of a new animal version are written as
+      new versions of their pairings (`<animalId>--<traitId>`), chained
+      onto the previous pairing row. `traitsRefs` is written in one
+      canonical order (by trait id, `traitsRefsOf`), in the seed as in an
+      edit, so the same set of traits hashes the same in both trait
+      relation modes; five seed animal hashes changed with it. The server
+      validates bodies without Ajv type coercion, so a value of the wrong
+      JSON type is refused instead of rewritten. Two findings of the B8
+      review are applied here: the invoice sequence is derived from the
+      highest existing number of the year (`nextInvoiceSequence`), and
+      `issueInvoice` resolves customers and animals through the
+      current-version rule.
 - [ ] **B10 Seed generator.** Depends on: B9. Deterministic generator with
       a seed and sizes `small` (10 species, 100 animals), `medium`, `large`
       (50 species, 40 traits, 2 000 animals, 300 customers, 50 breeders, 5 000
