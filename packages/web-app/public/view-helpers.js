@@ -57,6 +57,21 @@ export const formatRelativeTime = (iso, now = new Date()) => {
   return relativeTimeFormat.format(Math.round(hours / 24), 'day');
 };
 
+export const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+/**
+ * The moment an rljson `timeId` (`<milliseconds since epoch>:<4 unique
+ * characters>`) was issued, which is when the version it belongs to was
+ * written on the node that wrote it.
+ *
+ * @param {string} timeId
+ */
+export const dateOfTimeId = (timeId) =>
+  new Date(Number(timeId.slice(0, timeId.indexOf(':'))));
+
 /**
  * Parses a date-only string such as `"2020-07-22"` into a `Date` at
  * midnight in the viewer's own time zone. `new Date(dateOnlyString)` parses

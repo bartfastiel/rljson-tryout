@@ -1,10 +1,13 @@
 // @ts-check
+import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
 import { hashQuery } from '../hash-route.js';
 import { notFoundView } from '../not-found-view.js';
 import {
   applicationName,
   dateFormat,
+  dateOfTimeId,
+  dateTimeFormat,
   errorState,
   parseDateOnly,
   priceFormat,
@@ -55,30 +58,71 @@ import {
  */
 
 /**
- * The href of the list a "back" link should return to: the filtered list
- * the detail was opened from, carrying along whichever of `species`,
- * `breeder` and `trait` this view's own hash query holds (the animal card
- * that links here puts them there, see `animals-list.js`), the full list
- * when none is present.
+ * One version of an animal as `GET /api/animals/:id/history` lists it,
+ * newest first: the fields the version list shows and the `current` flag
+ * of the rule in roadmap section 2.6.
+ *
+ * @typedef {object} AnimalVersion
+ * @property {string} hash
+ * @property {string} timeId
+ * @property {string[]} previous
+ * @property {boolean} current
+ * @property {string} name
+ * @property {number} priceCents
  */
-const listHref = () => {
-  const query = hashQuery(location.hash);
-  const speciesId = query.get('species');
-  const breederId = query.get('breeder');
-  const traitId = query.get('trait');
 
+/**
+ * The `species`, `breeder` and `trait` filters this view's own hash query
+ * carries (the animal card that links here puts them there, see
+ * `animals-list.js`), so that every href this view builds keeps them and
+ * the back link returns to the filtered list the detail was opened from.
+ */
+const filterParams = () => {
+  const query = hashQuery(location.hash);
   const params = new URLSearchParams();
-  if (speciesId !== null) {
-    params.set('species', speciesId);
+  for (const name of ['species', 'breeder', 'trait']) {
+    const value = query.get(name);
+    if (value !== null) {
+      params.set(name, value);
+    }
   }
-  if (breederId !== null) {
-    params.set('breeder', breederId);
-  }
-  if (traitId !== null) {
-    params.set('trait', traitId);
-  }
+  return params;
+};
+
+/**
+ * The hash of the version this view shows, from `?version=<hash>`, or
+ * `null` for the current version.
+ */
+const requestedVersion = () => hashQuery(location.hash).get('version');
+
+/**
+ * @param {string} path
+ * @param {URLSearchParams} params
+ */
+const hrefWith = (path, params) => {
   const queryString = params.toString();
-  return queryString === '' ? '#/animals' : `#/animals?${queryString}`;
+  return queryString === '' ? path : `${path}?${queryString}`;
+};
+
+/**
+ * The href of the list a "back" link should return to: the filtered list
+ * the detail was opened from, the full list when no filter is present.
+ */
+const listHref = () => hrefWith('#/animals', filterParams());
+
+/**
+ * The href of this animal's detail, for the current version when `version`
+ * is `null` and for that exact version otherwise, keeping the filters.
+ *
+ * @param {string} animalId
+ * @param {string | null} version
+ */
+const detailHref = (animalId, version) => {
+  const params = filterParams();
+  if (version !== null) {
+    params.set('version', version);
+  }
+  return hrefWith(`#/animals/${encodeURIComponent(animalId)}`, params);
 };
 
 /**
@@ -177,27 +221,138 @@ const traitChips = (animal) => {
 };
 
 /**
+ * The heading row: the animal's name and, on the current version, the
+ * "Edit" action that opens the form writing the next version. An old
+ * version is read-only, so it gets no action.
+ *
  * @param {AnimalDetail} animal
+ * @param {boolean} isCurrent
  */
-const detailView = (animal) => {
+const headingRow = (animal, isCurrent) => {
+  const header = element('div', 'view-header');
+  header.append(element('h1', 'view-title', animal.name));
+  if (isCurrent) {
+    const edit = element('a', 'button', 'Edit');
+    edit.href = `#/animals/${encodeURIComponent(animal.id)}/edit`;
+    header.append(edit);
+  }
+  return header;
+};
+
+/**
+ * The notice above an old version: when it was written, and a link to the
+ * current version. The moment comes from the version's `timeId`, and a
+ * version is looked up by hash in the history, newest first, since an edit
+ * that restores earlier content gives the same hash a second, newer
+ * history entry.
+ *
+ * @param {AnimalDetail} animal
+ * @param {AnimalVersion[]} history
+ */
+const oldVersionNotice = (animal, history) => {
+  const version = history.find((entry) => entry.hash === animal.hash);
+  const notice = element('p', 'version-notice');
+  notice.setAttribute('role', 'status');
+  const currentLink = element('a', '', 'Show the current version');
+  currentLink.href = detailHref(animal.id, null);
+  notice.append(
+    version === undefined
+      ? 'You are viewing an older version. '
+      : `You are viewing the version from ${dateTimeFormat.format(dateOfTimeId(version.timeId))}. `,
+    currentLink,
+  );
+  return notice;
+};
+
+/**
+ * One row of the version list: the moment the version was written, its
+ * name when it differs from the version shown, its price, and a "current"
+ * badge on the tip. The whole row is a link that shows that version
+ * (`?version=<hash>`, or the plain detail for the current one); the row of
+ * the version on screen is marked as the current page.
+ *
+ * @param {AnimalVersion} version
+ * @param {AnimalDetail} shown
+ */
+const versionRow = (version, shown) => {
+  const link = element('a', 'version-link');
+  link.href = detailHref(shown.id, version.current ? null : version.hash);
+  if (version.hash === shown.hash) {
+    link.setAttribute('aria-current', 'page');
+  }
+  const text = element('div', 'version-text');
+  text.append(
+    element(
+      'span',
+      'version-time',
+      dateTimeFormat.format(dateOfTimeId(version.timeId)),
+    ),
+    element(
+      'span',
+      'version-summary',
+      version.name === shown.name
+        ? priceFormat.format(version.priceCents / 100)
+        : `${version.name} · ${priceFormat.format(version.priceCents / 100)}`,
+    ),
+  );
+  link.append(text);
+  if (version.current) {
+    link.append(element('span', 'version-badge', 'current'));
+  }
+  const item = element('li', 'version-item');
+  item.append(link);
+  return item;
+};
+
+/**
+ * The "Versions" section: every version of the animal, newest first.
+ *
+ * @param {AnimalVersion[]} history
+ * @param {AnimalDetail} shown
+ */
+const versionsSection = (history, shown) => {
+  const title = element('h2', 'section-title', 'Versions');
+  title.id = 'animal-versions-title';
+  const list = element('ol', 'version-list');
+  list.setAttribute('aria-labelledby', title.id);
+  list.append(...history.map((version) => versionRow(version, shown)));
+
+  const section = element('section', 'animal-versions');
+  section.setAttribute('aria-labelledby', title.id);
+  section.append(title, list);
+  return section;
+};
+
+/**
+ * @param {AnimalDetail} animal
+ * @param {AnimalVersion[]} history
+ * @param {boolean} isCurrent
+ */
+const detailView = (animal, history, isCurrent) => {
   const view = element('section', 'animal-detail-view');
   const traits = traitChips(animal);
   view.append(
-    element('h1', 'view-title', animal.name),
+    headingRow(animal, isCurrent),
+    ...(isCurrent ? [] : [oldVersionNotice(animal, history)]),
     factsBlock(animal),
     ...(traits === null ? [] : [traits]),
     storyParagraphs(animal.backgroundStory),
+    versionsSection(history, animal),
   );
   return view;
 };
 
 /**
- * Shows one animal: a heading with its name, a compact facts block and its
- * background story as paragraphs, reached from an animal card at
- * `#/animals/<id>`. Fetches `GET /api/animals/<id>` when it enters the
- * document; a hash change replaces this element with a fresh instance (see
- * `app.js`), which re-reads the id. Shows a loading, a not-found (unknown
- * id) or an error state with a retry button until the animal is there.
+ * Shows one animal: a heading with its name and an "Edit" action, a
+ * compact facts block, its background story as paragraphs and the list of
+ * its versions, reached from an animal card at `#/animals/<id>`; with
+ * `?version=<hash>` it shows that older version read-only, with a notice
+ * and a link back to the current one. Fetches `GET /api/animals/<id>` and
+ * `GET /api/animals/<id>/history` when it enters the document; a hash
+ * change replaces this element with a fresh instance (see `app.js`), which
+ * re-reads the id and the version. Shows a loading, a not-found (unknown
+ * id or version) or an error state with a retry button until the animal is
+ * there.
  */
 class AnimalDetailElement extends HTMLElement {
   connectedCallback() {
@@ -209,32 +364,45 @@ class AnimalDetailElement extends HTMLElement {
     if (id === null) {
       throw new Error('animal-detail requires an animal-id attribute.');
     }
+    const version = requestedVersion();
+    const detailPath =
+      version === null
+        ? `/api/animals/${encodeURIComponent(id)}`
+        : `/api/animals/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`;
 
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(backLink(), statusMessage('Loading animal…'));
     try {
-      const response = await fetch(`/api/animals/${encodeURIComponent(id)}`, {
+      const response = await fetch(detailPath, {
         headers: { accept: 'application/json' },
       });
       if (response.status === 404) {
         // The not-found view supplies its own way back, so it replaces the
         // persistent back link instead of sitting alongside a second one.
         this.replaceChildren(
-          notFoundView(`There is no animal with id "${id}".`, {
-            href: listHref(),
-            text: 'Back to Animals',
-          }),
+          notFoundView(
+            version === null
+              ? `There is no animal with id "${id}".`
+              : `There is no version "${version}" of the animal "${id}".`,
+            { href: listHref(), text: 'Back to Animals' },
+          ),
         );
         return;
       }
       if (!response.ok) {
         throw new Error(
-          `The node answered ${response.status} ${response.statusText} for /api/animals/${id}.`,
+          `The node answered ${response.status} ${response.statusText} for ${detailPath}.`,
         );
       }
       const animal = /** @type {AnimalDetail} */ (await response.json());
+      const history = /** @type {AnimalVersion[]} */ (
+        await fetchJson(`/api/animals/${encodeURIComponent(id)}/history`)
+      );
       document.title = `${animal.name} · ${applicationName}`;
-      this.replaceChildren(backLink(), detailView(animal));
+      this.replaceChildren(
+        backLink(),
+        detailView(animal, history, version === null),
+      );
     } catch (error) {
       this.replaceChildren(
         backLink(),

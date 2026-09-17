@@ -1,5 +1,6 @@
 // @ts-check
 import './components/animal-detail.js';
+import './components/animal-form.js';
 import './components/animals-list.js';
 import './components/breeders-list.js';
 import './components/invoice-detail.js';
@@ -57,14 +58,22 @@ const entityView = (tagName, attributeName, id) => {
  * The page a hash's path segments select: a title for the tab and the
  * element to show. A section's second segment addresses one entity
  * (`#/animals/<id>`, `#/invoices/<id>`), except `#/invoices/new`, which is
- * the form for a new invoice. An unknown section gets the not-found page.
+ * the form for a new invoice; `#/animals/<id>/edit` is the form that
+ * writes a new version of that animal. An unknown section gets the
+ * not-found page.
  *
  * @param {string[]} segments
  * @returns {{ title: string, element: HTMLElement }}
  */
 const pageFor = (segments) => {
-  const [sectionName, entityId] = segments;
+  const [sectionName, entityId, action] = segments;
   const addressesEntity = segments.length > 1;
+  if (sectionName === 'animals' && addressesEntity && action === 'edit') {
+    return {
+      title: 'Edit animal',
+      element: entityView('animal-form', 'animal-id', entityId),
+    };
+  }
   if (sectionName === 'animals' && addressesEntity) {
     return {
       title: views.animals.title,
