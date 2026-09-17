@@ -76,6 +76,11 @@ const serverOverFakeNetwork = async () => {
     nodeName: 'node1',
     publicUrl: 'http://node1:8080',
     nodeUrls: ['http://node1:8080', 'http://node2:8080', 'http://node3:8080'],
+    nodeStatusUrls: [
+      'http://node1:8080',
+      'http://node2:8080',
+      'http://node3:8080',
+    ],
     discovery: 'enabled',
     dataDirectory,
   });

@@ -38,6 +38,7 @@ export type NodeDirectoryOptions = Readonly<{
 }>;
 
 type PolledStatus = {
+  statusUrl: string;
   name: string | null;
   nodeId: string | null;
   role: NodeRole | null;
@@ -52,7 +53,8 @@ const nodeRoles: ReadonlySet<NodeRole> = new Set<NodeRole>([
   'client',
 ]);
 
-const unknownStatus = (): PolledStatus => ({
+const unknownStatus = (statusUrl: string): PolledStatus => ({
+  statusUrl,
   name: null,
   nodeId: null,
   role: null,
@@ -72,7 +74,9 @@ const readRole = (value: unknown): NodeRole | null =>
  * URL. This is how a URL a browser can open is correlated with the node id
  * discovery sees: `@rljson/network` announces ids and IP addresses, never
  * public URLs or display names. Nothing in the announcement carries a name,
- * so the correlation has to come from the nodes themselves.
+ * so the correlation has to come from the nodes themselves. The poll goes
+ * to the `NODE_STATUS_URLS` entry at the same position (the in-cluster
+ * address in Kubernetes), the entries keep the public URL as their key.
  */
 export class NodeDirectory {
   private readonly publicUrl: string;
@@ -87,7 +91,10 @@ export class NodeDirectory {
   private running = false;
 
   constructor(
-    configuration: Pick<Configuration, 'publicUrl' | 'nodeUrls'>,
+    configuration: Pick<
+      Configuration,
+      'publicUrl' | 'nodeUrls' | 'nodeStatusUrls'
+    >,
     logger: FastifyBaseLogger,
     options: NodeDirectoryOptions = {},
   ) {
@@ -100,11 +107,14 @@ export class NodeDirectory {
     this.urls = configuration.nodeUrls.includes(configuration.publicUrl)
       ? configuration.nodeUrls
       : [configuration.publicUrl, ...configuration.nodeUrls];
-    for (const url of this.urls) {
+    configuration.nodeUrls.forEach((url, index) => {
       if (url !== configuration.publicUrl) {
-        this.polled.set(url, unknownStatus());
+        this.polled.set(
+          url,
+          unknownStatus(configuration.nodeStatusUrls[index]),
+        );
       }
-    }
+    });
   }
 
   /**
@@ -152,7 +162,7 @@ export class NodeDirectory {
           seenInTopology: true,
         };
       }
-      const status = this.polled.get(url) ?? unknownStatus();
+      const status = this.polled.get(url) ?? unknownStatus(url);
       return {
         url,
         self: false,
@@ -201,8 +211,9 @@ export class NodeDirectory {
   }
 
   private async poll(url: string, status: PolledStatus): Promise<void> {
+    const statusUrl = status.statusUrl;
     try {
-      const response = await this.fetch(`${url}/status`, {
+      const response = await this.fetch(`${statusUrl}/status`, {
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -212,7 +223,7 @@ export class NodeDirectory {
       const body = (await response.json()) as Record<string, unknown>;
       const nodeId = readString(body.nodeId);
       if (!status.reachable) {
-        this.logger.info({ url, nodeId }, 'node reachable');
+        this.logger.info({ url, statusUrl, nodeId }, 'node reachable');
       }
       status.name = readString(body.nodeName);
       status.nodeId = nodeId;
@@ -221,7 +232,7 @@ export class NodeDirectory {
       status.lastSeen = this.now();
     } catch (error) {
       if (status.reachable) {
-        this.logger.warn({ url, err: error }, 'node unreachable');
+        this.logger.warn({ url, statusUrl, err: error }, 'node unreachable');
       }
       status.reachable = false;
     }

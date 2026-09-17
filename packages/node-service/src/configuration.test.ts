@@ -30,6 +30,7 @@ describe('readConfiguration', () => {
       gitCommit: 'unknown',
       webAppDirectory: webAppPublicDirectory,
       storage: 'memory',
+      seedSize: 'small',
       traitRelationMode: 'multi-reference',
       rljsonDomain: 'petshop-local',
       hubPort: 3000,
@@ -37,6 +38,7 @@ describe('readConfiguration', () => {
       dataDirectory: packageDataDirectory,
       publicUrl: 'http://localhost:8080',
       nodeUrls: [],
+      nodeStatusUrls: [],
       discovery: 'enabled',
     });
   });
@@ -49,6 +51,7 @@ describe('readConfiguration', () => {
       GIT_COMMIT: 'abc1234',
       WEB_APP_DIRECTORY: temporaryDirectory,
       STORAGE: 'sqlite',
+      SEED_SIZE: 'none',
       TRAIT_RELATION: 'junction',
       RLJSON_DOMAIN: 'petshop-compose',
       HUB_PORT: '3100',
@@ -56,6 +59,8 @@ describe('readConfiguration', () => {
       DATA_DIR: temporaryDirectory,
       PUBLIC_URL: 'http://node2:8080',
       NODE_URLS: 'http://node1:8080,http://node2:8080,http://node3:8080',
+      NODE_STATUS_URLS:
+        'http://node1.petshop.svc:80,http://node2.petshop.svc:80,http://node3.petshop.svc:80',
       DISCOVERY: 'disabled',
     });
 
@@ -66,6 +71,7 @@ describe('readConfiguration', () => {
       gitCommit: 'abc1234',
       webAppDirectory: temporaryDirectory,
       storage: 'sqlite',
+      seedSize: 'none',
       traitRelationMode: 'junction',
       rljsonDomain: 'petshop-compose',
       hubPort: 3100,
@@ -73,6 +79,11 @@ describe('readConfiguration', () => {
       dataDirectory: temporaryDirectory,
       publicUrl: 'http://node2:8080',
       nodeUrls: ['http://node1:8080', 'http://node2:8080', 'http://node3:8080'],
+      nodeStatusUrls: [
+        'http://node1.petshop.svc',
+        'http://node2.petshop.svc',
+        'http://node3.petshop.svc',
+      ],
       discovery: 'disabled',
     });
   });
@@ -136,6 +147,21 @@ describe('readConfiguration', () => {
   it('throws a clear error for a storage kind it does not know yet', () => {
     expect(() => readConfiguration({ STORAGE: 'mssql' })).toThrow(
       'STORAGE must be one of memory, sqlite, got "mssql"',
+    );
+  });
+
+  it('defaults the seed size to small', () => {
+    expect(readConfiguration({}).seedSize).toBe('small');
+  });
+
+  it('accepts both seed sizes that exist so far', () => {
+    expect(readConfiguration({ SEED_SIZE: 'none' }).seedSize).toBe('none');
+    expect(readConfiguration({ SEED_SIZE: 'small' }).seedSize).toBe('small');
+  });
+
+  it('throws a clear error for a seed size that does not exist yet', () => {
+    expect(() => readConfiguration({ SEED_SIZE: 'large' })).toThrow(
+      'SEED_SIZE must be one of none, small, got "large"',
     );
   });
 
@@ -231,6 +257,53 @@ describe('readConfiguration', () => {
     ).toThrow(
       /NODE_URLS must be an http or https URL, got "ftp:\/\/node2:8080"/,
     );
+  });
+
+  it('polls the public URLs themselves when NODE_STATUS_URLS is not set', () => {
+    const configuration = readConfiguration({
+      NODE_URLS: 'https://node1.example.test,https://node2.example.test',
+    });
+
+    expect(configuration.nodeStatusUrls).toStrictEqual(configuration.nodeUrls);
+  });
+
+  it('aligns NODE_STATUS_URLS with NODE_URLS by position and normalizes them alike', () => {
+    const configuration = readConfiguration({
+      NODE_URLS: 'https://node1.example.test,https://node2.example.test',
+      NODE_STATUS_URLS:
+        ' http://node1.pr-7.svc.cluster.local/ , HTTP://Node2.pr-7.svc.cluster.local:80/?x=1 ',
+    });
+
+    expect(configuration.nodeStatusUrls).toStrictEqual([
+      'http://node1.pr-7.svc.cluster.local',
+      'http://node2.pr-7.svc.cluster.local',
+    ]);
+    expect(Object.isFrozen(configuration.nodeStatusUrls)).toBe(true);
+  });
+
+  it('throws a clear error when NODE_STATUS_URLS and NODE_URLS differ in length', () => {
+    expect(() =>
+      readConfiguration({
+        NODE_URLS: 'https://node1.example.test,https://node2.example.test',
+        NODE_STATUS_URLS: 'http://node1.svc',
+      }),
+    ).toThrow(
+      'NODE_STATUS_URLS must list one URL per NODE_URLS entry in the same order, got 1 for 2',
+    );
+    expect(() =>
+      readConfiguration({ NODE_STATUS_URLS: 'http://node1.svc' }),
+    ).toThrow(
+      'NODE_STATUS_URLS must list one URL per NODE_URLS entry in the same order, got 1 for 0',
+    );
+  });
+
+  it('validates every NODE_STATUS_URLS entry like a node URL', () => {
+    expect(() =>
+      readConfiguration({
+        NODE_URLS: 'https://node1.example.test',
+        NODE_STATUS_URLS: 'node1.svc',
+      }),
+    ).toThrow(/NODE_STATUS_URLS must be an absolute URL, got "node1.svc"/);
   });
 
   it('resolves a relative data directory against the working directory', () => {

@@ -32,6 +32,7 @@ export const testConfiguration: Configuration = Object.freeze({
     'public',
   ),
   storage: 'memory',
+  seedSize: 'small',
   traitRelationMode: 'multi-reference',
   rljsonDomain: 'petshop-test',
   hubPort: 0,
@@ -39,6 +40,7 @@ export const testConfiguration: Configuration = Object.freeze({
   dataDirectory: join(tmpdir(), 'rljson-tryout-node-service-tests'),
   publicUrl: 'http://localhost:8080',
   nodeUrls: [],
+  nodeStatusUrls: [],
   discovery: 'disabled',
 });
 

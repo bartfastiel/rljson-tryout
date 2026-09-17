@@ -46,15 +46,20 @@ const fakeFetch = (nodes: Record<string, FakeNode | 'broken' | 'slow'>) => {
 const directoryOver = (
   nodes: Record<string, FakeNode | 'broken' | 'slow'>,
   nodeUrls: readonly string[],
-  options: { pollIntervalMs?: number; timeoutMs?: number } = {},
+  options: {
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+    nodeStatusUrls?: readonly string[];
+  } = {},
 ) => {
   const { fetch, requested } = fakeFetch(nodes);
   const { logger, records } = recordingLogger();
   let now = 1_700_000_000_000;
+  const { nodeStatusUrls = nodeUrls, ...directoryOptions } = options;
   const directory = new NodeDirectory(
-    { publicUrl: selfUrl, nodeUrls },
+    { publicUrl: selfUrl, nodeUrls, nodeStatusUrls },
     logger,
-    { fetch, now: () => now, ...options },
+    { fetch, now: () => now, ...directoryOptions },
   );
   return {
     directory,
@@ -125,6 +130,68 @@ describe('NodeDirectory', () => {
     );
   });
 
+  it('polls the status URL at the same position and keys the entry by the public URL', async () => {
+    const { directory, requested, records } = directoryOver(
+      {
+        'http://node2.petshop.svc.cluster.local': {
+          nodeName: 'node2',
+          nodeId: 'id-node2',
+          role: 'hub',
+        },
+        'http://node3.petshop.svc.cluster.local': {
+          nodeName: 'node3',
+          nodeId: 'id-node3',
+          role: 'client',
+        },
+      },
+      [selfUrl, 'https://node2.example.test', 'https://node3.example.test'],
+      {
+        nodeStatusUrls: [
+          'http://node1.petshop.svc.cluster.local',
+          'http://node2.petshop.svc.cluster.local',
+          'http://node3.petshop.svc.cluster.local',
+        ],
+      },
+    );
+    started.push(directory);
+
+    await directory.start();
+
+    expect(requested.sort()).toStrictEqual([
+      'http://node2.petshop.svc.cluster.local/status',
+      'http://node3.petshop.svc.cluster.local/status',
+    ]);
+    expect(directory.entries(self, ['id-node2', 'id-node3'])).toMatchObject([
+      { url: selfUrl, self: true },
+      {
+        url: 'https://node2.example.test',
+        name: 'node2',
+        nodeId: 'id-node2',
+        role: 'hub',
+        reachable: true,
+        seenInTopology: true,
+      },
+      {
+        url: 'https://node3.example.test',
+        name: 'node3',
+        nodeId: 'id-node3',
+        role: 'client',
+        reachable: true,
+        seenInTopology: true,
+      },
+    ]);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        message: 'node reachable',
+        fields: {
+          url: 'https://node2.example.test',
+          statusUrl: 'http://node2.petshop.svc.cluster.local',
+          nodeId: 'id-node2',
+        },
+      }),
+    );
+  });
+
   it('puts this node first when NODE_URLS does not list it', () => {
     const { directory } = directoryOver({}, ['http://node2:8080']);
 
@@ -177,7 +244,11 @@ describe('NodeDirectory', () => {
       expect.objectContaining({
         level: 'info',
         message: 'node reachable',
-        fields: { url: 'http://node2:8080', nodeId: 'id-node2' },
+        fields: {
+          url: 'http://node2:8080',
+          statusUrl: 'http://node2:8080',
+          nodeId: 'id-node2',
+        },
       }),
     );
   });

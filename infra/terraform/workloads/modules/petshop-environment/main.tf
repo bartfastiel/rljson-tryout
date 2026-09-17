@@ -9,8 +9,14 @@ locals {
   # Every node learns the public URL of every node of this environment,
   # itself included, so that it can correlate the node ids discovery sees
   # with links a browser can open (`NODE_URLS` in roadmap section 2.4).
-  public_urls = { for node in var.nodes : node.name => "https://${local.hostnames[node.name]}" }
-  node_urls   = join(",", [for node in var.nodes : local.public_urls[node.name]])
+  # The server-side poll of every other node's `/status` goes to the
+  # node's ClusterIP service instead (`NODE_STATUS_URLS`, same order): the
+  # public host of a preview carries a staging certificate that Node's
+  # `fetch` rejects, and the cluster-internal hop needs no TLS at all.
+  public_urls      = { for node in var.nodes : node.name => "https://${local.hostnames[node.name]}" }
+  status_urls      = { for node in var.nodes : node.name => "http://${node.name}.${var.environment_name}.svc.cluster.local" }
+  node_urls        = join(",", [for node in var.nodes : local.public_urls[node.name]])
+  node_status_urls = join(",", [for node in var.nodes : local.status_urls[node.name]])
 
   # The environment of every node's container (roadmap section 2.4), the
   # same list for the Deployment of a memory node and the StatefulSet of a
@@ -20,12 +26,14 @@ locals {
       { name = "NODE_NAME", value = node.name },
       { name = "LOG_LEVEL", value = "info" },
       { name = "STORAGE", value = node.storage },
+      { name = "SEED_SIZE", value = var.seed_size },
       { name = "RLJSON_DOMAIN", value = var.rljson_domain },
       { name = "HUB_PORT", value = "3000" },
       { name = "BROADCAST_PORT", value = "41234" },
       { name = "DATA_DIR", value = "/data" },
       { name = "PUBLIC_URL", value = local.public_urls[node.name] },
       { name = "NODE_URLS", value = local.node_urls },
+      { name = "NODE_STATUS_URLS", value = local.node_status_urls },
     ]
   }
 
