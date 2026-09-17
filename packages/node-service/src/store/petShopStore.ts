@@ -1100,23 +1100,22 @@ export class PetShopStore {
   }
 
   /**
-   * The given rows plus, for every hash none of them carries, the row of
+   * The given rows by hash plus, for every hash the map lacks, the row of
    * that hash read through `readMatching`: how a detail assembled from a
    * row another node wrote resolves that row's references when the local
-   * tables do not hold them.
+   * tables do not hold them. The map passed in is left untouched.
    */
   private async withRowsOfHashes<Row extends { _hash: string }>(
-    rows: readonly Row[],
+    known: ReadonlyMap<string, Row>,
     tableCfg: TableCfg,
     hashes: readonly string[],
-  ): Promise<Row[]> {
-    const known = byHash(rows);
+  ): Promise<Map<string, Row>> {
     const fetched = await Promise.all(
       [...new Set(hashes)]
         .filter((hash) => !known.has(hash))
         .map((hash) => this.readMatching<Row>(tableCfg, { _hash: hash })),
     );
-    return [...rows, ...fetched.flat()];
+    return new Map([...known, ...byHash(fetched.flat())]);
   }
 
   /**
@@ -1768,28 +1767,31 @@ export class PetShopStore {
       invoiceItemsTableCfg,
       { invoiceRef: invoice._hash },
     );
-    const [customers, animals] = await Promise.all([
-      this.withRowsOfHashes(tables.customers.rows, customersTableCfg, [
+    const [customersByHash, animalsByHash] = await Promise.all([
+      this.withRowsOfHashes(tables.customersByHash, customersTableCfg, [
         invoice.customerRef,
       ]),
       this.withRowsOfHashes(
-        tables.animals.rows,
+        tables.animalsByHash,
         animalsTableCfg,
         invoiceItems.map((item) => item.animalRef),
       ),
     ]);
-    const species = await this.withRowsOfHashes(
-      tables.species,
+    const speciesByHash = await this.withRowsOfHashes(
+      tables.speciesByHash,
       speciesTableCfg,
-      animals.map((animal) => animal.speciesRef),
+      invoiceItems.flatMap((item) => {
+        const animal = animalsByHash.get(item.animalRef);
+        return animal === undefined ? [] : [animal.speciesRef];
+      }),
     );
 
     return invoiceDetail(invoice, {
       ...tables,
-      invoiceItems,
-      customers: { ...tables.customers, rows: customers },
-      animals: { ...tables.animals, rows: animals },
-      species,
+      invoiceItemsByInvoiceRef: groupByInvoiceRef(invoiceItems),
+      customersByHash,
+      animalsByHash,
+      speciesByHash,
     });
   }
 

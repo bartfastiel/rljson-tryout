@@ -164,7 +164,7 @@ describe('PetShopStore reading through the network', () => {
 
     expect(await client.getInvoice(issued.id)).toBeUndefined();
     expect(await client.getInvoice('invoice-2026-0001')).toBeDefined();
-    expect(await client.listAnimals()).toHaveLength(10);
+    expect((await client.listAnimals()).total).toBe(10);
   });
 
   it('keeps the single-node behaviour when the cascade is the local store itself', async () => {

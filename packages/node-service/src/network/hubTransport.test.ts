@@ -271,7 +271,7 @@ describe('HubTransport as client', () => {
     });
     expect(await probe(hubNode.transport.boundPort() ?? 0)).toBe('refused');
     expect(await clientNode.store.getInvoice(issued.id)).toBeUndefined();
-    expect(await clientNode.store.listAnimals()).toHaveLength(10);
+    expect((await clientNode.store.listAnimals()).total).toBe(10);
     expect((await clientNode.store.getInvoice('invoice-2026-0001'))?.id).toBe(
       'invoice-2026-0001',
     );
@@ -299,7 +299,7 @@ describe('HubTransport as client', () => {
       lastError: expect.stringContaining('cannot reach hub') as string,
     });
     expect(store.readsThroughNetwork).toBe(false);
-    expect(await store.listAnimals()).toHaveLength(10);
+    expect((await store.listAnimals()).total).toBe(10);
   });
 });
 
@@ -334,7 +334,7 @@ describe('HubTransport transitions', () => {
     });
     expect(store.readsThroughNetwork).toBe(false);
     expect(store.localIo.isOpen).toBe(true);
-    expect(await store.listAnimals()).toHaveLength(10);
+    expect((await store.listAnimals()).total).toBe(10);
   });
 
   it('ends in the state of the last call when transitions overlap', async () => {
