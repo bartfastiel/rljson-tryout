@@ -141,9 +141,18 @@ Kubernetes (single node in production so far):
   that a plain `docker run` works without a mount.
 - `hostNetwork` is not used. The broadcast socket binds inside the pod
   and the announcement leaves through the pod's `eth0` onto the flannel
-  bridge; the three-node proof in production follows with slice C3, the
-  single-node deployment of this slice proves that the sockets bind and
-  the node reports `standalone`.
+  bridge; the three-node proof in production follows with slice C3. The
+  preview of pull request #32 (namespace `pr-32`, one pod at 10.42.0.51)
+  proved the single-node case, read with a temporary kubeconfig: the pod
+  logged `discovery started` with the pod address, `/proc/net/udp` showed
+  `0.0.0.0:41234` and `/proc/net/tcp` the probe listener on `0.0.0.0:3000`
+  next to the HTTP port, both owned by uid 1000, `/data/identity/petshop-pr-32/node-id`
+  held the id `/status` reported, and `/status` answered
+  `role: "standalone"` with `domain: "petshop-pr-32"` and itself as the
+  only `nodes` entry. Whether the broadcast self-test passed on the flannel
+  bridge is not observable for a lone node: `NetworkManager` exposes no
+  layer state, and `formedBy` only turns to `broadcast` once a peer was
+  discovered that way.
 
 Timings measured in this slice: see above (0.1 s self-election of the
 earliest node, 5.0 s to full agreement, probe latency under 1.3 ms,
