@@ -23,11 +23,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Fails within seconds, before any concurrency group is taken, when the
+  # run was started from another branch or without the confirmation.
   confirm:
     name: confirm
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - name: Check the branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "${REF}" != "refs/heads/main" ]; then
+            echo "::error::Down runs only from main; this run was started from ${REF}."
+            exit 1
+          fi
+
       - name: Check the confirmation input
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
