@@ -4,3 +4,8 @@ allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
   - prettier@3.9.7
+overrides:
+  '@rljson/rljson': 0.0.81
+  '@rljson/io': 0.0.78
+  '@rljson/hash': 0.0.19
+  '@rljson/json': 0.0.23
