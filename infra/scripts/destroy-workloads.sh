@@ -37,12 +37,14 @@ cluster_is_reachable() {
   # k3s runs the API server with anonymous authentication off, so a 401
   # Status body proves the server answers just as well as a version body.
   for attempt in 1 2 3; do
+    if [ "${attempt}" -gt 1 ]; then
+      sleep 10
+    fi
     body="$(curl -sk --max-time 10 "https://${server_ipv4}:6443/version" || true)"
     if printf '%s' "${body}" | grep -Eq '"gitVersion"|"code": ?40[13]'; then
       echo "The Kubernetes API server at ${server_ipv4} answers (attempt ${attempt})."
       return 0
     fi
-    sleep 10
   done
   echo "The Kubernetes API server at ${server_ipv4} did not answer in three attempts: the server is gone."
   return 1
@@ -57,6 +59,31 @@ count_resources() {
   terraform state list 2> /dev/null | grep -vc '^data\.' || true
 }
 
+summary="## Workloads"$'\n\n'"| Workspace | Result |"$'\n'"| --- | --- |"
+current_workspace=""
+remaining_workspaces=()
+
+# Whatever happens, the summary collected so far reaches the run summary
+# and the log group is closed, so a failure half way through still shows
+# which workspaces are gone and which were not touched.
+finish() {
+  local exit_code=$?
+  local untouched
+  if [ -n "${current_workspace}" ]; then
+    echo "::endgroup::"
+    if [ "${exit_code}" -ne 0 ]; then
+      terraform workspace select default > /dev/null 2>&1 || true
+      summary+=$'\n'"| ${current_workspace} | failed with exit code ${exit_code}, see the log |"
+      for untouched in "${remaining_workspaces[@]}"; do
+        summary+=$'\n'"| ${untouched} | not touched because ${current_workspace} failed |"
+      done
+      echo "::error::Destroying workspace ${current_workspace} failed with exit code ${exit_code}."
+    fi
+  fi
+  printf '%s\n' "${summary}" >> "${summary_file}"
+}
+trap finish EXIT
+
 workspaces="$(list_workspaces)"
 previews="$(printf '%s\n' "${workspaces}" | grep '^pr-' || true)"
 others="$(printf '%s\n' "${workspaces}" | grep -v '^pr-' | grep -vx 'production' || true)"
@@ -65,7 +92,7 @@ mapfile -t ordered < <(printf '%s\n' "${previews}" "${others}" "${production}" |
 
 if [ "${#ordered[@]}" -eq 0 ]; then
   echo "No workloads workspace besides default exists; nothing to destroy."
-  printf '## Workloads\n\nNo workspace besides `default` existed.\n' >> "${summary_file}"
+  summary="## Workloads"$'\n\n'"No workspace besides default existed."
   exit 0
 fi
 
@@ -77,27 +104,27 @@ fi
 echo "Workspaces in destroy order (${mode} mode):"
 printf -- '- %s\n' "${ordered[@]}"
 
-summary="## Workloads"$'\n\n'"| Workspace | Result |"$'\n'"| --- | --- |"
-for workspace in "${ordered[@]}"; do
-  echo "::group::Workspace ${workspace}"
-  terraform workspace select "${workspace}"
+for index in "${!ordered[@]}"; do
+  current_workspace="${ordered[index]}"
+  remaining_workspaces=("${ordered[@]:index+1}")
+  echo "::group::Workspace ${current_workspace}"
+  terraform workspace select "${current_workspace}"
   resource_count="$(count_resources)"
   if [ "${mode}" = destroy ]; then
     terraform destroy -input=false -auto-approve -no-color
   fi
   terraform workspace select default
   if [ "${mode}" = orphan ]; then
-    terraform workspace delete -force "${workspace}"
+    terraform workspace delete -force "${current_workspace}"
     result="cluster unreachable: state with ${resource_count} resources removed, workspace deleted"
-  elif [ "${workspace}" = production ]; then
+  elif [ "${current_workspace}" = production ]; then
     result="${resource_count} resources destroyed, workspace kept"
   else
-    terraform workspace delete "${workspace}"
+    terraform workspace delete "${current_workspace}"
     result="${resource_count} resources destroyed, workspace deleted"
   fi
-  echo "${workspace}: ${result}"
-  summary+=$'\n'"| ${workspace} | ${result} |"
+  echo "${current_workspace}: ${result}"
+  summary+=$'\n'"| ${current_workspace} | ${result} |"
   echo "::endgroup::"
+  current_workspace=""
 done
-
-printf '%s\n' "${summary}" >> "${summary_file}"
