@@ -16,6 +16,7 @@ type Scenario = {
   deploymentUrls?: string;
   expectedCommit?: string;
   healthReadyAfter?: number;
+  issuerReadyAfter?: number;
   timeoutSeconds?: number;
   issuer?: string;
   allowStagingCertificate?: string;
@@ -45,6 +46,7 @@ function runScript(scenario: Scenario): Outcome {
       FAKE_STATE_DIRECTORY: posixPath(stateDirectory),
       FAKE_HEALTH_COMMIT: expectedCommit,
       FAKE_HEALTH_READY_AFTER: String(scenario.healthReadyAfter ?? 0),
+      FAKE_ISSUER_READY_AFTER: String(scenario.issuerReadyAfter ?? 0),
       FAKE_ISSUER:
         scenario.issuer ?? "issuer=C = US, O = Let's Encrypt, CN = YR2",
       FAKE_REDIRECT: redirect,
@@ -96,6 +98,24 @@ describe('verify-deployment.sh', () => {
     ).toHaveLength(3);
   });
 
+  it('keeps polling while Traefik still serves its default certificate', () => {
+    const outcome = runScript({
+      deploymentUrls: nodeUrl,
+      issuerReadyAfter: 2,
+      allowStagingCertificate: 'true',
+      issuer:
+        "issuer=C = US, O = Let's Encrypt, CN = (STAGING) Ersatz Emmer YR2",
+    });
+
+    expect(outcome.status, outcome.output).toBe(0);
+    expect(outcome.calls.filter((call) => call === 'sleep 10')).toHaveLength(2);
+    expect(
+      outcome.calls.filter((call) => call.startsWith('openssl x509')),
+    ).toHaveLength(3);
+    expect(outcome.output).not.toContain('TRAEFIK DEFAULT CERT');
+    expect(outcome.output).toContain('certificate issuer: issuer=C = US');
+  });
+
   it('checks every URL of the list', () => {
     const outcome = runScript({
       deploymentUrls: `${nodeUrl} ${apexUrl}`,
@@ -131,11 +151,12 @@ describe('verify-deployment.sh', () => {
     const outcome = runScript({
       deploymentUrls: nodeUrl,
       issuer: 'issuer=CN=TRAEFIK DEFAULT CERT',
+      timeoutSeconds: 0,
     });
 
     expect(outcome.status).toBe(1);
     expect(outcome.output).toContain(
-      "::error::https://node1.example.org/health does not serve a Let's Encrypt production certificate, got: issuer=CN=TRAEFIK DEFAULT CERT",
+      "::error::https://node1.example.org/health does not serve a Let's Encrypt production certificate after 0 seconds, got: issuer=CN=TRAEFIK DEFAULT CERT",
     );
   });
 
@@ -149,11 +170,12 @@ describe('verify-deployment.sh', () => {
       const outcome = runScript({
         deploymentUrls: nodeUrl,
         issuer: stagingIssuer,
+        timeoutSeconds: 0,
       });
 
       expect(outcome.status).toBe(1);
       expect(outcome.output).toContain(
-        `::error::${nodeUrl}/health does not serve a Let's Encrypt production certificate, got: ${stagingIssuer}`,
+        `::error::${nodeUrl}/health does not serve a Let's Encrypt production certificate after 0 seconds, got: ${stagingIssuer}`,
       );
       expect(httpsCalls(outcome).length).toBeGreaterThan(0);
       for (const call of outcome.calls) {
@@ -182,11 +204,12 @@ describe('verify-deployment.sh', () => {
       const outcome = runScript({
         deploymentUrls: nodeUrl,
         allowStagingCertificate: 'true',
+        timeoutSeconds: 0,
       });
 
       expect(outcome.status).toBe(1);
       expect(outcome.output).toContain(
-        `::error::${nodeUrl}/health does not serve a Let's Encrypt staging certificate, got: issuer=C = US, O = Let's Encrypt, CN = YR2`,
+        `::error::${nodeUrl}/health does not serve a Let's Encrypt staging certificate after 0 seconds, got: issuer=C = US, O = Let's Encrypt, CN = YR2`,
       );
     });
 

@@ -60,6 +60,13 @@ probe() {
   curl -sS --retry 3 --retry-connrefused --max-time 10 "${certificate_options[@]}" "$@"
 }
 
+served_issuer() {
+  timeout 15 openssl s_client -connect "$1:443" -servername "$1" < /dev/null 2> /dev/null | openssl x509 -noout -issuer 2> /dev/null || true
+}
+
+# The certificate is ordered when the ingress appears, so the served
+# issuer is polled together with the commit: Traefik answers with its
+# default certificate until cert-manager has stored the issued one.
 for base_url in "${urls[@]}"; do
   host="${base_url#https://}"
   health_url="${base_url}/health"
@@ -67,23 +74,21 @@ for base_url in "${urls[@]}"; do
   while true; do
     payload="$(curl -sS --max-time 10 "${certificate_options[@]}" "${health_url}" || true)"
     commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2> /dev/null || true)"
-    if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
+    issuer="$(served_issuer "${host}")"
+    if [ "${commit}" = "${EXPECTED_COMMIT}" ] && issuer_matches "${issuer}"; then
       break
     fi
     if ((SECONDS >= deadline)); then
-      fail "${health_url} did not report commit ${EXPECTED_COMMIT} within ${timeout_seconds} seconds. Last payload: ${payload}"
+      if [ "${commit}" != "${EXPECTED_COMMIT}" ]; then
+        fail "${health_url} did not report commit ${EXPECTED_COMMIT} within ${timeout_seconds} seconds. Last payload: ${payload}"
+      fi
+      fail "${health_url} does not serve a ${expected_issuer} certificate after ${timeout_seconds} seconds, got: ${issuer}"
     fi
     sleep 10
   done
   echo "${health_url} answered:"
   printf '%s\n' "${payload}"
-
-  issuer="$(timeout 15 openssl s_client -connect "${host}:443" -servername "${host}" < /dev/null 2> /dev/null | openssl x509 -noout -issuer 2> /dev/null || true)"
-  if issuer_matches "${issuer}"; then
-    echo "${health_url} certificate issuer: ${issuer}"
-  else
-    fail "${health_url} does not serve a ${expected_issuer} certificate, got: ${issuer}"
-  fi
+  echo "${health_url} certificate issuer: ${issuer}"
 
   plain_http_url="http://${host}/health"
   redirect="$(probe -o /dev/null -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
