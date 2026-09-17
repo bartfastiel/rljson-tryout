@@ -1,5 +1,20 @@
 # rljson-tryout
 
+[![Pipeline](https://github.com/bartfastiel/rljson-tryout/actions/workflows/pipeline.yml/badge.svg)](https://github.com/bartfastiel/rljson-tryout/actions/workflows/pipeline.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![License](https://img.shields.io/github/license/bartfastiel/rljson-tryout)](LICENSE)
+![Node](https://img.shields.io/badge/node-24-339933?logo=node.js&logoColor=white)
+
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=coverage)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Bugs](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=bugs)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Vulnerabilities](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=vulnerabilities)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Code Smells](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=code_smells)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Duplicated Lines (%)](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=duplicated_lines_density)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=bartfastiel_rljson-tryout&metric=ncloc)](https://sonarcloud.io/summary/new_code?id=bartfastiel_rljson-tryout)
+
 A hobby project to learn [rljson](https://github.com/rljson) by building
 something real with it: a small network of nodes that discover each other,
 synchronise a pet shop dataset between different database backends, and each
@@ -60,6 +75,9 @@ Environment variables the service understands so far:
 | `HTTP_PORT`  | `8080`    | Port to listen on, must be an integer 0 to 65535                    |
 | `LOG_LEVEL`  | `info`    | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`) |
 | `GIT_COMMIT` | `unknown` | Commit shown by `/health`, set by the container build               |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, pull request and
+commit conventions.
 
 ## Reproducing
 
