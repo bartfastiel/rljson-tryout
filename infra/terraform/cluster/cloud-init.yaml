@@ -1,0 +1,32 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+write_files:
+  # k3s applies every manifest in this directory at start-up; a
+  # HelmChartConfig merges its values into the bundled Traefik chart.
+  - path: /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+    permissions: '0644'
+    content: |
+      apiVersion: helm.cattle.io/v1
+      kind: HelmChartConfig
+      metadata:
+        name: traefik
+        namespace: kube-system
+      spec:
+        valuesContent: |-
+          ports:
+            web:
+              http:
+                redirections:
+                  entryPoint:
+                    to: websecure
+                    scheme: https
+                    permanent: true
+
+runcmd:
+  - >-
+    curl -sfL https://get.k3s.io |
+    INSTALL_K3S_CHANNEL=stable
+    INSTALL_K3S_EXEC="server --tls-san ${public_ipv4}"
+    sh -
