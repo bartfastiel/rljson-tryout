@@ -47,10 +47,9 @@ const notFound = (reply: FastifyReply, message: string): ErrorBody => {
  * editable, a species or trait no row has) live in `animalChangeProblems`
  * and `PetShopStore.updateAnimal`, whose `AnimalValidationError` carries
  * the message the form shows; the schema only keeps values of the wrong
- * JSON type out of the store. Fastify's default validator coerces where
- * it can (a lone string becomes a one-element array for `traitIds`), so
- * only a value it cannot coerce, such as a word where `priceCents` expects
- * a number, is refused here.
+ * JSON type out of the store. The server's validator runs without type
+ * coercion (`server.ts`), so `"100"`, `true` or `null` where a number is
+ * expected are refused here rather than rewritten.
  */
 const updateAnimalBodySchema = {
   type: 'object',

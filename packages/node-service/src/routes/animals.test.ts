@@ -291,7 +291,7 @@ describe('GET /api/animals/:id?version=<hash>', () => {
     store = new PetShopStore();
     await store.initialize();
     await store.seedIfEmpty();
-    server = buildServer(testConfiguration, store);
+    server = buildTestServer(store);
   });
 
   afterEach(async () => {
@@ -347,7 +347,7 @@ describe('GET /api/animals/:id/history', () => {
     store = new PetShopStore();
     await store.initialize();
     await store.seedIfEmpty();
-    server = buildServer(testConfiguration, store);
+    server = buildTestServer(store);
   });
 
   afterEach(async () => {
@@ -415,7 +415,7 @@ describe('PUT /api/animals/:id', () => {
     store = new PetShopStore();
     await store.initialize();
     await store.seedIfEmpty();
-    server = buildServer(testConfiguration, store);
+    server = buildTestServer(store);
   });
 
   afterEach(async () => {
@@ -481,19 +481,36 @@ describe('PUT /api/animals/:id', () => {
     },
   );
 
-  it('answers 400 for a value of the wrong JSON type before reaching the store', async () => {
-    const response = await update('donald-the-third', {
-      priceCents: 'expensive',
-    });
+  it.each([
+    ['a word as the price', { priceCents: 'expensive' }, 'priceCents'],
+    ['a numeric string as the price', { priceCents: '100' }, 'priceCents'],
+    ['null as the price', { priceCents: null }, 'priceCents'],
+    ['a boolean as the price', { priceCents: true }, 'priceCents'],
+    ['null as the story', { backgroundStory: null }, 'backgroundStory'],
+    ['a number as the name', { name: 123 }, 'name'],
+    ['a string as the trait list', { traitIds: 'fiercely-loyal' }, 'traitIds'],
+  ])(
+    'answers 400 for %s without coercing it and writes nothing',
+    async (_description, body, field) => {
+      const before = await server.inject({
+        method: 'GET',
+        url: '/api/animals/donald-the-third',
+      });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json<{ message: string }>().message).toContain(
-      'priceCents',
-    );
-    const history = await server.inject({
-      method: 'GET',
-      url: '/api/animals/donald-the-third/history',
-    });
-    expect(history.json()).toHaveLength(1);
-  });
+      const response = await update('donald-the-third', body);
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ message: string }>().message).toContain(field);
+      const history = await server.inject({
+        method: 'GET',
+        url: '/api/animals/donald-the-third/history',
+      });
+      expect(history.json()).toHaveLength(1);
+      const after = await server.inject({
+        method: 'GET',
+        url: '/api/animals/donald-the-third',
+      });
+      expect(after.json()).toStrictEqual(before.json());
+    },
+  );
 });

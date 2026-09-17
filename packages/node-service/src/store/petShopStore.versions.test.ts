@@ -243,8 +243,23 @@ describe.each<TraitRelationMode>(['multi-reference', 'junction'])(
         );
         expect(stored.breederRef).toBe(breeder._hash);
         expect(stored.traitsRefs).toStrictEqual([
-          traitHash('fiercely-loyal'),
           traitHash('competitive-streak'),
+          traitHash('fiercely-loyal'),
+        ]);
+      });
+
+      it('writes traitsRefs in the canonical order whatever order the ids come in', async () => {
+        const first = (await store.updateAnimal('donald-the-third', {
+          traitIds: ['keen-senses', 'fiercely-loyal'],
+        }))!;
+        const second = (await store.updateAnimal('donald-the-third', {
+          traitIds: ['fiercely-loyal', 'keen-senses'],
+        }))!;
+
+        expect(second.hash).toBe(first.hash);
+        expect(first.traits.map((trait) => trait.id)).toStrictEqual([
+          'fiercely-loyal',
+          'keen-senses',
         ]);
       });
 
@@ -473,6 +488,42 @@ describe.each<TraitRelationMode>(['multi-reference', 'junction'])(
     });
   },
 );
+
+describe('PetShopStore edits agree across trait relation modes', () => {
+  it('produces the same row hash for the same edit in both modes', async () => {
+    const stores = await Promise.all(
+      (['multi-reference', 'junction'] as const).map(async (mode) => {
+        const store = new PetShopStore({ traitRelationMode: mode });
+        await store.initialize();
+        await store.seedIfEmpty();
+        return store;
+      }),
+    );
+    try {
+      const [renamedInMultiReference, renamedInJunction] = await Promise.all(
+        stores.map((store) =>
+          store.updateAnimal('sir-quackington', { name: 'Gadget Edited' }),
+        ),
+      );
+      const [restoredInMultiReference, restoredInJunction] = await Promise.all(
+        stores.map((store) =>
+          store.updateAnimal('sir-quackington', { name: 'Sir Quackington' }),
+        ),
+      );
+
+      expect(renamedInJunction!.hash).toBe(renamedInMultiReference!.hash);
+      expect(restoredInJunction!.hash).toBe(restoredInMultiReference!.hash);
+      expect(restoredInMultiReference!.hash).toBe(
+        seedAnimal('sir-quackington')._hash,
+      );
+      expect(renamedInJunction!.traits).toStrictEqual(
+        renamedInMultiReference!.traits,
+      );
+    } finally {
+      await Promise.all(stores.map((store) => store.close()));
+    }
+  });
+});
 
 describe('PetShopStore lists resolve through the current-version rule', () => {
   let store: PetShopStore;
