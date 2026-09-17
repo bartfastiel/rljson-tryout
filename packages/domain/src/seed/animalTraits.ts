@@ -1,7 +1,8 @@
 import { hashed } from '../hashing.ts';
-import type {
-  AnimalTraitRow,
-  HashedAnimalTraitRow,
+import {
+  animalTraitId,
+  type AnimalTraitRow,
+  type HashedAnimalTraitRow,
 } from '../tables/animalTraits.ts';
 import { animalsSeed } from './animals.ts';
 import { traitsSeed } from './traits.ts';
@@ -39,7 +40,7 @@ export const animalTraitsSeed: readonly HashedAnimalTraitRow[] =
   animalsSeed.flatMap((animal) =>
     animal.traitsRefs.map((traitRef) => {
       const row: AnimalTraitRow = {
-        id: `${animal.id}--${traitIdForHash(traitRef)}`,
+        id: animalTraitId(animal.id, traitIdForHash(traitRef)),
         animalRef: animal._hash,
         traitRef,
       };

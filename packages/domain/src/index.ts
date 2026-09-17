@@ -1,9 +1,27 @@
+export {
+  animalChangeProblems,
+  editableAnimalFields,
+  updateAnimalChangeSetId,
+  type AnimalChanges,
+} from './animalChanges.ts';
+export {
+  compareTimeIdsNewestFirst,
+  currentRows,
+  currentVersions,
+  referenceColumnOf,
+  versionsOf,
+  type CurrentVersions,
+  type EntityRow,
+  type EntityVersion,
+  type VersionHistoryRow,
+} from './entityVersions.ts';
 export { hashed } from './hashing.ts';
 export {
   invoiceId,
   invoiceItemId,
   invoiceNumber,
   issueInvoiceChangeSetId,
+  nextInvoiceSequence,
 } from './invoiceNumbering.ts';
 export { animalTraitsSeed } from './seed/animalTraits.ts';
 export { animalsSeed } from './seed/animals.ts';
@@ -18,6 +36,7 @@ export { personsSeed } from './seed/persons.ts';
 export { speciesSeed } from './seed/species.ts';
 export { traitsSeed } from './seed/traits.ts';
 export {
+  animalTraitId,
   animalTraitsInsertHistoryTableCfg,
   animalTraitsTableCfg,
   type AnimalTraitRow,

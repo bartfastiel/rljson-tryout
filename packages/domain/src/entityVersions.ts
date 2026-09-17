@@ -1,0 +1,210 @@
+/**
+ * The "current version" rule of roadmap section 2.6, implemented once for
+ * every entity table: a row never changes, a change is a new row with a new
+ * `_hash` plus an InsertHistory row whose `previous` names the `timeId` of
+ * the version it supersedes. The InsertHistory rows of one table therefore
+ * form a DAG, and the current version of an entity is the version whose
+ * history row is a tip of that DAG (no other row of the same entity names
+ * it in `previous`). More than one tip for one entity is a conflict
+ * (`docs/findings/entity-versions.md`).
+ *
+ * rljson's own `Db.detectDagBranch` applies the same tip rule to a whole
+ * table, which reports a branch as soon as a table holds two independent
+ * entities (`docs/findings/db-basics.md`). This module groups the history
+ * rows by entity `id` through the row each one references, so tips are
+ * counted per entity, which is what lists, details and conflict detection
+ * (slice D11) need.
+ */
+
+/**
+ * What this module needs of an InsertHistory row: its `timeId`, the
+ * `timeId`s it supersedes, and the `<table>Ref` column that names the row
+ * it was written for (`animalsRef` for the `animals` table). The column
+ * name is derived from the table key by `referenceColumnOf`, matching
+ * `createInsertHistoryTableCfg` of `@rljson/rljson`.
+ */
+export type VersionHistoryRow = {
+  timeId: string;
+  previous?: readonly string[];
+  [referenceColumn: string]: unknown;
+};
+
+/**
+ * What this module needs of an entity row: its content hash and its stable
+ * identity across versions.
+ */
+export type EntityRow = {
+  _hash: string;
+  id: string;
+};
+
+/**
+ * One version of one entity, as `versionsOf` lists them: the row, the
+ * `timeId` of the InsertHistory row that wrote it, the `timeId`s that
+ * version superseded, and whether it is a tip of the entity's DAG.
+ */
+export type EntityVersion<Row extends EntityRow> = {
+  row: Row;
+  timeId: string;
+  previous: string[];
+  current: boolean;
+};
+
+/**
+ * The outcome of the rule for a whole table: the current row per entity
+ * `id`, and the `id`s whose DAG has more than one tip. A conflicting entity
+ * still has a current row in `currentById` (the tip with the newest
+ * `timeId`, ties broken by the `timeId`'s unique part), so a list never
+ * loses an entity to a conflict; slice D11 surfaces `conflictingIds` to the
+ * operator and slice D12 closes the branch with a merge version.
+ */
+export type CurrentVersions<Row extends EntityRow> = {
+  currentById: Map<string, Row>;
+  conflictingIds: Set<string>;
+};
+
+/**
+ * The name of the column an InsertHistory row references its table's row
+ * through: `<tableKey>Ref`, the convention `createInsertHistoryTableCfg`
+ * of `@rljson/rljson` uses (`animalsRef`, `speciesRef`).
+ */
+export const referenceColumnOf = (tableKey: string): string => `${tableKey}Ref`;
+
+const timestampOf = (timeId: string): number =>
+  Number(timeId.slice(0, timeId.indexOf(':')));
+
+/**
+ * Orders two rljson `timeId`s (`<milliseconds since epoch>:<4 unique
+ * characters>`) newest first: by timestamp, ties broken by the unique
+ * part so that the order is total and deterministic on every node.
+ */
+export const compareTimeIdsNewestFirst = (
+  left: string,
+  right: string,
+): number =>
+  timestampOf(right) - timestampOf(left) || right.localeCompare(left);
+
+/**
+ * A history row paired with the entity row it references, the unit the
+ * rule reasons about. A version is a history row, not a row: the same row
+ * hash can be written twice (an edit that restores earlier content) and
+ * then counts as two versions. A history row whose reference resolves to
+ * no row in the table says nothing about any entity and is left out; so
+ * is a row no history row references, which has no place in the DAG and
+ * therefore no version (every write in this project goes through
+ * `Db.insert` or writes its history row alongside, so nothing is lost).
+ */
+type Version<Row extends EntityRow> = {
+  row: Row;
+  history: VersionHistoryRow;
+};
+
+const versionsByEntity = <Row extends EntityRow>(
+  rows: readonly Row[],
+  historyRows: readonly VersionHistoryRow[],
+  tableKey: string,
+): Map<string, Version<Row>[]> => {
+  const referenceColumn = referenceColumnOf(tableKey);
+  const rowsByHash = new Map(rows.map((row) => [row._hash, row]));
+  const byEntity = new Map<string, Version<Row>[]>();
+
+  for (const history of historyRows) {
+    const row = rowsByHash.get(history[referenceColumn] as string);
+    if (row === undefined) {
+      continue;
+    }
+    const versions = byEntity.get(row.id) ?? [];
+    versions.push({ row, history });
+    byEntity.set(row.id, versions);
+  }
+
+  return byEntity;
+};
+
+const newestFirst = <Row extends EntityRow>(
+  versions: readonly Version<Row>[],
+): Version<Row>[] =>
+  [...versions].sort((left, right) =>
+    compareTimeIdsNewestFirst(left.history.timeId, right.history.timeId),
+  );
+
+/**
+ * The tips of one entity's DAG, newest first: the versions no other
+ * version of the entity names in `previous`. History rows only ever name
+ * rows written before them, so a cycle cannot arise from honest writes;
+ * should one arrive anyway (a hostile peer, slice D14 and later), the
+ * newest version counts as the single tip rather than the entity
+ * disappearing from every list.
+ */
+const tipsOf = <Row extends EntityRow>(
+  versions: readonly Version<Row>[],
+): Version<Row>[] => {
+  const superseded = new Set(
+    versions.flatMap((version) => version.history.previous ?? []),
+  );
+  const tips = newestFirst(
+    versions.filter((version) => !superseded.has(version.history.timeId)),
+  );
+  return tips.length > 0 ? tips : newestFirst(versions).slice(0, 1);
+};
+
+/**
+ * Applies the current-version rule to every entity of one table: given all
+ * rows of the table and all rows of its InsertHistory companion, returns
+ * the current row per entity `id` and the set of `id`s with more than one
+ * tip. Pure: reads its arguments and nothing else.
+ */
+export const currentVersions = <Row extends EntityRow>(
+  rows: readonly Row[],
+  historyRows: readonly VersionHistoryRow[],
+  tableKey: string,
+): CurrentVersions<Row> => {
+  const currentById = new Map<string, Row>();
+  const conflictingIds = new Set<string>();
+
+  for (const [id, versions] of versionsByEntity(rows, historyRows, tableKey)) {
+    const tips = tipsOf(versions);
+    currentById.set(id, tips[0].row);
+    if (tips.length > 1) {
+      conflictingIds.add(id);
+    }
+  }
+
+  return { currentById, conflictingIds };
+};
+
+/**
+ * The current rows of one table, ordered by `id`: the shape every list
+ * endpoint serves. Conflicting entities appear with their newest tip.
+ */
+export const currentRows = <Row extends EntityRow>(
+  rows: readonly Row[],
+  historyRows: readonly VersionHistoryRow[],
+  tableKey: string,
+): Row[] =>
+  [...currentVersions(rows, historyRows, tableKey).currentById.values()].sort(
+    (left, right) => left.id.localeCompare(right.id),
+  );
+
+/**
+ * Every version of one entity, newest first, each flagged `current` when
+ * it is a tip of the entity's DAG. An `id` the table does not hold gives an
+ * empty list. Newest first means by `timeId`, the same order every node
+ * computes for the same history rows.
+ */
+export const versionsOf = <Row extends EntityRow>(
+  rows: readonly Row[],
+  historyRows: readonly VersionHistoryRow[],
+  tableKey: string,
+  id: string,
+): EntityVersion<Row>[] => {
+  const versions = versionsByEntity(rows, historyRows, tableKey).get(id) ?? [];
+  const tipTimeIds = new Set(tipsOf(versions).map((tip) => tip.history.timeId));
+
+  return newestFirst(versions).map((version) => ({
+    row: version.row,
+    timeId: version.history.timeId,
+    previous: [...(version.history.previous ?? [])],
+    current: tipTimeIds.has(version.history.timeId),
+  }));
+};

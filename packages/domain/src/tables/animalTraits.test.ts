@@ -2,9 +2,18 @@ import { throwOnInvalidTableCfg } from '@rljson/rljson';
 import { describe, expect, it } from 'vitest';
 
 import {
+  animalTraitId,
   animalTraitsInsertHistoryTableCfg,
   animalTraitsTableCfg,
 } from './animalTraits.ts';
+
+describe('animalTraitId', () => {
+  it('joins the animal id and the trait id with two dashes', () => {
+    expect(animalTraitId('sir-quackington', 'fiercely-loyal')).toBe(
+      'sir-quackington--fiercely-loyal',
+    );
+  });
+});
 
 describe('animalTraitsTableCfg', () => {
   it('is a valid rljson table configuration', () => {
