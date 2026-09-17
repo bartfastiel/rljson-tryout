@@ -27,8 +27,12 @@ this file only repeats what a contributor needs to remember day to day.
 - Unit tests with Vitest live next to the source they test (`*.test.ts`).
 - Behaviour that a user or another node can observe gets a Gherkin feature
   (`features/*.feature`, steps in `features/steps/`).
-- Coverage of new code stays above 80 percent; the Sonar quality gate on the
-  pull request enforces it.
+- Coverage of new code stays above 80 percent; the `checks` job runs a
+  SonarCloud analysis and fails the pull request when its quality gate does
+  not pass. SonarCloud pull request decoration (a separate check and inline
+  comments from the SonarCloud GitHub app) needs that app bound to the
+  repository, a one-time step for a human; until then the gate result only
+  shows in the `checks` job log.
 
 ## English and naming
 

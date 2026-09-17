@@ -410,7 +410,12 @@ merged.
       `**/features/**` patterns from `sonar.test.inclusions`, because source
       and test files share the same `packages` root and SonarCloud requires a
       file to be excluded from source scope explicitly when it is pulled into
-      test scope from an overlapping path.
+      test scope from an overlapping path. The SonarCloud GitHub app does not
+      post its own check run without being bound to the repository first (a
+      one-time human step), so branch protection cannot require a Sonar
+      status check; the quality gate is instead enforced inside the `checks`
+      job with `SonarSource/sonarqube-quality-gate-action` after the scan
+      step, and branch protection keeps requiring only `checks`.
 - [x] **A3 Node service with health endpoint.** Depends on: A1. Package
       `node-service`: Fastify server, `GET /health` per 2.5 with version from
       `package.json` and commit from `GIT_COMMIT` env, configuration module for
