@@ -396,7 +396,7 @@ merged.
       TypeScript is pinned to the last release below 6.1 because
       `typescript-eslint` 8.70.0 does not yet support TypeScript 7, the newly
       released native compiler.
-- [ ] **A2 Sonar and branch protection.** Depends on: A1.
+- [x] **A2 Sonar and branch protection.** Depends on: A1.
       `sonar-project.properties` (organization `bartfastiel-github`, project key
       `bartfastiel_rljson-tryout`, sources `packages`, lcov path, coverage
       exclusions for `packages/web-app/**`, `**/*.test.ts`, `features/**`),
@@ -405,6 +405,12 @@ merged.
       via `gh api` (pull request required, status checks `checks` and the Sonar
       quality gate required, linear history, no required reviewers). Done when
       a test pull request shows both checks and merges only after they pass.
+      Deviation: Dependabot for Docker is deferred to A4, which adds the first
+      Dockerfile; `sonar.exclusions` also repeats the `**/*.test.ts` and
+      `**/features/**` patterns from `sonar.test.inclusions`, because source
+      and test files share the same `packages` root and SonarCloud requires a
+      file to be excluded from source scope explicitly when it is pulled into
+      test scope from an overlapping path.
 - [x] **A3 Node service with health endpoint.** Depends on: A1. Package
       `node-service`: Fastify server, `GET /health` per 2.5 with version from
       `package.json` and commit from `GIT_COMMIT` env, configuration module for

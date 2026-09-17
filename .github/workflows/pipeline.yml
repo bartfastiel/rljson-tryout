@@ -49,3 +49,9 @@ jobs:
         with:
           name: coverage
           path: coverage/lcov.info
+
+      - name: Sonar scan
+        if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
