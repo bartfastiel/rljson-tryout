@@ -4,8 +4,9 @@ import { element } from './dom.js';
 /**
  * Formatting and small status and error presentation shared by every view
  * that fetches data from the API (`animals-list.js`, `species-list.js`,
- * `animal-detail.js`), so dates, prices, loading and error states look and
- * behave identically everywhere instead of being copied into each view.
+ * `animal-detail.js`, the invoice views), so dates, prices, status badges,
+ * loading and error states look and behave identically everywhere instead
+ * of being copied into each view.
  */
 
 /**
@@ -38,6 +39,16 @@ export const parseDateOnly = (dateOnly) => {
   const [year, month, day] = dateOnly.split('-').map(Number);
   return new Date(year, month - 1, day);
 };
+
+/**
+ * The status of an invoice as a small badge, coloured by state so that an
+ * open (unpaid) invoice stands out in a list and on the detail view alike.
+ * The text is the status word itself, which is what a screen reader gets.
+ *
+ * @param {string} status
+ */
+export const statusBadge = (status) =>
+  element('span', `status-badge status-badge-${status}`, status);
 
 /**
  * A `role="status"` paragraph for a loading or an empty-result message.

@@ -67,6 +67,9 @@ test('shows a not found page with a way back for an unknown route', async ({
   await expect(
     mainNavigation(page).getByRole('link', { name: 'Breeders' }),
   ).not.toHaveAttribute('aria-current');
+  await expect(
+    mainNavigation(page).getByRole('link', { name: 'Invoices' }),
+  ).not.toHaveAttribute('aria-current');
 
   await page.getByRole('link', { name: 'Back to Animals' }).click();
 
@@ -81,7 +84,7 @@ test('gives every navigation item a tap target of at least 44 by 44 CSS pixels',
 }) => {
   await page.goto('/');
   const links = mainNavigation(page).getByRole('link');
-  await expect(links).toHaveCount(3);
+  await expect(links).toHaveCount(4);
 
   for (const link of await links.all()) {
     const box = await boundingBoxOf(link);

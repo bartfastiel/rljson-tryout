@@ -11,6 +11,13 @@
   --color-accent-tint: #f8e9dc;
   --color-focus: #1d4ed8;
   --color-error: #a4262c;
+  --color-error-tint: #fbe9e9;
+  --color-open: #8a5a00;
+  --color-open-tint: #fff3d6;
+  --color-paid: #1f6b3a;
+  --color-paid-tint: #dff3e6;
+  --color-cancelled: #5c5c66;
+  --color-cancelled-tint: #ebebef;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -46,6 +53,13 @@
     --color-accent-tint: #3a2a1c;
     --color-focus: #8ab4f8;
     --color-error: #f2a8a4;
+    --color-error-tint: #3a2222;
+    --color-open: #f5c76a;
+    --color-open-tint: #3a2f16;
+    --color-paid: #8fd9a8;
+    --color-paid-tint: #1d3a28;
+    --color-cancelled: #b5b5c0;
+    --color-cancelled-tint: #2f2f36;
   }
 }
 
@@ -431,6 +445,280 @@ a.card {
   cursor: pointer;
 }
 
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.button-secondary {
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-surface);
+}
+
+/*
+ * The invoices view puts its one action, "New invoice", next to the title
+ * so it is reachable without scrolling past the list; on a phone the two
+ * wrap onto separate lines rather than squeezing the title.
+ */
+.view-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.view-header .view-title {
+  margin: 0;
+}
+
+.section-title {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.status-badge-open {
+  color: var(--color-open);
+  background: var(--color-open-tint);
+}
+
+.status-badge-paid {
+  color: var(--color-paid);
+  background: var(--color-paid-tint);
+}
+
+.status-badge-cancelled {
+  color: var(--color-cancelled);
+  background: var(--color-cancelled-tint);
+}
+
+.invoice-card-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.invoice-number {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.3;
+}
+
+.invoice-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.invoice-total {
+  margin: 0;
+  font-weight: 600;
+}
+
+/*
+ * Invoice lines are shared by the form (with a quantity stepper) and the
+ * detail view (with the quantity as text): name and price on the left,
+ * the line total on the right, the stepper between them when present.
+ */
+.invoice-line-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invoice-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.invoice-line-text {
+  display: flex;
+  flex: 1 1 10rem;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.invoice-line-name {
+  font-weight: 600;
+}
+
+.invoice-line-price {
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.invoice-line-total {
+  margin-left: auto;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.invoice-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border-top: 2px solid var(--color-border);
+  font-size: 1.0625rem;
+}
+
+.invoice-total-amount {
+  font-size: 1.25rem;
+}
+
+.invoice-change-set {
+  margin: var(--space-6) 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The invoice form: every control is at least a 44 px target. */
+.invoice-form {
+  display: flex;
+  flex-direction: column;
+  max-width: var(--text-measure);
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
+}
+
+.form-label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.select,
+.text-input {
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.animal-picker-list {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 22rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.animal-picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.animal-picker-text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.animal-picker-name {
+  font-weight: 600;
+}
+
+.animal-picker-meta {
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.animal-picker-empty {
+  padding: var(--space-3) 0;
+  color: var(--color-text-muted);
+}
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.stepper-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap-target);
+  min-height: var(--tap-target);
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: transparent;
+  cursor: pointer;
+}
+
+.stepper-value {
+  min-width: 2rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.form-error {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  background: var(--color-error-tint);
+}
+
+.invoice-form .button[type='submit'] {
+  align-self: flex-start;
+  margin-top: var(--space-4);
+}
+
 @media (hover: hover) {
   .app-navigation a:hover {
     color: var(--color-accent);
@@ -438,6 +726,10 @@ a.card {
 
   .button:hover {
     filter: brightness(1.1);
+  }
+
+  .stepper-button:hover {
+    background: var(--color-accent-tint);
   }
 
   .chip:not([aria-current='page']):hover {

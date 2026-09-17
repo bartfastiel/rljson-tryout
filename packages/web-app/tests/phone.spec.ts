@@ -100,6 +100,54 @@ test('keeps all three filter groups usable at 360 pixels when a breeder is activ
   }
 });
 
+test('keeps all four navigation entries tappable with their labels readable at 360 pixels', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.goto('/#/invoices');
+  await expect(cardListItems(page).first()).toBeVisible();
+
+  const links = mainNavigation(page).getByRole('link');
+  await expect(links).toHaveCount(4);
+  for (const [index, name] of [
+    'Animals',
+    'Species',
+    'Breeders',
+    'Invoices',
+  ].entries()) {
+    const link = links.nth(index);
+    await expect(link).toHaveText(name);
+    const box = await boundingBoxOf(link);
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    const label = link.locator('span');
+    await expect(label).toBeVisible();
+    const labelBox = await boundingBoxOf(label);
+    expect(labelBox.width).toBeLessThanOrEqual(box.width);
+    const labelIsClipped = await label.evaluate(
+      (element) => element.scrollWidth > element.clientWidth,
+    );
+    expect(labelIsClipped).toBe(false);
+  }
+  await expectNoHorizontalScroll(page);
+});
+
+test('does not scroll horizontally on the invoice form at 360 pixels', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.goto('/#/invoices/new');
+  await page.getByRole('button', { name: 'Add Sir Quackington' }).click();
+  await page
+    .getByRole('button', { name: 'Add Henrietta the Egg Champion' })
+    .click();
+
+  await expect(
+    page.getByRole('list', { name: 'Invoice items' }).getByRole('listitem'),
+  ).toHaveCount(2);
+  await expectNoHorizontalScroll(page);
+});
+
 test('reads the long background story comfortably on a phone', async ({
   page,
 }) => {
