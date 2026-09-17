@@ -28,6 +28,9 @@ first slice whose dependencies are merged.
   (`*.test.ts`). Behaviour that a user or a second node can observe gets a
   Gherkin feature (`features/*.feature`, steps in `features/steps/`). Keep
   coverage of new code above 80 percent; the Sonar quality gate enforces it.
+  Zero open Sonar issues on new code is a standing rule too: the
+  `Sonar issues on new code` step in `checks` fails the pull request when
+  SonarCloud reports any.
 - **English everywhere in the repository.** Identifiers are full words, no
   abbreviations (`invoiceItem`, not `invItm`). Comments only where the code
   cannot say it.

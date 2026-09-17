@@ -94,6 +94,30 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      # Runs after the quality gate step so the analysis it waited for has
+      # already landed on SonarCloud. The project is public, so the search
+      # needs no token; SONAR_TOKEN is sent as the basic auth user with an
+      # empty password in case the API ever starts requiring one.
+      - name: Sonar issues on new code
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          response="$(curl -s --max-time 15 -u "${SONAR_TOKEN}:" \
+            "https://sonarcloud.io/api/issues/search?componentKeys=bartfastiel_rljson-tryout&pullRequest=${PULL_REQUEST_NUMBER}&resolved=false&ps=100")"
+          total="$(printf '%s' "${response}" | jq -r '.total // empty')"
+          if [ -z "${total}" ]; then
+            echo "::error::Could not read the Sonar issue count from the response: ${response}"
+            exit 1
+          fi
+          if [ "${total}" != "0" ]; then
+            printf '%s' "${response}" | jq -r \
+              '.issues[] | (.component | sub("^bartfastiel_rljson-tryout:"; "")) as $file | if .line then "::error file=\($file),line=\(.line)::\(.rule) \(.message)" else "::error file=\($file)::\(.rule) \(.message)" end'
+            echo "::error::${total} open Sonar issue(s) on the new code of this pull request. See https://sonarcloud.io/project/issues?id=bartfastiel_rljson-tryout&pullRequest=${PULL_REQUEST_NUMBER}&resolved=false"
+            exit 1
+          fi
+
   image:
     name: image
     runs-on: ubuntu-latest

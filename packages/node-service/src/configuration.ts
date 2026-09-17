@@ -42,7 +42,7 @@ const defaultWebAppDirectory = resolve(
 const readWebAppDirectory = (value: string | undefined): string => {
   const directory = resolve(value ?? defaultWebAppDirectory);
   const stats = statSync(directory, { throwIfNoEntry: false });
-  if (stats === undefined || !stats.isDirectory()) {
+  if (!stats?.isDirectory()) {
     throw new Error(
       `WEB_APP_DIRECTORY must be an existing directory, got "${directory}"`,
     );

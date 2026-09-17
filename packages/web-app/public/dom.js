@@ -27,7 +27,7 @@ export const element = (tagName, className, text = '') => {
 export const requiredElement = (selector) => {
   const found = document.querySelector(selector);
   if (!(found instanceof HTMLElement)) {
-    throw new Error(`The page has no element matching "${selector}".`);
+    throw new TypeError(`The page has no element matching "${selector}".`);
   }
   return found;
 };
