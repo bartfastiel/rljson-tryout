@@ -50,6 +50,18 @@ describe('animalsSeed', () => {
     }
   });
 
+  it('gives every animal a non-empty background story, exactly one of them long', () => {
+    for (const row of animalsSeed) {
+      expect(row.backgroundStory.length).toBeGreaterThan(0);
+    }
+
+    const longStories = animalsSeed.filter(
+      (row) => row.backgroundStory.length >= 4000,
+    );
+    expect(longStories).toHaveLength(1);
+    expect(longStories[0]?.id).toBe('sir-quackington');
+  });
+
   it('references every seeded species at least once', () => {
     const referencedHashes = new Set(animalsSeed.map((row) => row.speciesRef));
     const seededHashes = speciesSeed.map((row) => row._hash);
@@ -61,16 +73,16 @@ describe('animalsSeed', () => {
 
   it('has stable hashes so every node computes the same row identity', () => {
     expect(animalsSeed.map((row) => [row.id, row._hash])).toStrictEqual([
-      ['quackmore-junior', '1zITQSvDFZ3iBsoRFjeak-'],
-      ['donald-the-third', 'LiAgAAcHdpACS0weLkW87s'],
-      ['daphne-duck', 'gkYjzI7A1eAL_tiYHG9iYU'],
-      ['sir-quackington', 'ds_Q4shHXAy7roMMDRzMtS'],
-      ['bowser-the-guard-dog', 'JLKaIcDNvxQlx6pFQOsU-C'],
-      ['nosey-the-bloodhound', 'mu8xQHtvn8SARkwkaNZ1pl'],
-      ['pepper-the-poodle', 'oOgAZp6jsAfjDbL06oW91u'],
-      ['clara-cluck-junior', '6xwivtJjwqpdwsoqU0Wr8k'],
-      ['gadget-the-inventor', '3I50HlU10DUOcI0O7PI511'],
-      ['henrietta-the-egg-champion', 'QuW0VMHONHxuojLFssww61'],
+      ['quackmore-junior', '-5MDQMALTPIvpxjjyD43Hu'],
+      ['donald-the-third', 'jppXUN_rlkoI6p7VBoxnsR'],
+      ['daphne-duck', 'XgF90muWXlyTRcxVM9FceW'],
+      ['sir-quackington', '22lUsKd2gaGCpcfN4EltRU'],
+      ['bowser-the-guard-dog', '8nFn3JBnYkq-GM1-kSz26p'],
+      ['nosey-the-bloodhound', 'caNqjP2XNKIeOza432t4cc'],
+      ['pepper-the-poodle', 'jjUpNA1ELpy2xZSTjPSjK0'],
+      ['clara-cluck-junior', 'jN0Hn7o-mwHmyEfusfn-Zn'],
+      ['gadget-the-inventor', 'fvzZmqJeZKsoVSqkAceuZI'],
+      ['henrietta-the-egg-champion', 'ogRuaRl8nR3bdna6HQ-3CG'],
     ]);
   });
 

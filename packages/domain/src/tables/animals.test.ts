@@ -28,6 +28,7 @@ describe('animalsTableCfg', () => {
       ['speciesRef', 'string'],
       ['bornOn', 'string'],
       ['priceCents', 'number'],
+      ['backgroundStory', 'string'],
     ]);
   });
 
