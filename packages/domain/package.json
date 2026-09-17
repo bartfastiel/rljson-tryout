@@ -1,0 +1,16 @@
+{
+  "name": "@rljson-tryout/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rljson/hash": "0.0.19",
+    "@rljson/json": "0.0.23"
+  }
+}
