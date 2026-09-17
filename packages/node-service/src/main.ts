@@ -24,8 +24,8 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 
 try {
   await store.initialize();
-  const seededRows = await store.seedIfEmpty();
-  server.log.info({ seededRows }, 'pet shop store ready');
+  const seeded = await store.seedIfEmpty();
+  server.log.info(seeded, 'pet shop store ready');
 
   const address = await server.listen({
     host: '0.0.0.0',
