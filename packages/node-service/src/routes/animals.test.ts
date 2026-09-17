@@ -287,8 +287,7 @@ describe('GET /api/animals/:id?version=<hash>', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     await store.seedIfEmpty();
     server = buildTestServer(store);
   });
@@ -343,8 +342,7 @@ describe('GET /api/animals/:id/history', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     await store.seedIfEmpty();
     server = buildTestServer(store);
   });
@@ -411,8 +409,7 @@ describe('PUT /api/animals/:id', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     await store.seedIfEmpty();
     server = buildTestServer(store);
   });
