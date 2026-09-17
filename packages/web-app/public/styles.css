@@ -83,6 +83,9 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   display: grid;
+  /* The column may shrink below the header's content width, so that the
+     node bar scrolls within itself instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr auto;
   grid-template-areas:
     'header'

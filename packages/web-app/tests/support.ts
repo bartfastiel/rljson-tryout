@@ -69,12 +69,17 @@ export const bodyBackgroundLuminance = async (page: Page): Promise<number> =>
     await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
   );
 
+/**
+ * Compares the document against the configured viewport rather than
+ * `window.innerWidth`: under mobile emulation Chromium widens the layout
+ * viewport to overflowing content, so `innerWidth` would grow with the
+ * very overflow this check is meant to catch.
+ */
 export const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
-  const widths = await page.evaluate(() => ({
-    document: document.documentElement.scrollWidth,
-    viewport: window.innerWidth,
-  }));
-  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+  const documentWidth = await page.evaluate(
+    () => document.documentElement.scrollWidth,
+  );
+  expect(documentWidth).toBeLessThanOrEqual(viewportOf(page).width);
 };
 
 /**
