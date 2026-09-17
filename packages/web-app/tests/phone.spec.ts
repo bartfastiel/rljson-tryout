@@ -100,7 +100,7 @@ test('keeps all three filter groups usable at 360 pixels when a breeder is activ
   }
 });
 
-test('keeps all four navigation entries tappable with their labels readable at 360 pixels', async ({
+test('keeps all five navigation entries tappable with their labels readable at 360 pixels', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 360, height: 780 });
@@ -108,12 +108,13 @@ test('keeps all four navigation entries tappable with their labels readable at 3
   await expect(cardListItems(page).first()).toBeVisible();
 
   const links = mainNavigation(page).getByRole('link');
-  await expect(links).toHaveCount(4);
+  await expect(links).toHaveCount(5);
   for (const [index, name] of [
     'Animals',
     'Species',
     'Breeders',
     'Invoices',
+    'Network',
   ].entries()) {
     const link = links.nth(index);
     await expect(link).toHaveText(name);

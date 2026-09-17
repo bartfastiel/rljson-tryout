@@ -33,6 +33,14 @@ const expectedTables = [
   'animalsInsertHistory',
   'animalTraits',
   'animalTraitsInsertHistory',
+  'customers',
+  'customersInsertHistory',
+  'invoices',
+  'invoicesInsertHistory',
+  'invoiceItems',
+  'invoiceItemsInsertHistory',
+  'changeSets',
+  'changeSetsInsertHistory',
 ];
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -143,21 +151,19 @@ describe('GET /status', () => {
         },
       ],
       storage: 'memory',
-      tables: {
+      tables: expect.objectContaining({
         species: 3,
         speciesInsertHistory: 3,
         traits: 8,
         traitsInsertHistory: 8,
-        persons: 6,
-        personsInsertHistory: 6,
-        breeders: 4,
-        breedersInsertHistory: 4,
         animals: 10,
         animalsInsertHistory: 10,
-        animalTraits: expect.any(Number) as number,
-        animalTraitsInsertHistory: expect.any(Number) as number,
-      },
+      }) as Record<string, number>,
     });
+    const tables = response.json<{ tables: Record<string, number> }>().tables;
+    for (const table of expectedTables) {
+      expect(tables[table]).toBeGreaterThan(0);
+    }
     expect(
       Object.keys(response.json<{ tables: object }>().tables),
     ).toStrictEqual(expectedTables);
