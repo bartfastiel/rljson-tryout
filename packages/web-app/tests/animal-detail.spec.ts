@@ -21,7 +21,7 @@ test('renders the name, species, facts and full story of the long seeded animal'
   await expect(
     page.getByRole('heading', { level: 1, name: 'Sir Quackington' }),
   ).toBeVisible();
-  await expect(page).toHaveTitle('Animals · Duckburg Pet Shop');
+  await expect(page).toHaveTitle('Sir Quackington · Duckburg Pet Shop');
 
   const speciesLink = page
     .locator('.animal-facts')

@@ -6,8 +6,8 @@ import { fetchJson } from './api.js';
 import { requiredElement } from './dom.js';
 import { pathSegmentsFromHash } from './hash-route.js';
 import { notFoundView } from './not-found-view.js';
+import { applicationName } from './view-helpers.js';
 
-const applicationName = 'Duckburg Pet Shop';
 const defaultViewName = 'animals';
 
 /** @type {Record<string, { title: string, render: () => HTMLElement }>} */

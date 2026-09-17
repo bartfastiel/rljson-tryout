@@ -8,6 +8,13 @@ import { element } from './dom.js';
  * behave identically everywhere instead of being copied into each view.
  */
 
+/**
+ * The name shown in the header and appended to every page title, so it is
+ * defined once instead of as a matching string literal in `app.js` and
+ * every view that sets `document.title` itself (`animal-detail.js`).
+ */
+export const applicationName = 'Duckburg Pet Shop';
+
 export const dateFormat = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
 });

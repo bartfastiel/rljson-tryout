@@ -3,6 +3,7 @@ import { element } from '../dom.js';
 import { hashQuery } from '../hash-route.js';
 import { notFoundView } from '../not-found-view.js';
 import {
+  applicationName,
   dateFormat,
   errorState,
   parseDateOnly,
@@ -151,6 +152,7 @@ class AnimalDetailElement extends HTMLElement {
         );
       }
       const animal = /** @type {AnimalDetail} */ (await response.json());
+      document.title = `${animal.name} · ${applicationName}`;
       this.replaceChildren(backLink(), detailView(animal));
     } catch (error) {
       this.replaceChildren(
