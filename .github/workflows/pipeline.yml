@@ -52,6 +52,35 @@ jobs:
           name: coverage
           path: coverage/lcov.info
 
+      - name: Determine the Playwright version
+        id: playwright-version
+        working-directory: packages/web-app
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+
+      # Skips the download when the cache holds the browser and still
+      # installs the system libraries Chromium needs on the runner.
+      - name: Install Playwright browsers
+        working-directory: packages/web-app
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        id: end-to-end-tests
+        run: pnpm --filter @rljson-tryout/web-app test:e2e
+
+      - name: Upload Playwright report
+        if: failure() && steps.end-to-end-tests.conclusion == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: packages/web-app/playwright-report
+          retention-days: 7
+
       - name: Sonar scan
         if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
         uses: SonarSource/sonarqube-scan-action@v8

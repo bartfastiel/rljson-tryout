@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import type { Configuration } from './configuration.ts';
@@ -20,9 +21,9 @@ const readPackageVersion = (): string => {
 
 /**
  * Builds a Fastify instance configured for this service, with the `/health`
- * route and the `/api` routes from roadmap section 2.5 reading from the
- * given store. Does not start listening; the caller decides when and where
- * to bind.
+ * route, the `/api` routes from roadmap section 2.5 reading from the given
+ * store, and the web app served from the configured directory at `/`. Does
+ * not start listening; the caller decides when and where to bind.
  */
 export const buildServer = (
   configuration: Configuration,
@@ -41,6 +42,17 @@ export const buildServer = (
   }));
 
   registerSpeciesRoutes(server, store);
+
+  // The app has no build step and no hashed file names, so browsers must
+  // revalidate the entry document on every load to pick up new versions.
+  server.register(fastifyStatic, {
+    root: configuration.webAppDirectory,
+    setHeaders: (reply, filePath) => {
+      if (basename(filePath) === 'index.html') {
+        reply.header('cache-control', 'no-cache');
+      }
+    },
+  });
 
   return server;
 };

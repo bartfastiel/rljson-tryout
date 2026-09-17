@@ -1,3 +1,6 @@
+import { statSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 /**
  * A pino log level, restricted to the values the configured logger accepts.
  */
@@ -21,7 +24,32 @@ export type Configuration = Readonly<{
   httpPort: number;
   logLevel: LogLevel;
   gitCommit: string;
+  webAppDirectory: string;
 }>;
+
+/**
+ * The `public` directory of the `web-app` workspace package, resolved from
+ * this file so that the default works from any working directory.
+ */
+const defaultWebAppDirectory = resolve(
+  import.meta.dirname,
+  '..',
+  '..',
+  'web-app',
+  'public',
+);
+
+const readWebAppDirectory = (value: string | undefined): string => {
+  const directory = resolve(value ?? defaultWebAppDirectory);
+  const stats = statSync(directory, { throwIfNoEntry: false });
+  if (stats === undefined || !stats.isDirectory()) {
+    throw new Error(
+      `WEB_APP_DIRECTORY must be an existing directory, got "${directory}"`,
+    );
+  }
+
+  return directory;
+};
 
 const readHttpPort = (value: string | undefined): number => {
   if (value === undefined) {
@@ -65,4 +93,5 @@ export const readConfiguration = (
     httpPort: readHttpPort(environment.HTTP_PORT),
     logLevel: readLogLevel(environment.LOG_LEVEL),
     gitCommit: environment.GIT_COMMIT ?? 'unknown',
+    webAppDirectory: readWebAppDirectory(environment.WEB_APP_DIRECTORY),
   });

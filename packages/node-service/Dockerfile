@@ -14,6 +14,7 @@ WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/node-service/package.json packages/node-service/package.json
+COPY packages/web-app/package.json packages/web-app/package.json
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm fetch
 
 # The full source, installed offline from the fetch cache, typechecked and
@@ -32,13 +33,16 @@ RUN node -e "\
     fs.writeFileSync('runtime-package.json', JSON.stringify(runtime) + '\n');"
 
 # A minimal runtime with no pnpm store, no sources and no dev dependencies:
-# the bundle already contains every dependency it needs.
+# the bundle already contains every dependency it needs, and the web app is
+# static files served from `public`.
 FROM node:24-alpine AS runtime
 ARG GIT_COMMIT
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV NODE_ENV=production
+ENV WEB_APP_DIRECTORY=/app/public
 WORKDIR /app
 COPY --from=build --chown=node:node /repo/packages/node-service/dist/main.mjs ./dist/main.mjs
+COPY --from=build --chown=node:node /repo/packages/web-app/public ./public
 COPY --from=build --chown=node:node /repo/runtime-package.json ./package.json
 USER node
 EXPOSE 8080

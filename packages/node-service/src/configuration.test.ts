@@ -1,6 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+
+import { afterAll, describe, expect, it } from 'vitest';
 
 import { readConfiguration } from './configuration.ts';
+
+const webAppPublicDirectory = resolve(
+  import.meta.dirname,
+  '..',
+  '..',
+  'web-app',
+  'public',
+);
+
+const temporaryDirectory = mkdtempSync(join(tmpdir(), 'node-service-'));
+afterAll(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
 
 describe('readConfiguration', () => {
   it('applies the documented defaults when nothing is set', () => {
@@ -11,6 +26,7 @@ describe('readConfiguration', () => {
       httpPort: 8080,
       logLevel: 'info',
       gitCommit: 'unknown',
+      webAppDirectory: webAppPublicDirectory,
     });
   });
 
@@ -20,6 +36,7 @@ describe('readConfiguration', () => {
       HTTP_PORT: '8081',
       LOG_LEVEL: 'debug',
       GIT_COMMIT: 'abc1234',
+      WEB_APP_DIRECTORY: temporaryDirectory,
     });
 
     expect(configuration).toStrictEqual({
@@ -27,6 +44,7 @@ describe('readConfiguration', () => {
       httpPort: 8081,
       logLevel: 'debug',
       gitCommit: 'abc1234',
+      webAppDirectory: temporaryDirectory,
     });
   });
 
@@ -74,6 +92,29 @@ describe('readConfiguration', () => {
   it('throws a clear error for an invalid log level', () => {
     expect(() => readConfiguration({ LOG_LEVEL: 'verbose' })).toThrow(
       /LOG_LEVEL must be one of/,
+    );
+  });
+
+  it('resolves a relative web app directory against the working directory', () => {
+    const configuration = readConfiguration({ WEB_APP_DIRECTORY: '.' });
+
+    expect(configuration.webAppDirectory).toBe(process.cwd());
+  });
+
+  it('throws a clear error when the web app directory does not exist', () => {
+    const missing = join(temporaryDirectory, 'missing');
+
+    expect(() => readConfiguration({ WEB_APP_DIRECTORY: missing })).toThrow(
+      /WEB_APP_DIRECTORY must be an existing directory/,
+    );
+  });
+
+  it('throws a clear error when the web app directory is a file', () => {
+    const file = join(temporaryDirectory, 'index.html');
+    writeFileSync(file, '<!doctype html>');
+
+    expect(() => readConfiguration({ WEB_APP_DIRECTORY: file })).toThrow(
+      /WEB_APP_DIRECTORY must be an existing directory/,
     );
   });
 });

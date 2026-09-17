@@ -122,19 +122,20 @@ README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
-| Variable           | Values                             | Meaning                                                                 |
-| ------------------ | ---------------------------------- | ----------------------------------------------------------------------- |
-| `NODE_NAME`        | `node1` …                          | Display name, also used for the hostname                                |
-| `STORAGE`          | `memory`, `sqlite`, `mssql`        | Which `Io` implementation backs the node                                |
-| `DATA_DIR`         | path                               | Where SQLite file, blobs and node identity live (`/data` in Kubernetes) |
-| `MSSQL_CONNECTION` | connection string                  | Only for `STORAGE=mssql`                                                |
-| `HTTP_PORT`        | default `8080`                     |                                                                         |
-| `HUB_PORT`         | default `3000`                     |                                                                         |
-| `BROADCAST_PORT`   | default `41234`                    |                                                                         |
-| `RLJSON_DOMAIN`    | string                             | Network domain for peer discovery                                       |
-| `SEED_SIZE`        | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty                    |
-| `PUBLIC_URL`       | URL                                | Shown in status and used for links                                      |
-| `LOG_LEVEL`        | `info`                             |                                                                         |
+| Variable            | Values                             | Meaning                                                                                |
+| ------------------- | ---------------------------------- | -------------------------------------------------------------------------------------- |
+| `NODE_NAME`         | `node1` …                          | Display name, also used for the hostname                                               |
+| `STORAGE`           | `memory`, `sqlite`, `mssql`        | Which `Io` implementation backs the node                                               |
+| `DATA_DIR`          | path                               | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                |
+| `MSSQL_CONNECTION`  | connection string                  | Only for `STORAGE=mssql`                                                               |
+| `HTTP_PORT`         | default `8080`                     |                                                                                        |
+| `HUB_PORT`          | default `3000`                     |                                                                                        |
+| `BROADCAST_PORT`    | default `41234`                    |                                                                                        |
+| `RLJSON_DOMAIN`     | string                             | Network domain for peer discovery                                                      |
+| `SEED_SIZE`         | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty                                   |
+| `PUBLIC_URL`        | URL                                | Shown in status and used for links                                                     |
+| `LOG_LEVEL`         | `info`                             |                                                                                        |
+| `WEB_APP_DIRECTORY` | path                               | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image |
 
 ### 2.5 HTTP contract of a node
 
@@ -532,14 +533,22 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       3.5 were needed right away because `@rljson/validate` pulls older
       copies in, and they live in `pnpm-workspace.yaml` because pnpm 12
       ignores `pnpm.overrides` in `package.json`.
-- [ ] **B2 Web app skeleton, mobile first.** Depends on: B1. `web-app`
+- [x] **B2 Web app skeleton, mobile first.** Depends on: B1. `web-app`
       package with `index.html`, `app.js`, `styles.css`, hash routing, a shell
       with bottom navigation on narrow screens and a sidebar from 768 px, view
       `species` with component `species-list`. Tap targets at least 44 px,
       system font stack, `prefers-color-scheme` respected, no horizontal
       scrolling at 360 px. Playwright tests at 375 x 812 and 1280 x 800 that
       load the page and see three species. Served by the node at `/`. Done when
-      the app works on a phone browser against `node1`.
+      the app works on a phone browser against `node1`. Deviation: like B1,
+      started before the deployment chain A7 to A11 was merged, so acceptance
+      was the Playwright suite (phone and desktop projects), the unit tests
+      for the static serving, the container image answering `/` locally and
+      the app verified in a phone-sized browser on `HTTP_PORT=8141`; the
+      check on `node1` follows automatically once A9 deploys `main`. The shell
+      has one `nav` landmark that docks to the bottom on narrow screens and to
+      the left from 768 px, so assistive technology sees one navigation
+      instead of two with one hidden.
 - [ ] **B3 Animals with a species reference.** Depends on: B2. Table
       `animals` (without story and traits yet), `speciesRef`, route query that
       joins the species, `GET /api/animals`, view `animals` with species name
