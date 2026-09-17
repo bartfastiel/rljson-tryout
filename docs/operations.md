@@ -1,4 +1,4 @@
-# Operations: bringing the system down and up
+# Operations: previews, bringing the system down and up
 
 The whole system runs on one Hetzner `cpx32`. Hetzner bills it by the hour
 (0.0569 EUR) and caps the month at the monthly price, 35.49 EUR, plus about
@@ -115,6 +115,68 @@ An `Up` takes five to eight minutes. Preview environments are not
 recreated; they come back with the next push to their pull request.
 Running `Up` while the system is already up is harmless: both stages plan
 no changes, or a rolling update to the head of `main` if it moved.
+
+## Preview environments
+
+Every pull request from this repository gets its own copy of the pet shop
+while it is open. The pipeline's `terraform-workloads` job selects the
+workloads workspace `pr-<number>` (created on first use) and applies it
+with the image the `image` job pushed for the pull request's merge commit;
+the `smoke` job then verifies the preview like production and posts one
+comment on the pull request with the links, the deployed commit and the
+certificate note. Later pushes update that comment instead of adding
+another; a hidden HTML marker identifies it. The workspace name selects the
+environment in `infra/terraform/workloads`:
+
+| Workspace     | Namespace     | Hosts                                            | Certificates             |
+| ------------- | ------------- | ------------------------------------------------ | ------------------------ |
+| `production`  | `petshop`     | `node1.rljson-tryout…` and the apex host         | `letsencrypt-production` |
+| `pr-<number>` | `pr-<number>` | `node1-pr-<number>.rljson-tryout…`, no apex host | `letsencrypt-staging`    |
+
+Any other workspace name fails the plan with a message that names the two
+forms. Pull requests from forks and from Dependabot get no preview: their
+runs have no secrets, so the `terraform-workloads` and `smoke` jobs are
+skipped and only `checks` decides whether they can merge.
+
+Previews are signed by the Let's Encrypt **staging** issuer on purpose.
+The production issuer allows 50 new certificates per registered domain
+per week, and every preview host is a new certificate under
+`wer-ist-daniel-schwarz.de`; a busy week of pull requests could exhaust
+that budget and leave production's next hosts (`node2`, `node3`) without a
+certificate. Staging has far higher limits, but no browser trusts its
+chain: the browser shows a warning once per preview, accept it to continue,
+and use `curl -k` on the command line. The smoke job mirrors this: with
+`ALLOW_STAGING_CERTIFICATE=true` (set for pull requests only) it skips the
+chain check and demands `(STAGING)` in the issuer, while production keeps
+the strict check and rejects a staging certificate.
+
+Three workflows remove previews:
+
+| Workflow                                                      | When                                 | What it does                                                                                                                                                                                        |
+| ------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`Preview destroy`](../.github/workflows/preview-destroy.yml) | The pull request is closed or merged | Destroys workspace `pr-<number>` and deletes it, then rewrites the preview comment to say so. Shares the concurrency group `workloads-pr-<number>` with the pipeline's apply.                       |
+| [`Preview sweep`](../.github/workflows/preview-sweep.yml)     | Every six hours, and on demand       | Lists the `pr-*` workspaces, asks GitHub for each pull request's state and destroys the workspaces whose pull request is not open. A state that cannot be read keeps its preview and fails the run. |
+| [`Down`](../.github/workflows/down.yml)                       | By hand                              | Destroys the previews first, then production, then the cluster; preview workspaces are deleted, `Up` does not recreate them.                                                                        |
+
+Both preview workflows run `infra/scripts/destroy-workloads.sh` with the
+workspace names as arguments; a name that does not exist (a pull request
+that never had a preview) is reported and skipped. The sweep is the safety
+net for a `Preview destroy` that failed or never ran, for example when a
+pull request was closed while the system was down. The sweep and `Preview
+destroy` are not serialized against each other: when both pick the same
+workspace at the same moment, one fails on the state lock or finds the
+workspace gone, and the next sweep leaves nothing behind. To clean up by
+hand, start the sweep: `gh workflow run "Preview sweep" --ref main`.
+
+While the system is down, every pull request pipeline fails in
+`terraform-workloads` because the cluster state has no kubeconfig to apply
+against; `checks` is unaffected and merging still works. The next `Up`
+brings production back, previews come back with the next push to their
+pull request.
+
+Cost: a preview is one more pod on the same server (requests 100m CPU and
+128 MiB, limits 500m and 512 MiB) and one staging certificate; no Hetzner
+resource is added and nothing is billed per preview.
 
 ## What survives, what is lost
 
