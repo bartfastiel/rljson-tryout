@@ -90,24 +90,24 @@ docs/
 
 ### 2.3 Cloud, DNS and secrets
 
-| Item | Value |
-| --- | --- |
-| Hetzner project | `rljson-tryout` |
-| Server | one `cx32` in location `nbg1`, image `ubuntu-24.04`, k3s installed by cloud-init |
-| Public IPv4 | Hetzner Primary IP named `rljson-tryout` in `nbg1`, address `162.55.190.77`, created once by hand, attached to the server by Terraform, survives server replacement |
-| DNS records | `rljson-tryout` A and `*.rljson-tryout` A in the zone `wer-ist-daniel-schwarz.de` (Hetzner Cloud Console, project `konsoleH`), pointing to that primary IP, entered once by hand, not managed by Terraform |
-| Production hostnames | `node1.rljson-tryout.wer-ist-daniel-schwarz.de`, `node2…`, `node3…`; the apex host routes to node1 |
-| Preview hostnames | `node1-pr-<n>.rljson-tryout.wer-ist-daniel-schwarz.de`, apex `pr-<n>.rljson-tryout…` |
-| Terraform state | S3 bucket `bartfastiel-rljson-tryout-tfstate`, region `eu-central-1`, keys `cluster/terraform.tfstate` and `workloads/terraform.tfstate` (workspaces add their prefix) |
-| AWS access from CI | OIDC, role ARN in repository variable `AWS_ROLE_ARN`, no access keys |
-| Repository secrets | `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY` |
-| Repository variables | `AWS_ROLE_ARN`, `LETSENCRYPT_EMAIL` |
-| SonarCloud | organization `bartfastiel-github`, project key `bartfastiel_rljson-tryout`, automatic analysis off |
-| Secret expiry | `SONAR_TOKEN` and `ANTHROPIC_API_KEY` expire on 2026-12-16, `HCLOUD_TOKEN` does not expire |
-| Kubernetes namespaces | `petshop` for production, `pr-<n>` for previews |
-| Ingress | Traefik as shipped with k3s, cert-manager with ClusterIssuers `letsencrypt-staging` and `letsencrypt-production`, HTTP redirected to HTTPS |
-| Ports inside a node | HTTP `8080`, hub transport `3000`, UDP broadcast `41234` |
-| rljson network domain | `petshop-production` in production, `petshop-pr-<n>` in previews |
+| Item                  | Value                                                                                                                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hetzner project       | `rljson-tryout`                                                                                                                                                                                            |
+| Server                | one `cx32` in location `nbg1`, image `ubuntu-24.04`, k3s installed by cloud-init                                                                                                                           |
+| Public IPv4           | Hetzner Primary IP named `rljson-tryout` in `nbg1`, address `162.55.190.77`, created once by hand, attached to the server by Terraform, survives server replacement                                        |
+| DNS records           | `rljson-tryout` A and `*.rljson-tryout` A in the zone `wer-ist-daniel-schwarz.de` (Hetzner Cloud Console, project `konsoleH`), pointing to that primary IP, entered once by hand, not managed by Terraform |
+| Production hostnames  | `node1.rljson-tryout.wer-ist-daniel-schwarz.de`, `node2…`, `node3…`; the apex host routes to node1                                                                                                         |
+| Preview hostnames     | `node1-pr-<n>.rljson-tryout.wer-ist-daniel-schwarz.de`, apex `pr-<n>.rljson-tryout…`                                                                                                                       |
+| Terraform state       | S3 bucket `bartfastiel-rljson-tryout-tfstate`, region `eu-central-1`, keys `cluster/terraform.tfstate` and `workloads/terraform.tfstate` (workspaces add their prefix)                                     |
+| AWS access from CI    | OIDC, role ARN in repository variable `AWS_ROLE_ARN`, no access keys                                                                                                                                       |
+| Repository secrets    | `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY`                                                                                                                                                         |
+| Repository variables  | `AWS_ROLE_ARN`, `LETSENCRYPT_EMAIL`                                                                                                                                                                        |
+| SonarCloud            | organization `bartfastiel-github`, project key `bartfastiel_rljson-tryout`, automatic analysis off                                                                                                         |
+| Secret expiry         | `SONAR_TOKEN` and `ANTHROPIC_API_KEY` expire on 2026-12-16, `HCLOUD_TOKEN` does not expire                                                                                                                 |
+| Kubernetes namespaces | `petshop` for production, `pr-<n>` for previews                                                                                                                                                            |
+| Ingress               | Traefik as shipped with k3s, cert-manager with ClusterIssuers `letsencrypt-staging` and `letsencrypt-production`, HTTP redirected to HTTPS                                                                 |
+| Ports inside a node   | HTTP `8080`, hub transport `3000`, UDP broadcast `41234`                                                                                                                                                   |
+| rljson network domain | `petshop-production` in production, `petshop-pr-<n>` in previews                                                                                                                                           |
 
 Why DNS is static: Hetzner Cloud DNS rejects zones with more than two
 labels, so the subdomain cannot be delegated into its own zone, and the
@@ -121,19 +121,19 @@ README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
-| Variable | Values | Meaning |
-| --- | --- | --- |
-| `NODE_NAME` | `node1` … | Display name, also used for the hostname |
-| `STORAGE` | `memory`, `sqlite`, `mssql` | Which `Io` implementation backs the node |
-| `DATA_DIR` | path | Where SQLite file, blobs and node identity live (`/data` in Kubernetes) |
-| `MSSQL_CONNECTION` | connection string | Only for `STORAGE=mssql` |
-| `HTTP_PORT` | default `8080` | |
-| `HUB_PORT` | default `3000` | |
-| `BROADCAST_PORT` | default `41234` | |
-| `RLJSON_DOMAIN` | string | Network domain for peer discovery |
-| `SEED_SIZE` | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty |
-| `PUBLIC_URL` | URL | Shown in status and used for links |
-| `LOG_LEVEL` | `info` | |
+| Variable           | Values                             | Meaning                                                                 |
+| ------------------ | ---------------------------------- | ----------------------------------------------------------------------- |
+| `NODE_NAME`        | `node1` …                          | Display name, also used for the hostname                                |
+| `STORAGE`          | `memory`, `sqlite`, `mssql`        | Which `Io` implementation backs the node                                |
+| `DATA_DIR`         | path                               | Where SQLite file, blobs and node identity live (`/data` in Kubernetes) |
+| `MSSQL_CONNECTION` | connection string                  | Only for `STORAGE=mssql`                                                |
+| `HTTP_PORT`        | default `8080`                     |                                                                         |
+| `HUB_PORT`         | default `3000`                     |                                                                         |
+| `BROADCAST_PORT`   | default `41234`                    |                                                                         |
+| `RLJSON_DOMAIN`    | string                             | Network domain for peer discovery                                       |
+| `SEED_SIZE`        | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty                    |
+| `PUBLIC_URL`       | URL                                | Shown in status and used for links                                      |
+| `LOG_LEVEL`        | `info`                             |                                                                         |
 
 ### 2.5 HTTP contract of a node
 
@@ -141,24 +141,24 @@ All responses are JSON unless noted. Identifiers: `id` is the stable
 identity of an entity across versions (rljson slice id), `hash` is one
 immutable version (`_hash`).
 
-| Method and path | Purpose |
-| --- | --- |
-| `GET /health` | `{ status: "ok", name, version, commit }` |
-| `GET /status` | `{ nodeName, nodeId, role, hubAddress, peers: [...], storage, tables: { <table>: rowCount } }` |
-| `GET /api/stats` | Row counts per table, seed size, uptime |
-| `GET /api/species` | List of current species versions |
-| `GET /api/species/:hash/image` | PNG bytes, `Content-Type: image/png` |
-| `GET /api/animals?species=<id>&trait=<id>&q=<text>` | Current animal versions with species name joined |
-| `GET /api/animals/:id` | Current version with species, breeder and traits joined |
-| `GET /api/animals/:id/history` | All versions with InsertHistory rows, newest first |
-| `PUT /api/animals/:id` | Creates a new version from the current one plus the changed fields; returns it |
-| `GET /api/customers`, `GET /api/breeders` | Lists with the person joined |
-| `GET /api/invoices`, `GET /api/invoices/:id` | Invoice with items and animals joined |
-| `POST /api/invoices` | Body `{ customerId, items: [{ animalId, quantity }] }`, issues an invoice |
-| `GET /api/conflicts` | Open DAG branch conflicts (slice D11) |
-| `POST /api/conflicts/:table/:id/resolve` | Runs the deterministic resolution (slice D12) |
-| `GET /api/events` | Server-sent events: `insert`, `sync`, `topology`, `conflict` |
-| `GET /` and static files | The web app |
+| Method and path                                     | Purpose                                                                                        |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /health`                                       | `{ status: "ok", name, version, commit }`                                                      |
+| `GET /status`                                       | `{ nodeName, nodeId, role, hubAddress, peers: [...], storage, tables: { <table>: rowCount } }` |
+| `GET /api/stats`                                    | Row counts per table, seed size, uptime                                                        |
+| `GET /api/species`                                  | List of current species versions                                                               |
+| `GET /api/species/:hash/image`                      | PNG bytes, `Content-Type: image/png`                                                           |
+| `GET /api/animals?species=<id>&trait=<id>&q=<text>` | Current animal versions with species name joined                                               |
+| `GET /api/animals/:id`                              | Current version with species, breeder and traits joined                                        |
+| `GET /api/animals/:id/history`                      | All versions with InsertHistory rows, newest first                                             |
+| `PUT /api/animals/:id`                              | Creates a new version from the current one plus the changed fields; returns it                 |
+| `GET /api/customers`, `GET /api/breeders`           | Lists with the person joined                                                                   |
+| `GET /api/invoices`, `GET /api/invoices/:id`        | Invoice with items and animals joined                                                          |
+| `POST /api/invoices`                                | Body `{ customerId, items: [{ animalId, quantity }] }`, issues an invoice                      |
+| `GET /api/conflicts`                                | Open DAG branch conflicts (slice D11)                                                          |
+| `POST /api/conflicts/:table/:id/resolve`            | Runs the deterministic resolution (slice D12)                                                  |
+| `GET /api/events`                                   | Server-sent events: `insert`, `sync`, `topology`, `conflict`                                   |
+| `GET /` and static files                            | The web app                                                                                    |
 
 Errors use Fastify's default shape `{ statusCode, error, message }`.
 
@@ -169,18 +169,18 @@ companion. Every table has `_hash` and `id` first. References are
 `<table>Ref` columns holding a `_hash` of the referenced version; the
 generator and the API resolve `id` to the current version when they need it.
 
-| Table | Columns |
-| --- | --- |
-| `species` | `name`, `latinName`, `description`, `imageBlobId`, `imageMimeType` |
-| `traits` | `name`, `description` |
-| `animals` | `name`, `speciesRef`, `breederRef`, `bornOn`, `priceCents`, `backgroundStory`, `traitsRefs` (jsonArray) |
-| `animalTraits` | `animalRef`, `traitRef` |
-| `persons` | `name`, `street`, `city`, `email` |
-| `customers` | `personRef`, `customerNumber` |
-| `breeders` | `personRef`, `farmName`, `suppliesSince` |
-| `invoices` | `invoiceNumber`, `customerRef`, `issuedOn`, `status` (`open`, `paid`, `cancelled`) |
-| `invoiceItems` | `invoiceRef`, `animalRef`, `quantity`, `unitPriceCents` |
-| `changeSets` | rljson `buffets` table, see 3.4 |
+| Table          | Columns                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------- |
+| `species`      | `name`, `latinName`, `description`, `imageBlobId`, `imageMimeType`                                      |
+| `traits`       | `name`, `description`                                                                                   |
+| `animals`      | `name`, `speciesRef`, `breederRef`, `bornOn`, `priceCents`, `backgroundStory`, `traitsRefs` (jsonArray) |
+| `animalTraits` | `animalRef`, `traitRef`                                                                                 |
+| `persons`      | `name`, `street`, `city`, `email`                                                                       |
+| `customers`    | `personRef`, `customerNumber`                                                                           |
+| `breeders`     | `personRef`, `farmName`, `suppliesSince`                                                                |
+| `invoices`     | `invoiceNumber`, `customerRef`, `issuedOn`, `status` (`open`, `paid`, `cancelled`)                      |
+| `invoiceItems` | `invoiceRef`, `animalRef`, `quantity`, `unitPriceCents`                                                 |
+| `changeSets`   | rljson `buffets` table, see 3.4                                                                         |
 
 Current version of an entity: the version whose InsertHistory row is a tip of
 the DAG (no other row names it in `previous`). More than one tip is a
@@ -275,7 +275,7 @@ makes "what arrived from whom" observable.
 - `io-sqlite-node` and `io-mssql` pin older `io` and `rljson` versions. Add
   `pnpm.overrides` for `@rljson/rljson`, `@rljson/io`, `@rljson/hash`,
   `@rljson/json` in the root `package.json` and confirm with `pnpm why
-  @rljson/rljson` that exactly one version is installed. Record the outcome
+@rljson/rljson` that exactly one version is installed. Record the outcome
   in `docs/findings/versions.md`.
 - `IoSqliteNode` stores a relative `dbFileName` under `./data/`; pass an
   absolute path built from `DATA_DIR`.
@@ -301,7 +301,7 @@ makes "what arrived from whom" observable.
 3. `build` stage: copy the sources, `pnpm install --offline --frozen-lockfile`,
    `pnpm -r typecheck`, then bundle the service with esbuild into one file:
    `esbuild packages/node-service/src/main.ts --bundle --platform=node
-   --format=esm --target=node24 --sourcemap --outfile=dist/main.mjs` with a
+--format=esm --target=node24 --sourcemap --outfile=dist/main.mjs` with a
    banner that defines `require` through `createRequire` for dependencies
    that still use it. If a dependency cannot be bundled, mark it external and
    ship it through `pnpm deploy --prod`; document why.
@@ -347,7 +347,7 @@ the cluster.
   `hcloud_firewall` allowing 22, 80, 443, 6443 inbound and everything
   outbound, `hcloud_server` `cx32` with cloud-init `user_data` that installs
   k3s (`curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --tls-san
-  <public ip>" sh -`), and a `HelmChartConfig` for Traefik that redirects
+<public ip>" sh -`), and a `HelmChartConfig` for Traefik that redirects
   the `web` entrypoint to `websecure`.
 - `data "hcloud_primary_ip"` by name `rljson-tryout`; the server takes its
   `datacenter` from that data source and attaches the address through
@@ -386,270 +386,275 @@ merged.
 
 ### Phase A: walking skeleton to production
 
-- [ ] **A1 Toolchain and CI.** Depends on: nothing. Root `package.json` with
-  pnpm workspace, TypeScript, ESLint, Prettier, Vitest; package `domain`
-  with one test that hashes `{ a: 1 }` with `hip` from `@rljson/hash` and
-  compares to a golden hash; `pipeline.yml` with the `checks` job (lint,
-  typecheck, test). Done when the workflow is green on `main`.
+- [x] **A1 Toolchain and CI.** Depends on: nothing. Root `package.json` with
+      pnpm workspace, TypeScript, ESLint, Prettier, Vitest; package `domain`
+      with one test that hashes `{ a: 1 }` with `hip` from `@rljson/hash` and
+      compares to a golden hash; `pipeline.yml` with the `checks` job (lint,
+      typecheck, test). Done when the workflow is green on `main`. Deviation:
+      the test uses `hsh` (hash into a copy) instead of `hip` (hash in place) so
+      it can assert in the same breath that the input object stays unchanged;
+      TypeScript is pinned to the last release below 6.1 because
+      `typescript-eslint` 8.70.0 does not yet support TypeScript 7, the newly
+      released native compiler.
 - [ ] **A2 Sonar and branch protection.** Depends on: A1.
-  `sonar-project.properties` (organization `bartfastiel-github`, project key
-  `bartfastiel_rljson-tryout`, sources `packages`, lcov path, coverage
-  exclusions for `packages/web-app/**`, `**/*.test.ts`, `features/**`),
-  Sonar step in `checks`, Dependabot for npm, GitHub Actions and Docker,
-  `CONTRIBUTING.md` with the rules of section 1, branch protection on `main`
-  via `gh api` (pull request required, status checks `checks` and the Sonar
-  quality gate required, linear history, no required reviewers). Done when
-  a test pull request shows both checks and merges only after they pass.
+      `sonar-project.properties` (organization `bartfastiel-github`, project key
+      `bartfastiel_rljson-tryout`, sources `packages`, lcov path, coverage
+      exclusions for `packages/web-app/**`, `**/*.test.ts`, `features/**`),
+      Sonar step in `checks`, Dependabot for npm, GitHub Actions and Docker,
+      `CONTRIBUTING.md` with the rules of section 1, branch protection on `main`
+      via `gh api` (pull request required, status checks `checks` and the Sonar
+      quality gate required, linear history, no required reviewers). Done when
+      a test pull request shows both checks and merges only after they pass.
 - [ ] **A3 Node service with health endpoint.** Depends on: A1. Package
-  `node-service`: Fastify server, `GET /health` per 2.5 with version from
-  `package.json` and commit from `GIT_COMMIT` env, configuration module for
-  the variables in 2.4 (only the ones used so far), structured logging,
-  graceful shutdown, tests via `fastify.inject`. Done when `pnpm --filter
-  node-service start` answers on 8080 and tests pass.
+      `node-service`: Fastify server, `GET /health` per 2.5 with version from
+      `package.json` and commit from `GIT_COMMIT` env, configuration module for
+      the variables in 2.4 (only the ones used so far), structured logging,
+      graceful shutdown, tests via `fastify.inject`. Done when `pnpm --filter
+node-service start` answers on 8080 and tests pass.
 - [ ] **A4 Container image.** Depends on: A3. Dockerfile per 4.1,
-  `.dockerignore`, `image` job in the pipeline pushing to GHCR. Done when
-  `docker run -p 8080:8080 ghcr.io/bartfastiel/rljson-tryout/node-service:<sha>`
-  answers `/health` and the image is under 200 MB uncompressed. Note the
-  measured size in `docs/findings/image-size.md`. If the GHCR package is
-  private after the first push, say so in the pull request; a human sets it
-  to public once.
+      `.dockerignore`, `image` job in the pipeline pushing to GHCR. Done when
+      `docker run -p 8080:8080 ghcr.io/bartfastiel/rljson-tryout/node-service:<sha>`
+      answers `/health` and the image is under 200 MB uncompressed. Note the
+      measured size in `docs/findings/image-size.md`. If the GHCR package is
+      private after the first push, say so in the pull request; a human sets it
+      to public once.
 - [ ] **A5 State backend bootstrap.** Depends on: nothing.
-  `infra/scripts/bootstrap-aws-state-backend.sh`: idempotently creates the
-  S3 bucket (versioning, encryption, public access blocked), an IAM role
-  `github-actions-rljson-tryout` trusting the existing GitHub OIDC provider
-  for `repo:bartfastiel/rljson-tryout:*`, a policy limited to the bucket,
-  and sets the repository variable `AWS_ROLE_ARN` with `gh variable set`.
-  Run it once with the local AWS credentials. Done when the variable exists
-  and `aws sts get-caller-identity` through the role works from a workflow
-  step.
+      `infra/scripts/bootstrap-aws-state-backend.sh`: idempotently creates the
+      S3 bucket (versioning, encryption, public access blocked), an IAM role
+      `github-actions-rljson-tryout` trusting the existing GitHub OIDC provider
+      for `repo:bartfastiel/rljson-tryout:*`, a policy limited to the bucket,
+      and sets the repository variable `AWS_ROLE_ARN` with `gh variable set`.
+      Run it once with the local AWS credentials. Done when the variable exists
+      and `aws sts get-caller-identity` through the role works from a workflow
+      step.
 - [ ] **A6 Server with k3s.** Depends on: A5. Stage 1 per 4.3 with an
-  ephemeral address and without the kubeconfig provisioner;
-  `terraform-cluster` job. Done when
-  `curl -k https://<server_ipv4>:6443/version` answers from CI after
-  `apply` on `main`.
+      ephemeral address and without the kubeconfig provisioner;
+      `terraform-cluster` job. Done when
+      `curl -k https://<server_ipv4>:6443/version` answers from CI after
+      `apply` on `main`.
 - [ ] **A7 Kubeconfig hand-off.** Depends on: A6. The `terraform_data`
-  provisioner and the `kubeconfig` output. Done when a workflow step runs
-  `kubectl get nodes` with the output and sees the node `Ready`.
+      provisioner and the `kubeconfig` output. Done when a workflow step runs
+      `kubectl get nodes` with the output and sees the node `Ready`.
 - [ ] **A8 Persistent address.** Depends on: A6. The server switches from
-  an ephemeral address to the pre-created primary IP (data source,
-  datacenter taken from it); `README.md` gets a section "Reproducing with
-  your own domain" describing the primary IP and the two DNS records. Done
-  when `dig +short node1.rljson-tryout.wer-ist-daniel-schwarz.de` returns
-  the primary IP and a `terraform destroy` plus `apply` of the cluster
-  brings the same address back.
+      an ephemeral address to the pre-created primary IP (data source,
+      datacenter taken from it); `README.md` gets a section "Reproducing with
+      your own domain" describing the primary IP and the two DNS records. Done
+      when `dig +short node1.rljson-tryout.wer-ist-daniel-schwarz.de` returns
+      the primary IP and a `terraform destroy` plus `apply` of the cluster
+      brings the same address back.
 - [ ] **A9 First workload on the internet.** Depends on: A4, A7, A8. Stage 2
-  with the module for node1 only (`STORAGE=memory`), plain HTTP ingress,
-  `terraform-workloads` job for workspace `production`. Done when
-  `http://node1.rljson-tryout.wer-ist-daniel-schwarz.de/health` returns the
-  commit sha of `main`.
+      with the module for node1 only (`STORAGE=memory`), plain HTTP ingress,
+      `terraform-workloads` job for workspace `production`. Done when
+      `http://node1.rljson-tryout.wer-ist-daniel-schwarz.de/health` returns the
+      commit sha of `main`.
 - [ ] **A10 TLS.** Depends on: A9. cert-manager, both issuers, ingress with
-  TLS, HTTP redirect. Verify with the staging issuer first, then switch to
-  production in the same pull request once the staging certificate was
-  issued. Done when `https://node1…/health` has a valid Let's Encrypt
-  certificate and `http://` redirects.
+      TLS, HTTP redirect. Verify with the staging issuer first, then switch to
+      production in the same pull request once the staging certificate was
+      issued. Done when `https://node1…/health` has a valid Let's Encrypt
+      certificate and `http://` redirects.
 - [ ] **A11 Smoke test and deploy chain.** Depends on: A10. `smoke` job,
-  concurrency groups, image tag flows from `image` to `terraform-workloads`.
-  Done when a change to the health payload lands on the internet through
-  one merge without manual steps and the smoke job proves it.
+      concurrency groups, image tag flows from `image` to `terraform-workloads`.
+      Done when a change to the health payload lands on the internet through
+      one merge without manual steps and the smoke job proves it.
 - [ ] **A12 Preview environments.** Depends on: A11. Workspace `pr-<n>`,
-  namespace, flattened hostnames, pull request comment,
-  `preview-destroy.yml`. Done when the pull request that adds this feature
-  shows its own preview at `https://node1-pr-<n>.rljson-tryout…/health` and
-  the namespace disappears after the merge.
+      namespace, flattened hostnames, pull request comment,
+      `preview-destroy.yml`. Done when the pull request that adds this feature
+      shows its own preview at `https://node1-pr-<n>.rljson-tryout…/health` and
+      the namespace disappears after the merge.
 - [ ] **A13 Budget guards.** Depends on: A12. `preview-sweep.yml`,
-  `destroy-all.yml`, `docs/operations.md` describing both. Done when the
-  sweep runs green on schedule and `destroy-all` is tested once against a
-  preview workspace (never against production during this slice).
+      `destroy-all.yml`, `docs/operations.md` describing both. Done when the
+      sweep runs green on schedule and `destroy-all` is tested once against a
+      preview workspace (never against production during this slice).
 
 ### Phase B: the domain on one node (in-memory store)
 
 - [ ] **B1 Species table.** Depends on: A11. `domain`: `TableCfg` for
-  `species` and its InsertHistory, three hand-written Duckburg species,
-  hashing, validation tests (missing reference, wrong hash, wrong type).
-  `node-service`: `PetShopStore` holding `Db` over `IoMem`, tables created
-  at start, seed of the three species, `GET /api/species`. Done when the
-  endpoint on `node1` lists three species.
+      `species` and its InsertHistory, three hand-written Duckburg species,
+      hashing, validation tests (missing reference, wrong hash, wrong type).
+      `node-service`: `PetShopStore` holding `Db` over `IoMem`, tables created
+      at start, seed of the three species, `GET /api/species`. Done when the
+      endpoint on `node1` lists three species.
 - [ ] **B2 Web app skeleton, mobile first.** Depends on: B1. `web-app`
-  package with `index.html`, `app.js`, `styles.css`, hash routing, a shell
-  with bottom navigation on narrow screens and a sidebar from 768 px, view
-  `species` with component `species-list`. Tap targets at least 44 px,
-  system font stack, `prefers-color-scheme` respected, no horizontal
-  scrolling at 360 px. Playwright tests at 375 x 812 and 1280 x 800 that
-  load the page and see three species. Served by the node at `/`. Done when
-  the app works on a phone browser against `node1`.
+      package with `index.html`, `app.js`, `styles.css`, hash routing, a shell
+      with bottom navigation on narrow screens and a sidebar from 768 px, view
+      `species` with component `species-list`. Tap targets at least 44 px,
+      system font stack, `prefers-color-scheme` respected, no horizontal
+      scrolling at 360 px. Playwright tests at 375 x 812 and 1280 x 800 that
+      load the page and see three species. Served by the node at `/`. Done when
+      the app works on a phone browser against `node1`.
 - [ ] **B3 Animals with a species reference.** Depends on: B2. Table
-  `animals` (without story and traits yet), `speciesRef`, route query that
-  joins the species, `GET /api/animals`, view `animals` with species name
-  and price. Done when the list shows the joined species name.
+      `animals` (without story and traits yet), `speciesRef`, route query that
+      joins the species, `GET /api/animals`, view `animals` with species name
+      and price. Done when the list shows the joined species name.
 - [ ] **B4 Long background story.** Depends on: B3. Column
-  `backgroundStory`, `GET /api/animals/:id`, view `animal-detail`, Gherkin
-  set up with a first feature that round-trips a 4 000 character story.
-  Done when the feature passes and the story reads well on a phone
-  (line length, font size).
+      `backgroundStory`, `GET /api/animals/:id`, view `animal-detail`, Gherkin
+      set up with a first feature that round-trips a 4 000 character story.
+      Done when the feature passes and the story reads well on a phone
+      (line length, font size).
 - [ ] **B5 Traits as multi-reference.** Depends on: B4. Table `traits`,
-  column `traitsRefs` (jsonArray of hashes), validation test for a dangling
-  entry, trait chips in the detail view, filter `?trait=<id>`. Done when
-  filtering works and the validator rejects a dangling trait.
+      column `traitsRefs` (jsonArray of hashes), validation test for a dangling
+      entry, trait chips in the detail view, filter `?trait=<id>`. Done when
+      filtering works and the validator rejects a dangling trait.
 - [ ] **B6 Traits as a junction table.** Depends on: B5. Table
-  `animalTraits`, the same filter implemented over the junction, both
-  implementations behind one interface with a toggle in configuration, and
-  `docs/findings/n-to-m.md` comparing query shape, payload size and
-  validation. Done when both paths return the same result in a test.
+      `animalTraits`, the same filter implemented over the junction, both
+      implementations behind one interface with a toggle in configuration, and
+      `docs/findings/n-to-m.md` comparing query shape, payload size and
+      validation. Done when both paths return the same result in a test.
 - [ ] **B7 Persons and breeders.** Depends on: B4. Tables `persons`,
-  `breeders`, column `breederRef`, `GET /api/breeders`, breeder shown in the
-  detail view. Done when a breeder appears with their person data.
+      `breeders`, column `breederRef`, `GET /api/breeders`, breeder shown in the
+      detail view. Done when a breeder appears with their person data.
 - [ ] **B8 Customers and invoices.** Depends on: B7. Tables `customers`,
-  `invoices`, `invoiceItems`, `changeSets` (3.4), `POST /api/invoices`
-  writing all rows plus one change set, `GET /api/invoices`, view
-  `invoices` and component `invoice-form` (pick customer, add animals,
-  submit), Gherkin feature "Scrooge buys Donald the duck". Done when an
-  invoice issued on the phone shows up in the list with its items.
+      `invoices`, `invoiceItems`, `changeSets` (3.4), `POST /api/invoices`
+      writing all rows plus one change set, `GET /api/invoices`, view
+      `invoices` and component `invoice-form` (pick customer, add animals,
+      submit), Gherkin feature "Scrooge buys Donald the duck". Done when an
+      invoice issued on the phone shows up in the list with its items.
 - [ ] **B9 Versions of an entity.** Depends on: B8. `PUT /api/animals/:id`,
-  `GET /api/animals/:id/history`, version list in the detail view, the
-  "current version" rule from 2.6 implemented once in `domain` and used by
-  every list endpoint, Gherkin feature for a price change. Done when the
-  list shows the new price and the history shows both versions.
+      `GET /api/animals/:id/history`, version list in the detail view, the
+      "current version" rule from 2.6 implemented once in `domain` and used by
+      every list endpoint, Gherkin feature for a price change. Done when the
+      list shows the new price and the history shows both versions.
 - [ ] **B10 Seed generator.** Depends on: B9. Deterministic generator with
-  a seed and sizes `small` (10 species, 100 animals), `medium`, `large`
-  (50 species, 40 traits, 2 000 animals, 300 customers, 50 breeders, 5 000
-  invoices, 12 000 items), names from Duckburg pools, deterministic ids,
-  `SEED_SIZE` handling at first start, `GET /api/stats`. Tests: same seed
-  gives identical hashes, sizes match, some breeders are customers, some
-  invoices are unpaid. Done when `node1` runs with `SEED_SIZE=medium`.
+      a seed and sizes `small` (10 species, 100 animals), `medium`, `large`
+      (50 species, 40 traits, 2 000 animals, 300 customers, 50 breeders, 5 000
+      invoices, 12 000 items), names from Duckburg pools, deterministic ids,
+      `SEED_SIZE` handling at first start, `GET /api/stats`. Tests: same seed
+      gives identical hashes, sizes match, some breeders are customers, some
+      invoices are unpaid. Done when `node1` runs with `SEED_SIZE=medium`.
 - [ ] **B11 Stories and arcs.** Depends on: B10. Template-based story
-  generator producing 4 000 to 6 000 characters per animal from paragraphs
-  that reference the animal's species, traits, breeder and previous owners;
-  ten hand-written arcs (Scrooge, Donald, Gyro, the Beagle Boys, Magica, …)
-  woven into the data. Tests on length and on references resolving. Done
-  when a random animal's story mentions its real breeder.
+      generator producing 4 000 to 6 000 characters per animal from paragraphs
+      that reference the animal's species, traits, breeder and previous owners;
+      ten hand-written arcs (Scrooge, Donald, Gyro, the Beagle Boys, Magica, …)
+      woven into the data. Tests on length and on references resolving. Done
+      when a random animal's story mentions its real breeder.
 - [ ] **B12 Species images as blobs.** Depends on: B10. Procedural PNG per
-  species (own encoder over `node:zlib`, deterministic from the species
-  id), stored in `BsMem`, `imageBlobId` on the species, `GET
-  /api/species/:hash/image`, images in list and detail. Tests: PNG
-  signature, same image twice gives one blob. Done when images render on
-  the phone.
+      species (own encoder over `node:zlib`, deterministic from the species
+      id), stored in `BsMem`, `imageBlobId` on the species, `GET
+/api/species/:hash/image`, images in list and detail. Tests: PNG
+      signature, same image twice gives one blob. Done when images render on
+      the phone.
 - [ ] **B13 Live updates.** Depends on: B8. `GET /api/events` with
-  server-sent events, the app refreshes lists on `insert`, a status line
-  shows the connection. Done when an invoice issued in one tab appears in a
-  second tab without reload, also through Traefik in production.
+      server-sent events, the app refreshes lists on `insert`, a status line
+      shows the connection. Done when an invoice issued in one tab appears in a
+      second tab without reload, also through Traefik in production.
 
 ### Phase C: persistent stores, one node per engine
 
 - [ ] **C1 SQLite store.** Depends on: B13. `STORAGE=sqlite` with
-  `IoSqliteNode` under `DATA_DIR`, node1 in production becomes a
-  `StatefulSet` with a claim, the Gherkin domain suite runs against both
-  stores in CI, `docs/findings/versions.md` and `docs/findings/stores.md`
-  started. Done when an invoice survives a redeploy of node1.
+      `IoSqliteNode` under `DATA_DIR`, node1 in production becomes a
+      `StatefulSet` with a claim, the Gherkin domain suite runs against both
+      stores in CI, `docs/findings/versions.md` and `docs/findings/stores.md`
+      started. Done when an invoice survives a redeploy of node1.
 - [ ] **C2 Blobs on disk.** Depends on: C1. `BsFs` under `DATA_DIR/blobs`
-  for the sqlite node. Done when species images survive a redeploy.
+      for the sqlite node. Done when species images survive a redeploy.
 - [ ] **C3 Second and third node.** Depends on: C1. node2 (`sqlite` for
-  now) and node3 (`memory`) deployed with their own hostnames and seeds,
-  each still independent. Done when all three hosts serve the app.
+      now) and node3 (`memory`) deployed with their own hostnames and seeds,
+      each still independent. Done when all three hosts serve the app.
 - [ ] **C4 SQL Server store.** Depends on: C3. `STORAGE=mssql` with
-  `IoMssql`, SQL Server `StatefulSet` in production, node2 switched to it,
-  CI runs the domain suite against SQL Server as a service container,
-  findings on type mapping and import speed. Done when node2 serves the
-  seed from SQL Server.
+      `IoMssql`, SQL Server `StatefulSet` in production, node2 switched to it,
+      CI runs the domain suite against SQL Server as a service container,
+      findings on type mapping and import speed. Done when node2 serves the
+      seed from SQL Server.
 - [ ] **C5 Large import baseline.** Depends on: C4. A Kubernetes `Job` that
-  imports the large seed into a chosen node, timings per store in
-  `docs/findings/large-content.md`. Done when node1 holds the large seed
-  and the app remains usable.
+      imports the large seed into a chosen node, timings per store in
+      `docs/findings/large-content.md`. Done when node1 holds the large seed
+      and the app remains usable.
 
 ### Phase D: the network
 
 - [ ] **D1 Discovery and roles.** Depends on: C3. `RoleOrchestrator` over
-  `NetworkManager` (broadcast, probing, identity under `DATA_DIR/identity`),
-  `/status` shows node id, role, hub, peers; view `network` in the app with
-  the topology and links to the other nodes; a local Docker Compose file
-  with three nodes for the integration tests. Gherkin: "three nodes start,
-  exactly one becomes hub". Done when the production status pages agree on
-  one hub.
+      `NetworkManager` (broadcast, probing, identity under `DATA_DIR/identity`),
+      `/status` shows node id, role, hub, peers; view `network` in the app with
+      the topology and links to the other nodes; a local Docker Compose file
+      with three nodes for the integration tests. Gherkin: "three nodes start,
+      exactly one becomes hub". Done when the production status pages agree on
+      one hub.
 - [ ] **D2 Hub transport.** Depends on: D1. As hub, run `Server` over the
-  node's own `Io` and `Bs` with a socket.io server on 3000; as client, run
-  `Client` connected to the hub; the API uses the multis from then on.
-  Gherkin: "a row written on the hub is readable by hash on a client". Done
-  when the feature passes against Compose and `/status` in production shows
-  connected clients.
+      node's own `Io` and `Bs` with a socket.io server on 3000; as client, run
+      `Client` connected to the hub; the API uses the multis from then on.
+      Gherkin: "a row written on the hub is readable by hash on a client". Done
+      when the feature passes against Compose and `/status` in production shows
+      connected clients.
 - [ ] **D3 Change set synchronisation.** Depends on: D2. `SyncAgent`:
-  announce every change set, pull incoming change sets and their items,
-  emit `sync` events. Gherkin: "a customer created on node1 is listed on
-  node2 and node3 within five seconds". Done when an invoice issued on the
-  phone against node3 appears on node1.
+      announce every change set, pull incoming change sets and their items,
+      emit `sync` events. Gherkin: "a customer created on node1 is listed on
+      node2 and node3 within five seconds". Done when an invoice issued on the
+      phone against node3 appears on node1.
 - [ ] **D4 Bootstrap and heartbeat.** Depends on: D3. Late joiners receive
-  the latest change set, `bootstrapHeartbeatMs` configured. Gherkin: "node3
-  restarts and catches up". Done when the memory node is complete again
-  after a restart in production.
+      the latest change set, `bootstrapHeartbeatMs` configured. Gherkin: "node3
+      restarts and catches up". Done when the memory node is complete again
+      after a restart in production.
 - [ ] **D5 Blob synchronisation.** Depends on: D3. Images pulled through
-  `BsPeer` via the hub, cached locally. Done when a species image uploaded
-  to node1 renders on node3.
+      `BsPeer` via the hub, cached locally. Done when a species image uploaded
+      to node1 renders on node3.
 - [ ] **D6 Hub failover.** Depends on: D4. Delete the hub pod, watch
-  re-election and reconnects, Gherkin feature. Done when the network heals
-  within one minute without data loss.
+      re-election and reconnects, Gherkin feature. Done when the network heals
+      within one minute without data loss.
 - [ ] **D7 Identity persistence.** Depends on: D6. Node ids survive restarts
-  on nodes with a volume, the memory node gets a fresh id; findings on how
-  the hub treats the returning and the new identity.
+      on nodes with a volume, the memory node gets a fresh id; findings on how
+      the hub treats the returning and the new identity.
 - [ ] **D8 Large content over the network.** Depends on: D5, C5. Large seed
-  imported on one node, pulls observed on the others (per-hash pulls versus
-  `readRowsByHashes`), stories of 40 000 and 400 000 characters, memory of
-  the in-memory node. Findings in `docs/findings/large-content.md`.
+      imported on one node, pulls observed on the others (per-hash pulls versus
+      `readRowsByHashes`), stories of 40 000 and 400 000 characters, memory of
+      the in-memory node. Findings in `docs/findings/large-content.md`.
 - [ ] **D9 Concurrency.** Depends on: D4. Load `Job` issuing invoices on all
-  nodes at once, `SyncConfig` with client identity and causal ordering.
-  Gherkin: "200 concurrent invoices from three nodes arrive everywhere
-  exactly once". Findings in `docs/findings/concurrency.md`.
+      nodes at once, `SyncConfig` with client identity and causal ordering.
+      Gherkin: "200 concurrent invoices from three nodes arrive everywhere
+      exactly once". Findings in `docs/findings/concurrency.md`.
 - [ ] **D10 Acknowledgements and gap fill.** Depends on: D9. `requireAck`,
-  `ackTimeoutMs`, a paused pod that misses refs and recovers through gap
-  fill. Findings appended.
+      `ackTimeoutMs`, a paused pod that misses refs and recovers through gap
+      fill. Findings appended.
 - [ ] **D11 Conflict detection.** Depends on: D9. Conflict observer per
-  table, `GET /api/conflicts`, badge and list in the app, Gherkin with a
-  partition (a `NetworkPolicy` in Kubernetes, `docker network disconnect`
-  in Compose) where two nodes change the same animal.
+      table, `GET /api/conflicts`, badge and list in the app, Gherkin with a
+      partition (a `NetworkPolicy` in Kubernetes, `docker network disconnect`
+      in Compose) where two nodes change the same animal.
 - [ ] **D12 Conflict resolution.** Depends on: D11. Deterministic rule
-  (field-wise merge when fields differ, otherwise later client timestamp
-  wins, tie broken by client id), merge version with `previous` on both
-  tips, automatic on the node that detects it, `POST /api/conflicts/…
-  /resolve` for a manual trigger. Gherkin edit versus edit.
+      (field-wise merge when fields differ, otherwise later client timestamp
+      wins, tie broken by client id), merge version with `previous` on both
+      tips, automatic on the node that detects it, `POST /api/conflicts/…
+/resolve` for a manual trigger. Gherkin edit versus edit.
 - [ ] **D13 Deletions.** Depends on: D12. Tombstone versions (`deleted:
-  true`), lists hide them, edit versus delete resolves to the edit. Gherkin
-  feature.
+true`), lists hide them, edit versus delete resolves to the edit. Gherkin
+      feature.
 - [ ] **D14 Chaos node, unknown references.** Depends on: D3. Package
-  `chaos-node`: joins as a client and announces change set hashes that do
-  not exist. Observe and document how long honest nodes block; add bounded
-  pull timeouts and a per-peer failure counter to `SyncAgent`.
-  `docs/findings/hostile-nodes.md` started. Deployed in production only
-  when enabled by a variable.
+      `chaos-node`: joins as a client and announces change set hashes that do
+      not exist. Observe and document how long honest nodes block; add bounded
+      pull timeouts and a per-peer failure counter to `SyncAgent`.
+      `docs/findings/hostile-nodes.md` started. Deployed in production only
+      when enabled by a variable.
 - [ ] **D15 Chaos node, wrong hashes.** Depends on: D14. The chaos node
-  serves rows whose `_hash` does not match their content. `SyncAgent`
-  verifies hashes with `hsh` before persisting and rejects the change set.
+      serves rows whose `_hash` does not match their content. `SyncAgent`
+      verifies hashes with `hsh` before persisting and rejects the change set.
 - [ ] **D16 Chaos node, invalid data.** Depends on: D15. Dangling
-  references, wrong `_type`, oversized values, very slow answers.
-  `Validate` before persisting, size limits, findings completed.
+      references, wrong `_type`, oversized values, very slow answers.
+      `Validate` before persisting, size limits, findings completed.
 - [ ] **D17 Layers and cakes.** Depends on: D12. Inventory modelled as a
-  cake (slice ids are animal ids, layers for price, status, owner),
-  `GET /api/inventory`, comparison with the InsertHistory approach in
-  `docs/findings/layers-and-cakes.md`.
+      cake (slice ids are animal ids, layers for price, status, owner),
+      `GET /api/inventory`, comparison with the InsertHistory approach in
+      `docs/findings/layers-and-cakes.md`.
 
 ### Phase E: optional, pick by interest
 
 - [ ] **E1 Own `Io` for PostgreSQL.** Depends on: C4. Package `io-postgres`
-  built against the conformance tests shipped with `@rljson/io`, one pull
-  request per group of methods, finally node4 in production.
+      built against the conformance tests shipped with `@rljson/io`, one pull
+      request per group of methods, finally node4 in production.
 - [ ] **E2 Single executable image.** Depends on: A4. Node SEA plus
-  `FROM scratch` with the musl libraries, size and start time compared in
-  `docs/findings/image-size.md`.
+      `FROM scratch` with the musl libraries, size and start time compared in
+      `docs/findings/image-size.md`.
 - [ ] **E3 Browser as rljson client.** Depends on: D5. Bundle `Client`,
-  `Db` and an IndexedDB `Io` for the browser, offline-capable app.
+      `Db` and an IndexedDB `Io` for the browser, offline-capable app.
 - [ ] **E4 Assistant.** Depends on: B13. `POST /api/assistant` with the
-  Anthropic SDK (`claude-opus-5`, streaming, tools `query_table` and
-  `issue_invoice`), chat view in the app, `ANTHROPIC_API_KEY` as a
-  Kubernetes secret from the repository secret.
+      Anthropic SDK (`claude-opus-5`, streaming, tools `query_table` and
+      `issue_invoice`), chat view in the app, `ANTHROPIC_API_KEY` as a
+      Kubernetes secret from the repository secret.
 - [ ] **E5 Second server.** Depends on: D6. A second server in a Hetzner
-  private network, broadcast fails its self-test, static hub fallback, then
-  a small cloud coordinator implementing `POST /register`, `GET /peers`,
-  `POST /probes`.
+      private network, broadcast fails its self-test, static hub fallback, then
+      a small cloud coordinator implementing `POST /register`, `GET /peers`,
+      `POST /probes`.
 - [ ] **E6 MongoDB with `mongo-agent`.** Depends on: D3.
 - [ ] **E7 Kubeconfig without SSH.** Depends on: A7. Terraform-generated
-  root CA fed to k3s through cloud-init, admin client certificate issued by
-  Terraform, provisioner removed.
+      root CA fed to k3s through cloud-init, admin client certificate issued by
+      Terraform, provisioner removed.
 
 ## 6. Findings template
 

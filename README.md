@@ -28,6 +28,19 @@ slice by slice; the reasoning behind the architecture is in
 - Clean, readable TypeScript. Tests first where it matters, Gherkin scenarios
   for behaviour that spans nodes.
 
+## Development
+
+```sh
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+Node 24 runs the TypeScript sources directly (type stripping); there is no
+build step in the monorepo. Per-package scripts live in
+`packages/*/package.json`.
+
 ## License
 
 [MIT](LICENSE)
