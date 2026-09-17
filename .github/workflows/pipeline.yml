@@ -194,6 +194,57 @@ jobs:
         id: image-reference
         run: echo "image=${IMAGE_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
+  # Starts three node services from the pushed image with Docker Compose
+  # and proves that they discover each other and elect exactly one hub
+  # (`packages/node-service/features/network.feature`). Forks and Dependabot
+  # push no image, so they have nothing to test here.
+  integration:
+    name: integration
+    needs: image
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      NODE_SERVICE_IMAGE: ${{ needs.image.outputs.image }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the image
+        run: docker pull "${NODE_SERVICE_IMAGE}"
+
+      - name: Integration tests
+        run: pnpm --filter @rljson-tryout/node-service test:integration
+
+      - name: Upload compose logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compose-logs
+          path: packages/node-service/test-results/compose
+          retention-days: 7
+
   terraform-cluster:
     name: terraform-cluster
     needs: checks

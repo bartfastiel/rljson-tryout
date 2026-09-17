@@ -7,6 +7,7 @@ set -euo pipefail
 #   FAKE_HEALTH_COMMIT       commit /health reports once ready
 #   FAKE_HEALTH_READY_AFTER  number of /health calls that report an old commit first
 #   FAKE_REDIRECT            what http://.../health answers as "<code> <redirect url>"
+#   FAKE_STATUS              JSON body of /status
 #   FAKE_SPECIES             JSON body of /api/species
 #   FAKE_WEB_APP             what / answers as "<code> <content type>"
 #   FAKE_STATE_DIRECTORY     where the number of /health calls is counted
@@ -27,6 +28,9 @@ case "${url}" in
     ;;
   http://*/health)
     printf '%s' "${FAKE_REDIRECT}"
+    ;;
+  https://*/status)
+    printf '%s' "${FAKE_STATUS}"
     ;;
   https://*/api/species)
     printf '%s' "${FAKE_SPECIES}"

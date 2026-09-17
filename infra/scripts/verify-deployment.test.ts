@@ -21,6 +21,7 @@ type Scenario = {
   issuer?: string;
   allowStagingCertificate?: string;
   redirect?: string;
+  status?: string;
   species?: string;
   webApp?: string;
 };
@@ -50,6 +51,9 @@ function runScript(scenario: Scenario): Outcome {
       FAKE_ISSUER:
         scenario.issuer ?? "issuer=C = US, O = Let's Encrypt, CN = YR2",
       FAKE_REDIRECT: redirect,
+      FAKE_STATUS:
+        scenario.status ??
+        '{"nodeName":"node1","nodeId":"id-node1","role":"standalone","hubAddress":null}',
       FAKE_SPECIES: scenario.species ?? '[{"id":"a"},{"id":"b"},{"id":"c"}]',
       FAKE_WEB_APP: scenario.webApp ?? '200 text/html; charset=utf-8',
       DEPLOYMENT_URLS: scenario.deploymentUrls,
@@ -81,12 +85,28 @@ describe('verify-deployment.sh', () => {
     expect(outcome.output).toContain(
       `http://node1.example.org/health redirects: 301 ${nodeUrl}/health`,
     );
+    expect(outcome.output).toContain(
+      `${nodeUrl}/status reports: {"nodeName":"node1","nodeId":"id-node1","role":"standalone","hubAddress":null}`,
+    );
     expect(outcome.output).toContain(`${nodeUrl}/api/species lists 3 species`);
     expect(outcome.output).toContain(
       `${nodeUrl}/ serves the web app: 200 text/html; charset=utf-8`,
     );
     expect(outcome.calls).not.toContain('sleep 10');
   });
+
+  it.each(['hub', 'client'])(
+    'accepts the settled discovery role %s',
+    (role) => {
+      const outcome = runScript({
+        deploymentUrls: nodeUrl,
+        status: `{"nodeName":"node1","nodeId":"id-node1","role":"${role}","hubAddress":"10.42.0.12:3000"}`,
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(outcome.output).toContain(`"role":"${role}"`);
+    },
+  );
 
   it('polls /health until the expected commit appears', () => {
     const outcome = runScript({ deploymentUrls: nodeUrl, healthReadyAfter: 2 });
@@ -234,6 +254,21 @@ describe('verify-deployment.sh', () => {
     expect(outcome.output).toContain(
       `::error::http://node1.example.org/health does not redirect to ${nodeUrl}/health, got: 200`,
     );
+  });
+
+  it.each([
+    ['a node still starting', '{"nodeName":"node1","role":"starting"}'],
+    ['no role', '{"nodeName":"node1"}'],
+    ['an empty body', ''],
+    ['no JSON', 'Service Unavailable'],
+  ])('fails when /status reports %s', (_, status) => {
+    const outcome = runScript({ deploymentUrls: nodeUrl, status });
+
+    expect(outcome.status).toBe(1);
+    expect(outcome.output).toContain(
+      `::error::${nodeUrl}/status does not report a settled role (standalone, hub or client), got: ${status}`,
+    );
+    expect(outcome.output).not.toContain('lists');
   });
 
   it.each([
