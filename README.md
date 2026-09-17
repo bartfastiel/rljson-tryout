@@ -30,9 +30,9 @@ other nodes.
 
 ## Status
 
-The system is live at [https://node1.rljson-tryout.wer-ist-daniel-schwarz.de](https://node1.rljson-tryout.wer-ist-daniel-schwarz.de) with a production Let's Encrypt certificate.
-Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress, and slice C1 gives node1 in production a SQLite store on a persistent volume, so its invoices survive a redeploy.
-Slice D1 (discovery and roles) was pulled forward: every node discovers the other nodes of its rljson domain by UDP broadcast, takes part in the hub election and reports the outcome at `/status`; the three-node proof runs against a local Docker Compose setup until slice C3 deploys node2 and node3.
+The system is live with a production Let's Encrypt certificate on three nodes: [node1](https://node1.rljson-tryout.wer-ist-daniel-schwarz.de) (also the apex host [rljson-tryout.wer-ist-daniel-schwarz.de](https://rljson-tryout.wer-ist-daniel-schwarz.de)), [node2](https://node2.rljson-tryout.wer-ist-daniel-schwarz.de) and [node3](https://node3.rljson-tryout.wer-ist-daniel-schwarz.de).
+Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress, slice C1 gives node1 and node2 in production a SQLite store on a persistent volume each, so their invoices survive a redeploy, and slice C3 puts the three nodes on the internet, each still with its own data.
+Slice D1 (discovery and roles) was pulled forward: every node discovers the other nodes of its rljson domain by UDP broadcast, takes part in the hub election and reports the outcome at `/status`; since C3 the three production nodes agree on one hub, which the header of the web app and the `Network` view show live.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
@@ -182,9 +182,11 @@ Environment variables the service understands so far:
 | `HUB_PORT`          | `3000`                         | TCP port of the hub transport and of the probe listener                                                                                                                                   |
 | `BROADCAST_PORT`    | `41234`                        | UDP port of the discovery announcements                                                                                                                                                   |
 | `STORAGE`           | `memory`                       | What backs the store: `memory` (lost on restart) or `sqlite` (`DATA_DIR/petshop.sqlite`, survives restarts); `mssql` follows with slice C4                                                |
+| `SEED_SIZE`         | `small`                        | What an empty store is seeded with at start: `small` (the hand-written pet shop) or `none` (nothing); the generated `medium` and `large` seeds follow with slice C5                       |
 | `DATA_DIR`          | `packages/node-service/data`   | Where the node identity lives (`identity/<domain>/node-id`) and, with `STORAGE=sqlite`, the database file; `/data` in the image                                                           |
 | `PUBLIC_URL`        | `http://localhost:<HTTP_PORT>` | This node's own URL as `/status` reports it and as the other nodes link to it                                                                                                             |
-| `NODE_URLS`         | empty                          | Comma separated public URLs of every node of the environment, this one included; each is polled for its `/status` every three seconds                                                     |
+| `NODE_URLS`         | empty                          | Comma separated public URLs of every node of the environment, this one included, as the header links to them                                                                              |
+| `NODE_STATUS_URLS`  | `NODE_URLS`                    | Comma separated URLs at which this node polls the `/status` of the node at the same position of `NODE_URLS` every three seconds; the in-cluster service URLs in Kubernetes, same length   |
 | `DISCOVERY`         | `enabled`                      | `disabled` turns the broadcast and probe sockets off (unit tests, single-node runs)                                                                                                       |
 
 ### Running three nodes with Docker Compose
@@ -200,11 +202,13 @@ docker compose -f deploy/compose/three-nodes.yml down
 ```
 
 Within about five seconds (one broadcast interval) exactly one node
-reports `hub` and the other two `client` with the same `hubAddress`. The
-nodes know each other by their container-internal URLs
-(`http://node1:8080` and so on), so the links in the header work between
-the containers but not from a browser on the host, which the header shows
-as a red browser probe marker next to a green discovery outline. Set
+reports `hub` and the other two `client` with the same `hubAddress`. Like
+in Kubernetes, the nodes carry two address lists: `NODE_URLS` names the
+host-side URLs (`http://localhost:8301` and so on), so the links in the
+header open from a browser on the host and its probe marker turns green,
+and `NODE_STATUS_URLS` names the container-internal URLs
+(`http://node1:8080` and so on), where the nodes poll each other's
+`/status`. Set
 `NODE_SERVICE_IMAGE` to run a pushed image instead of building one, together
 with `NODE_SERVICE_PULL_POLICY=missing` unless the image was pulled before
 (the compose file never pulls by default, so a local build is never
@@ -287,9 +291,9 @@ plan passes, it is available.
 from the state of the cluster stage, configures the `kubernetes`, `helm`
 and `kubectl` providers from it and calls the module
 `modules/petshop-environment` once per workspace: namespace `petshop` in
-workspace `production`, one workload of the node service per node (so far
-only `node1`), a `ClusterIP` service and a Traefik `Ingress` per node,
-plus an ingress for the apex host that routes to `node1`. The workload
+workspace `production`, one workload of the node service per node, a
+`ClusterIP` service and a Traefik `Ingress` per node, plus an ingress for
+the apex host that routes to `node1`. The workload
 follows the node's `storage` in the module's `nodes` list: a `memory` node
 is a `Deployment` over an `emptyDir` with a surge rollout, a `sqlite` node
 is a `StatefulSet` with one replica and a 2 Gi `local-path` persistent
@@ -297,16 +301,25 @@ volume claim mounted at `/data`, which holds the SQLite file and the
 discovery identity, so that an invoice and the node id survive a restart
 and a redeploy (a rollout of a `StatefulSet` replaces its single pod, a
 few seconds of downtime the `smoke` job waits out). Production runs
-`node1` over `sqlite`, previews over `memory`. The image is the one the
+three nodes, `node1` and `node2` over `sqlite` and `node3` over `memory`,
+each with its own hostname, certificate and seed; previews run a single
+`node1` over `memory`. The image is the one the
 `image` job pushed for the same commit,
 `ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`. Every pod
-receives its configuration from the module: `STORAGE`, `RLJSON_DOMAIN`
+receives its configuration from the module: `STORAGE`, `SEED_SIZE`
+(`small` on every node), `RLJSON_DOMAIN`
 (`petshop-production`, or `petshop-pr-<number>` in a preview, so that the
 environments sharing the pod network never see each other), `HUB_PORT`,
 `BROADCAST_PORT`, `DATA_DIR=/data` (the root filesystem is read-only),
-`PUBLIC_URL` and the `NODE_URLS` of all nodes of the environment; the
+`PUBLIC_URL`, the `NODE_URLS` of all nodes of the environment and the
+`NODE_STATUS_URLS` of their `ClusterIP` services
+(`http://<node>.<namespace>.svc.cluster.local`), where the server-side
+`/status` poll goes because a preview's public certificate is not one
+Node's `fetch` trusts; the
 container ports 3000 (TCP) and 41234 (UDP) are named in the pod, and the
-pods share the flannel bridge without `hostNetwork`.
+pods share the flannel bridge without `hostNetwork`, over which the UDP
+broadcast of one pod reaches the others
+([docs/findings/network-discovery.md](docs/findings/network-discovery.md)).
 
 Every push to `main` deploys automatically: the `image` job pushes
 `ghcr.io/<repository>/node-service:<commit sha>`, the `terraform-workloads`
@@ -316,12 +329,17 @@ and exposes the deployed URLs as a job output, and the `smoke` job runs
 it reports the commit that was just pushed with a certificate the runner
 trusts, then checks that `http://` redirects, that `/status` reports a
 settled discovery role (`standalone`, `hub` or `client`), that
-`/api/species` lists species and that `/` serves the web app. The
+`/api/species` lists species and that `/` serves the web app; with three
+or more URLs it then waits (up to five minutes) until every node lists
+every other node as seen in the discovery topology and exactly one node
+is the hub, and prints the roles. The
 hostnames follow
 `<node>.<base_domain>` with the apex host as an alias of `node1`; with the
 default `base_domain` that is
 
 - `https://node1.rljson-tryout.wer-ist-daniel-schwarz.de/health`
+- `https://node2.rljson-tryout.wer-ist-daniel-schwarz.de/health`
+- `https://node3.rljson-tryout.wer-ist-daniel-schwarz.de/health`
 - `https://rljson-tryout.wer-ist-daniel-schwarz.de/health`
 
 Traefik redirects `http://` to `https://` permanently. The production
