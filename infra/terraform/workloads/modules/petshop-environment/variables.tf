@@ -38,6 +38,11 @@ variable "cluster_issuer" {
   }
 }
 
+variable "enable_apex_ingress" {
+  description = "Whether the first node also answers on the apex host (the base domain in production, the infix without its leading dash otherwise). Previews leave it off: one host per node is enough for a review."
+  type        = bool
+}
+
 variable "nodes" {
   description = "Nodes of this environment in display order; the first one also answers on the apex host. Every node runs the in-memory store."
   type = list(object({
