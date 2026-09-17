@@ -1,9 +1,16 @@
 export { hashed } from './hashing.ts';
+export { animalTraitsSeed } from './seed/animalTraits.ts';
 export { animalsSeed } from './seed/animals.ts';
 export { breedersSeed } from './seed/breeders.ts';
 export { personsSeed } from './seed/persons.ts';
 export { speciesSeed } from './seed/species.ts';
 export { traitsSeed } from './seed/traits.ts';
+export {
+  animalTraitsInsertHistoryTableCfg,
+  animalTraitsTableCfg,
+  type AnimalTraitRow,
+  type HashedAnimalTraitRow,
+} from './tables/animalTraits.ts';
 export {
   animalsInsertHistoryTableCfg,
   animalsTableCfg,
