@@ -73,25 +73,29 @@ export const referenceColumnOf = (tableKey: string): string => `${tableKey}Ref`;
 const timestampOf = (timeId: string): number =>
   Number(timeId.slice(0, timeId.indexOf(':')));
 
-const compareCodePoints = (left: string, right: string): number => {
+/**
+ * The unique parts of two `timeId`s in descending code point order: the
+ * greater string first. Code points rather than locale collation, which
+ * differs between runtimes and treats `-` and `_` of the nanoid alphabet
+ * unevenly.
+ */
+const descendingByCodePoints = (left: string, right: string): number => {
   if (left === right) {
     return 0;
   }
-  return left < right ? -1 : 1;
+  return left < right ? 1 : -1;
 };
 
 /**
  * Orders two rljson `timeId`s (`<milliseconds since epoch>:<4 unique
  * characters>`) newest first: by timestamp, ties broken by the unique
- * part compared code point by code point (not by locale collation, which
- * differs between runtimes and treats `-` and `_` of the nanoid alphabet
- * unevenly), so that the order is total and the same on every node.
+ * part, so that the order is total and the same on every node.
  */
 export const compareTimeIdsNewestFirst = (
   left: string,
   right: string,
 ): number =>
-  timestampOf(right) - timestampOf(left) || compareCodePoints(right, left);
+  timestampOf(right) - timestampOf(left) || descendingByCodePoints(left, right);
 
 /**
  * A history row paired with the entity row it references, the unit the
