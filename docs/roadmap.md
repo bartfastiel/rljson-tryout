@@ -756,7 +756,16 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       for the sqlite node. Done when species images survive a redeploy.
 - [ ] **C3 Second and third node.** Depends on: C1. node2 (`sqlite` for
       now) and node3 (`memory`) deployed with their own hostnames and seeds,
-      each still independent. Done when all three hosts serve the app.
+      each still independent; the Terraform module passes every node's URL
+      to every node's container as the comma separated configuration
+      variable `NODE_URLS`. The web app header shows a node bar: the current
+      node renders as a clearly active link (a light badge), the other
+      nodes from `NODE_URLS` as plain links, each outlined green when the
+      browser's own `GET /health` probe against that node succeeds and red
+      otherwise; the node service allows cross-origin `GET /health` so a
+      browser on any node can probe every other node. Done when all three
+      hosts serve the app and each one's header shows the other two nodes,
+      correctly outlined green or red.
 - [ ] **C4 SQL Server store.** Depends on: C3. `STORAGE=mssql` with
       `IoMssql`, SQL Server `StatefulSet` in production, node2 switched to it,
       CI runs the domain suite against SQL Server as a service container,
@@ -771,11 +780,16 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
 
 - [ ] **D1 Discovery and roles.** Depends on: C3. `RoleOrchestrator` over
       `NetworkManager` (broadcast, probing, identity under `DATA_DIR/identity`),
-      `/status` shows node id, role, hub, peers; view `network` in the app with
-      the topology and links to the other nodes; a local Docker Compose file
-      with three nodes for the integration tests. Gherkin: "three nodes start,
-      exactly one becomes hub". Done when the production status pages agree on
-      one hub.
+      `/status` shows node id, role, hub, peers; the node bar's green or red
+      from C3 now comes primarily from this discovery topology (a peer seen
+      by broadcast or probing) and only secondarily, shown distinctly, from
+      the browser's own `/health` probe; view `network` in the app shows the
+      topology, links to the other nodes and the complete link list with
+      role (hub or client), node id and last seen, updated live through the
+      SSE `topology` event; a local Docker Compose file with three nodes for
+      the integration tests. Gherkin: "three nodes start, exactly one
+      becomes hub". Done when the production status pages agree on one hub
+      and the node bar reflects the discovery topology live.
 - [ ] **D2 Hub transport.** Depends on: D1. As hub, run `Server` over the
       node's own `Io` and `Bs` with a socket.io server on 3000; as client, run
       `Client` connected to the hub; the API uses the multis from then on.
@@ -787,6 +801,20 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       emit `sync` events. Gherkin: "a customer created on node1 is listed on
       node2 and node3 within five seconds". Done when an invoice issued on the
       phone against node3 appears on node1.
+- [ ] **D3b Transfer indicators.** Depends on: D3, B13. Per partner node in
+      the node bar an upstream and a downstream icon; when this node
+      receives data from that partner the upstream icon activates
+      immediately and its fill animates from bottom to top while the
+      transfer runs, then keeps animating one more second after completion;
+      the same for downstream when this node sends. Tapping or clicking a
+      partner node opens a closable popup (full screen on narrow viewports,
+      a dialog on wide ones) listing up to the last ten transfers with that
+      partner, one row each with the direction icon, table, change set hash
+      (short), row count and time; the data comes from the SSE `sync`
+      events, which must carry direction, peer id and change set. Playwright
+      covers the popup at both viewports and the animation state classes.
+      Done when an invoice issued on node2 makes node1's upstream icon
+      animate and the popup lists it.
 - [ ] **D4 Bootstrap and heartbeat.** Depends on: D3. Late joiners receive
       the latest change set, `bootstrapHeartbeatMs` configured. Gherkin: "node3
       restarts and catches up". Done when the memory node is complete again
@@ -862,6 +890,28 @@ true`), lists hide them, edit versus delete resolves to the edit. Gherkin
 - [ ] **E7 Kubeconfig without SSH.** Depends on: A7. Terraform-generated
       root CA fed to k3s through cloud-init, admin client certificate issued by
       Terraform, SSH resource and `loafoe/ssh` provider removed.
+
+### Phase F: finishing
+
+- [ ] **F1 Pixel-perfect pet shop styling.** Depends on: B13 (and ideally
+      D3b). The app looks like a real pet shop for its customer audience:
+      colour system, typography, shapes, illustrations of every species and
+      decorative elements generated as SVG by the agent (own work, no
+      external assets, no licence questions), consistent icons, empty
+      states, micro-interactions that respect `prefers-reduced-motion`,
+      still vanilla or web components, preferably a single embedded HTML
+      file with no dependencies (a lightweight framework only if truly
+      justified and argued in the pull request). Pixel-perfect at 375 x 812,
+      768 x 1024 and 1280 x 800 with Playwright screenshot comparisons. Done
+      when the owner says it looks like a real shop and the screenshot tests
+      pass.
+- [ ] **F2 Comparison forks.** Depends on: everything else, optional. Fork
+      the repository and rebuild the same system on a comparable TypeScript
+      product (candidates to research first: Ditto, Yjs/y-websocket,
+      Automerge, ElectricSQL, PowerSync, RxDB; pick what offers local
+      storage plus peer or hub synchronisation with a TypeScript SDK), keep
+      the web app and the domain, swap the storage and sync layers, and
+      write a findings comparison.
 
 ## 6. Findings template
 
