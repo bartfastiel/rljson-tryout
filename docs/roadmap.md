@@ -523,10 +523,20 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       definition does not exist yet, and the account email is the repository
       secret `LETSENCRYPT_EMAIL` rather than a variable, because the runner
       prints variables used in a job's environment into the public log.
-- [ ] **A11 Smoke test and deploy chain.** Depends on: A10. `smoke` job,
+- [x] **A11 Smoke test and deploy chain.** Depends on: A10. `smoke` job,
       concurrency groups, image tag flows from `image` to `terraform-workloads`.
       Done when a change to the health payload lands on the internet through
-      one merge without manual steps and the smoke job proves it.
+      one merge without manual steps and the smoke job proves it. The
+      change is the field `startedAt` in `/health`. The verification lives
+      in `infra/scripts/verify-deployment.sh`, which takes the URLs and the
+      expected commit from the environment so that the `smoke` job and the
+      manual `up` workflow share it; it also proves `/api/species` and the
+      web app at `/`. The `image` job hands its full image reference to
+      `terraform-workloads` through a job output, so the registry path is
+      spelled once. The concurrency groups `cluster` and
+      `workloads-production` existed since A6 and A9; the workflow-level
+      group serializes whole runs on `main`, so `smoke` needs no group of
+      its own.
 - [ ] **A12 Preview environments.** Depends on: A11. Workspace `pr-<n>`,
       namespace, flattened hostnames, pull request comment,
       `preview-destroy.yml`. Done when the pull request that adds this feature

@@ -69,6 +69,18 @@
   deployment, service, node ingress and apex ingress. The service resource
   plans `wait_for_load_balancer = true` even for `ClusterIP`; the provider
   ignores it for that type.
+- First apply on `main` (run 35208641092): the whole apply took 9 s, the
+  deployment 8 s of it including the image pull from GHCR, and `/health`
+  reported the new commit 3 s after the apply. A later rollout to a new
+  image tag took 17 s (surge pod started, ready, old pod gone).
+- Deploy chain since slice A11: the `image` job exposes the full image
+  reference as a job output and `terraform-workloads` receives it as
+  `TF_VAR_image`, so the registry path is derived once from
+  `github.repository` (lower-cased with bash's `${variable,,}` because GHCR
+  rejects capitals). `terraform-workloads` exposes the deployed URLs as a
+  job output and the `smoke` job verifies them without Terraform. Runs on
+  `main` are serialized by the workflow-level concurrency group, so a
+  smoke test never races a newer apply.
 
 ## What it means for rljson users
 
