@@ -34,8 +34,8 @@ const render = () => {
     return;
   }
 
-  const [sectionName, animalId] = segments;
-  const isAnimalDetail = sectionName === 'animals' && animalId !== undefined;
+  const sectionName = segments[0];
+  const isAnimalDetail = sectionName === 'animals' && segments.length > 1;
   const view = isAnimalDetail ? undefined : views[sectionName];
 
   document.title = isAnimalDetail
@@ -51,7 +51,7 @@ const render = () => {
 
   if (isAnimalDetail) {
     const detail = document.createElement('animal-detail');
-    detail.setAttribute('animal-id', animalId);
+    detail.setAttribute('animal-id', segments[1]);
     main.replaceChildren(detail);
     return;
   }

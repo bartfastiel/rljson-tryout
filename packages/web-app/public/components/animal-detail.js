@@ -2,6 +2,13 @@
 import { element } from '../dom.js';
 import { hashQuery } from '../hash-route.js';
 import { notFoundView } from '../not-found-view.js';
+import {
+  dateFormat,
+  errorState,
+  parseDateOnly,
+  priceFormat,
+  statusMessage,
+} from '../view-helpers.js';
 
 /**
  * One animal as `GET /api/animals/:id` returns it: the fields the detail
@@ -19,33 +26,6 @@ import { notFoundView } from '../not-found-view.js';
  * @property {number} priceCents
  * @property {string} backgroundStory
  */
-
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const priceFormat = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'EUR',
-});
-
-/**
- * Parses a date-only string the same way `animals-list.js` does: building
- * the `Date` from its numeric year, month and day keeps the calendar day
- * independent of the viewer's time zone, unlike `new Date(dateOnlyString)`.
- *
- * @param {string} dateOnly
- */
-const parseDateOnly = (dateOnly) => {
-  const [year, month, day] = dateOnly.split('-').map(Number);
-  return new Date(year, month - 1, day);
-};
-
-/**
- * @param {string} text
- */
-const statusMessage = (text) => {
-  const message = element('p', 'status', text);
-  message.setAttribute('role', 'status');
-  return message;
-};
 
 /**
  * The href of the list a "back" link should return to: the filtered list
@@ -173,32 +153,13 @@ class AnimalDetailElement extends HTMLElement {
       const animal = /** @type {AnimalDetail} */ (await response.json());
       this.replaceChildren(backLink(), detailView(animal));
     } catch (error) {
-      this.replaceChildren(backLink(), this.errorState(error));
+      this.replaceChildren(
+        backLink(),
+        errorState('Could not load the animal.', error, () => void this.load()),
+      );
     } finally {
       this.removeAttribute('aria-busy');
     }
-  }
-
-  /**
-   * @param {unknown} error
-   */
-  errorState(error) {
-    const retry = element('button', 'button', 'Retry');
-    retry.type = 'button';
-    retry.addEventListener('click', () => void this.load());
-
-    const state = element('div', 'status status-error');
-    state.setAttribute('role', 'alert');
-    state.append(
-      element('p', 'status-headline', 'Could not load the animal.'),
-      element(
-        'p',
-        'status-detail',
-        error instanceof Error ? error.message : String(error),
-      ),
-      retry,
-    );
-    return state;
   }
 }
 

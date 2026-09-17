@@ -2,6 +2,13 @@
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
 import { hashQuery } from '../hash-route.js';
+import {
+  dateFormat,
+  errorState,
+  parseDateOnly,
+  priceFormat,
+  statusMessage,
+} from '../view-helpers.js';
 
 /**
  * One animal as `GET /api/animals` returns it, with its species already
@@ -27,36 +34,6 @@ import { hashQuery } from '../hash-route.js';
  */
 
 const viewTitle = () => element('h1', 'view-title', 'Animals');
-
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const priceFormat = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'EUR',
-});
-
-/**
- * Parses a date-only string such as `"2020-07-22"` into a `Date` at
- * midnight in the viewer's own time zone. `new Date(dateOnlyString)` parses
- * the same string as UTC midnight instead, which `dateFormat` then renders
- * in the viewer's time zone: anyone west of UTC sees the previous day.
- * Building the `Date` from its numeric year, month and day keeps the
- * calendar day independent of the viewer's time zone.
- *
- * @param {string} dateOnly
- */
-const parseDateOnly = (dateOnly) => {
-  const [year, month, day] = dateOnly.split('-').map(Number);
-  return new Date(year, month - 1, day);
-};
-
-/**
- * @param {string} text
- */
-const statusMessage = (text) => {
-  const message = element('p', 'status', text);
-  message.setAttribute('role', 'status');
-  return message;
-};
 
 /**
  * The species id the `species` hash query parameter selects, or `null` when
@@ -186,32 +163,17 @@ class AnimalsList extends HTMLElement {
         animalCards(animals),
       );
     } catch (error) {
-      this.replaceChildren(viewTitle(), this.errorState(error));
+      this.replaceChildren(
+        viewTitle(),
+        errorState(
+          'Could not load the animals.',
+          error,
+          () => void this.load(),
+        ),
+      );
     } finally {
       this.removeAttribute('aria-busy');
     }
-  }
-
-  /**
-   * @param {unknown} error
-   */
-  errorState(error) {
-    const retry = element('button', 'button', 'Retry');
-    retry.type = 'button';
-    retry.addEventListener('click', () => void this.load());
-
-    const state = element('div', 'status status-error');
-    state.setAttribute('role', 'alert');
-    state.append(
-      element('p', 'status-headline', 'Could not load the animals.'),
-      element(
-        'p',
-        'status-detail',
-        error instanceof Error ? error.message : String(error),
-      ),
-      retry,
-    );
-    return state;
   }
 }
 

@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
+import { errorState, statusMessage } from '../view-helpers.js';
 
 /**
  * One species as `GET /api/species` returns it.
@@ -14,15 +15,6 @@ import { element } from '../dom.js';
  */
 
 const viewTitle = () => element('h1', 'view-title', 'Species');
-
-/**
- * @param {string} text
- */
-const statusMessage = (text) => {
-  const message = element('p', 'status', text);
-  message.setAttribute('role', 'status');
-  return message;
-};
 
 /**
  * @param {Species} species
@@ -81,32 +73,17 @@ class SpeciesList extends HTMLElement {
       );
       this.replaceChildren(viewTitle(), speciesCards(species));
     } catch (error) {
-      this.replaceChildren(viewTitle(), this.errorState(error));
+      this.replaceChildren(
+        viewTitle(),
+        errorState(
+          'Could not load the species.',
+          error,
+          () => void this.load(),
+        ),
+      );
     } finally {
       this.removeAttribute('aria-busy');
     }
-  }
-
-  /**
-   * @param {unknown} error
-   */
-  errorState(error) {
-    const retry = element('button', 'button', 'Retry');
-    retry.type = 'button';
-    retry.addEventListener('click', () => void this.load());
-
-    const state = element('div', 'status status-error');
-    state.setAttribute('role', 'alert');
-    state.append(
-      element('p', 'status-headline', 'Could not load the species.'),
-      element(
-        'p',
-        'status-detail',
-        error instanceof Error ? error.message : String(error),
-      ),
-      retry,
-    );
-    return state;
   }
 }
 
