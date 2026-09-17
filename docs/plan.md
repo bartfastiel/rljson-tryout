@@ -62,7 +62,7 @@ slice), `io-indexed-db` and `io-fs` (not published to npm).
    node3.rljson-tryout.wer-ist-daniel-schwarz.de ─┤
    node1-pr-42.rljson-tryout.wer-ist-daniel-schwarz.de (preview) ─┘
                                                             │
-   ┌──────────── one Hetzner Cloud server (cx32), single-node k3s ─────────────┐
+   ┌──────────── one Hetzner Cloud server (cx33), single-node k3s ─────────────┐
    │  flannel bridge: one layer 2 segment, UDP broadcast reaches every pod     │
    │                                                                            │
    │  namespace petshop (production)            namespace pr-42 (preview)      │

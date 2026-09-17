@@ -93,7 +93,7 @@ docs/
 | Item                  | Value                                                                                                                                                                                                      |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Hetzner project       | `rljson-tryout`                                                                                                                                                                                            |
-| Server                | one `cx32` in location `nbg1`, image `ubuntu-24.04`, k3s installed by cloud-init                                                                                                                           |
+| Server                | one `cx33` in location `nbg1`, image `ubuntu-24.04`, k3s installed by cloud-init                                                                                                                           |
 | Public IPv4           | Hetzner Primary IP named `rljson-tryout` in `nbg1`, address `162.55.190.77`, created once by hand, attached to the server by Terraform, survives server replacement                                        |
 | DNS records           | `rljson-tryout` A and `*.rljson-tryout` A in the zone `wer-ist-daniel-schwarz.de` (Hetzner Cloud Console, project `konsoleH`), pointing to that primary IP, entered once by hand, not managed by Terraform |
 | Production hostnames  | `node1.rljson-tryout.wer-ist-daniel-schwarz.de`, `node2…`, `node3…`; the apex host routes to node1                                                                                                         |
@@ -345,7 +345,7 @@ the cluster.
 
 - `hcloud_ssh_key` from `tls_private_key` (the private key stays in state),
   `hcloud_firewall` allowing 22, 80, 443, 6443 inbound and everything
-  outbound, `hcloud_server` `cx32` with cloud-init `user_data` that installs
+  outbound, `hcloud_server` `cx33` with cloud-init `user_data` that installs
   k3s (`curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --tls-san
 <public ip>" sh -`), and a `HelmChartConfig` for Traefik that redirects
   the `web` entrypoint to `websecure`.
@@ -462,7 +462,11 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       a stopped server and switching later would have forced a replacement;
       the server takes `location` (not the deprecated `datacenter`) from the
       data source. Runs on `main` are no longer cancelled by a newer push, so
-      an apply is never interrupted.
+      an apply is never interrupted. The first apply failed with "server type
+      cx32 not found": Hetzner replaced the `cx*2` line by `cx*3` in October
+      2025, so the server is a `cx33` (same 4 vCPU, 8 GB, 80 GB) and a
+      precondition now fails the plan when the type is unavailable in the
+      primary IP's location.
 - [ ] **A7 Kubeconfig hand-off.** Depends on: A6. The `terraform_data`
       provisioner and the `kubeconfig` output. Done when a workflow step runs
       `kubectl get nodes` with the output and sees the node `Ready`.

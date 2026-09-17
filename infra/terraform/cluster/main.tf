@@ -11,6 +11,17 @@ data "hcloud_primary_ip" "main" {
   name = local.project_name
 }
 
+data "hcloud_server_type" "main" {
+  name = "cx33"
+}
+
+locals {
+  server_type_in_location = one([
+    for location in data.hcloud_server_type.main.locations :
+    location if location.name == data.hcloud_primary_ip.main.location
+  ])
+}
+
 resource "tls_private_key" "main" {
   algorithm = "ED25519"
 }
@@ -51,7 +62,7 @@ resource "hcloud_firewall" "main" {
 
 resource "hcloud_server" "main" {
   name         = local.project_name
-  server_type  = "cx32"
+  server_type  = data.hcloud_server_type.main.name
   image        = "ubuntu-24.04"
   location     = data.hcloud_primary_ip.main.location
   ssh_keys     = [hcloud_ssh_key.main.id]
@@ -72,6 +83,10 @@ resource "hcloud_server" "main" {
     precondition {
       condition     = !data.hcloud_primary_ip.main.auto_delete
       error_message = "The primary IP ${local.project_name} must have auto delete switched off, otherwise the address and the DNS records pointing at it are lost when the server is replaced."
+    }
+    precondition {
+      condition     = try(local.server_type_in_location.available, false)
+      error_message = "Server type ${data.hcloud_server_type.main.name} is not available in location ${data.hcloud_primary_ip.main.location}; pick another type in main.tf."
     }
   }
 }
