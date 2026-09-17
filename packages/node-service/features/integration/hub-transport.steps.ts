@@ -125,15 +125,30 @@ describeFeature(
         );
 
         And(
-          'the client still lists "donald-the-third" at its old price',
+          'the client lists "donald-the-third" at 61000 cents once the change set arrived',
           async () => {
-            const response = await request<AnimalDetailResponse>(
-              client,
-              '/api/animals/donald-the-third',
-            );
+            expect(oldPriceCents).not.toBe(61_000);
+            const deadline = Date.now() + 5_000;
+            let current: AnimalDetailResponse;
+            do {
+              current = (
+                await request<AnimalDetailResponse>(
+                  client,
+                  '/api/animals/donald-the-third',
+                )
+              ).body;
+              if (current.hash === newVersion.hash) {
+                break;
+              }
+              await new Promise((resolvePromise) =>
+                setTimeout(resolvePromise, 100),
+              );
+            } while (Date.now() < deadline);
 
-            expect(response.body.priceCents).toBe(oldPriceCents);
-            expect(response.body.hash).not.toBe(newVersion.hash);
+            expect(current).toMatchObject({
+              hash: newVersion.hash,
+              priceCents: 61_000,
+            });
           },
         );
       },
