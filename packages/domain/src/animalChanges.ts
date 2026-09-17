@@ -48,45 +48,71 @@ const isWholeNonNegativeNumber = (value: unknown): boolean =>
 const isListOfIds = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(isNonEmptyString);
 
+type EditableAnimalField = (typeof editableAnimalFields)[number];
+
 /**
- * The reason a value of one editable field cannot be applied, `null` when
- * it can. Only fields the changes name are checked, so every check here
- * sees a present value.
+ * One rule a field's value has to satisfy, with the sentence shown when it
+ * does not.
+ */
+type FieldRule = {
+  accepts: (value: unknown) => boolean;
+  message: string;
+};
+
+const fieldRules: Record<EditableAnimalField, readonly FieldRule[]> = {
+  name: [{ accepts: isNonEmptyString, message: 'The name must not be empty.' }],
+  speciesId: [
+    { accepts: isNonEmptyString, message: 'The species id must not be empty.' },
+  ],
+  breederId: [
+    { accepts: isNonEmptyString, message: 'The breeder id must not be empty.' },
+  ],
+  bornOn: [
+    {
+      accepts: (value) => typeof value === 'string' && isCalendarDate(value),
+      message: 'The birth date must be a calendar date such as 2024-05-31.',
+    },
+  ],
+  priceCents: [
+    {
+      accepts: isWholeNonNegativeNumber,
+      message: 'The price must be a whole number of cents, at least 0.',
+    },
+  ],
+  backgroundStory: [
+    {
+      accepts: (value) => typeof value === 'string',
+      message: 'The background story must be text.',
+    },
+  ],
+  traitIds: [
+    {
+      accepts: isListOfIds,
+      message: 'The traits must be a list of trait ids.',
+    },
+    {
+      accepts: (value) =>
+        isListOfIds(value) && new Set(value).size === value.length,
+      message: 'The traits must not repeat a trait id.',
+    },
+  ],
+};
+
+const isEditableAnimalField = (field: string): field is EditableAnimalField =>
+  Object.hasOwn(fieldRules, field);
+
+/**
+ * The reason a value of one field cannot be applied, `null` when it can:
+ * the first rule of the field the value breaks, or, for a field no rule
+ * knows, that the field is not editable.
  */
 const fieldProblem = (field: string, value: unknown): string | null => {
-  switch (field) {
-    case 'name':
-      return isNonEmptyString(value) ? null : 'The name must not be empty.';
-    case 'priceCents':
-      return isWholeNonNegativeNumber(value)
-        ? null
-        : 'The price must be a whole number of cents, at least 0.';
-    case 'bornOn':
-      return typeof value === 'string' && isCalendarDate(value)
-        ? null
-        : 'The birth date must be a calendar date such as 2024-05-31.';
-    case 'backgroundStory':
-      return typeof value === 'string'
-        ? null
-        : 'The background story must be text.';
-    case 'speciesId':
-      return isNonEmptyString(value)
-        ? null
-        : 'The species id must not be empty.';
-    case 'breederId':
-      return isNonEmptyString(value)
-        ? null
-        : 'The breeder id must not be empty.';
-    case 'traitIds':
-      if (!isListOfIds(value)) {
-        return 'The traits must be a list of trait ids.';
-      }
-      return new Set(value).size === value.length
-        ? null
-        : 'The traits must not repeat a trait id.';
-    default:
-      return `"${field}" is not an editable field of an animal; editable fields are ${editableAnimalFields.join(', ')}.`;
+  if (!isEditableAnimalField(field)) {
+    return `"${field}" is not an editable field of an animal; editable fields are ${editableAnimalFields.join(', ')}.`;
   }
+  return (
+    fieldRules[field].find((rule) => !rule.accepts(value))?.message ?? null
+  );
 };
 
 /**
