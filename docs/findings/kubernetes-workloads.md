@@ -95,7 +95,11 @@
   both moves as "has moved to" lines with no resource change; the preview
   mapping was planned against a copy of the stage with a local backend and
   `TF_WORKSPACE=pr-42` (the S3 backend would have written an empty state
-  object for a workspace that only exists locally).
+  object for a workspace that only exists locally). Once the apply on
+  `main` (run 35223849412) had recorded both moves in state, the two
+  `moved` blocks became dead code and were removed; a read-only plan
+  afterwards showed no "moved" line and no create or destroy of the
+  renamed module or the apex ingress.
 
 ## What it means for rljson users
 
