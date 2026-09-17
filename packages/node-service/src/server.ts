@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import type { Configuration } from './configuration.ts';
+import { registerAnimalsRoutes } from './routes/animals.ts';
 import { registerSpeciesRoutes } from './routes/species.ts';
 import type { PetShopStore } from './store/petShopStore.ts';
 
@@ -42,6 +43,7 @@ export const buildServer = (
   }));
 
   registerSpeciesRoutes(server, store);
+  registerAnimalsRoutes(server, store);
 
   // The app has no build step and no hashed file names, so browsers must
   // revalidate the entry document on every load to pick up new versions.

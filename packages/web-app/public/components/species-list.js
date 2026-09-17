@@ -33,11 +33,15 @@ const speciesCard = (species) => {
   const latinNameLine = element('p', 'species-latin-name');
   latinNameLine.append(latinName);
 
+  const animalsLink = element('a', 'button', 'See animals');
+  animalsLink.href = `#/animals?species=${encodeURIComponent(species.id)}`;
+
   const card = element('article', 'card species-card');
   card.append(
     element('h2', 'species-name', species.name),
     latinNameLine,
     element('p', 'species-description', species.description),
+    animalsLink,
   );
 
   const item = element('li', 'card-list-item');

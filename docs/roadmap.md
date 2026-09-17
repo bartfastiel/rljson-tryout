@@ -537,7 +537,8 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       check on `node1` follows automatically once A9 deploys `main`. The
       "missing reference" validation test moves to B3, where the first
       `speciesRef` column exists; the species table has no reference column
-      to break. The version check found every pinned `@rljson/*` package at
+      to break. B3 delivered that test against the `animals.speciesRef`
+      column. The version check found every pinned `@rljson/*` package at
       its latest version (`docs/findings/versions.md`); the overrides from
       3.5 were needed right away because `@rljson/validate` pulls older
       copies in, and they live in `pnpm-workspace.yaml` because pnpm 12
@@ -558,10 +559,31 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       has one `nav` landmark that docks to the bottom on narrow screens and to
       the left from 768 px, so assistive technology sees one navigation
       instead of two with one hidden.
-- [ ] **B3 Animals with a species reference.** Depends on: B2. Table
+- [x] **B3 Animals with a species reference.** Depends on: B2. Table
       `animals` (without story and traits yet), `speciesRef`, route query that
       joins the species, `GET /api/animals`, view `animals` with species name
-      and price. Done when the list shows the joined species name.
+      and price. Done when the list shows the joined species name. Deviation:
+      the seed holds ten hand-written animals, not a fixed count the roadmap
+      left open. `PetShopStore.seedIfEmpty` now returns
+      `{ speciesSeeded, animalsSeeded }` instead of a plain row count, since
+      it seeds both tables in one coordinated call (species first, because
+      animals reference them by hash). The route join
+      `Route.fromFlat('animals/species')` was tried first and resolves every
+      animal's species in one `Db.get` call, but it silently drops a
+      referencing row whose reference does not resolve instead of including
+      it with a missing species; `PetShopStore.listAnimals` therefore uses
+      the explicit fallback the roadmap anticipated instead: two plain
+      `Db.get` calls (`animals`, `species`) joined with a local `Map`, which
+      includes every animal and reports `speciesId`/`speciesName` as `null`
+      when a reference does not resolve rather than dropping the row or
+      failing the request; filtering by species happens in JavaScript after
+      the join (findings in `docs/findings/db-basics.md`, "Joining a
+      reference"). The `animals` view becomes the default route
+      (`#/animals`) and gets a second, first-listed navigation entry
+      `Animals`; `#/species` stays and its cards link to the filtered
+      animals view. The species filter is a row of chips that are plain
+      links into the hash query (`#/animals?species=duck`), so selecting one
+      is an ordinary navigation and the filtered view is shareable.
 - [ ] **B4 Long background story.** Depends on: B3. Column
       `backgroundStory`, `GET /api/animals/:id`, view `animal-detail`, Gherkin
       set up with a first feature that round-trips a 4 000 character story.
