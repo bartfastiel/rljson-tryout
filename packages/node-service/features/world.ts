@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 
-import { PetShopStore } from '../src/store/petShopStore.ts';
+import type { StorageKind } from '../src/configuration.ts';
+import type { PetShopStore } from '../src/store/petShopStore.ts';
 import type { TraitRelationMode } from '../src/store/traitRelation.ts';
 import { buildTestServer } from '../src/testing/testServer.ts';
+import { testStore } from '../src/testing/testStores.ts';
 
 /**
  * A pet shop store plus a Fastify instance over it, initialized but not
@@ -18,18 +20,37 @@ export type World = {
 };
 
 /**
- * Builds a world whose store reads the animal-trait relation in the given
- * mode, `multi-reference` by default (`docs/findings/n-to-m.md`). The
- * server runs with the shared test configuration (`src/testing/testServer.ts`,
- * discovery disabled, never bound) under the node name `node-under-test`.
+ * What a scenario chooses about its world: which `STORAGE` backs the
+ * store (`memory` or `sqlite`; every feature runs over both through
+ * `describe.each(storageKinds)`), where a SQLite file goes, and which
+ * animal-trait relation the store reads (`multi-reference` by default,
+ * `docs/findings/n-to-m.md`).
  */
-export const createWorld = async (
-  traitRelationMode: TraitRelationMode = 'multi-reference',
-): Promise<World> => {
-  const store = new PetShopStore({ traitRelationMode });
-  await store.initialize();
+export type WorldOptions = {
+  storage: StorageKind;
+  dataDirectory: string;
+  traitRelationMode?: TraitRelationMode;
+};
+
+/**
+ * Builds a world over a store of the given kind. The server runs with the
+ * shared test configuration (`src/testing/testServer.ts`, discovery
+ * disabled, never bound) under the node name `node-under-test`, reporting
+ * the same `storage` the store was built with.
+ */
+export const createWorld = async ({
+  storage,
+  dataDirectory,
+  traitRelationMode = 'multi-reference',
+}: WorldOptions): Promise<World> => {
+  const store = await testStore(
+    { storage, dataDirectory },
+    { traitRelationMode },
+  );
   const server = buildTestServer(store, {
     nodeName: 'node-under-test',
+    storage,
+    dataDirectory,
     traitRelationMode,
   });
   return { store, server };

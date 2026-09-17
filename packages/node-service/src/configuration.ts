@@ -34,6 +34,17 @@ export type DiscoveryMode = 'enabled' | 'disabled';
 const discoveryModes: readonly DiscoveryMode[] = ['enabled', 'disabled'];
 
 /**
+ * Which `Io` implementation backs the node's store (`STORAGE` in roadmap
+ * section 2.4): `memory` keeps everything in the process and starts empty
+ * on every restart, `sqlite` keeps it in `<DATA_DIR>/petshop.sqlite` and
+ * survives a restart (`docs/findings/stores.md`). `mssql` arrives with
+ * slice C4.
+ */
+export type StorageKind = 'memory' | 'sqlite';
+
+const storageKinds: readonly StorageKind[] = ['memory', 'sqlite'];
+
+/**
  * The subset of the node configuration (see roadmap section 2.4) that this
  * package uses so far.
  */
@@ -43,6 +54,7 @@ export type Configuration = Readonly<{
   logLevel: LogLevel;
   gitCommit: string;
   webAppDirectory: string;
+  storage: StorageKind;
   traitRelationMode: TraitRelationMode;
   rljsonDomain: string;
   hubPort: number;
@@ -167,6 +179,20 @@ const readDiscoveryMode = (value: string | undefined): DiscoveryMode => {
   return value as DiscoveryMode;
 };
 
+const readStorageKind = (value: string | undefined): StorageKind => {
+  if (value === undefined) {
+    return 'memory';
+  }
+
+  if (!storageKinds.includes(value as StorageKind)) {
+    throw new Error(
+      `STORAGE must be one of ${storageKinds.join(', ')}, got "${value}"`,
+    );
+  }
+
+  return value as StorageKind;
+};
+
 const readLogLevel = (value: string | undefined): LogLevel => {
   if (value === undefined) {
     return 'info';
@@ -219,6 +245,7 @@ export const readConfiguration = (
     logLevel: readLogLevel(environment.LOG_LEVEL),
     gitCommit: environment.GIT_COMMIT ?? 'unknown',
     webAppDirectory: readWebAppDirectory(environment.WEB_APP_DIRECTORY),
+    storage: readStorageKind(environment.STORAGE),
     traitRelationMode: readTraitRelationMode(environment.TRAIT_RELATION),
     rljsonDomain: readRljsonDomain(environment.RLJSON_DOMAIN),
     hubPort: readPort('HUB_PORT', environment.HUB_PORT, 3000),

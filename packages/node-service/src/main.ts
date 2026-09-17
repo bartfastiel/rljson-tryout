@@ -4,13 +4,15 @@ import { readConfiguration } from './configuration.ts';
 import { NodeDirectory } from './network/nodeDirectory.ts';
 import { RoleOrchestrator } from './network/roleOrchestrator.ts';
 import { buildServer } from './server.ts';
+import { createIo } from './store/createIo.ts';
 import { PetShopStore } from './store/petShopStore.ts';
 
 const configuration = readConfiguration();
 const logger = pino({ level: configuration.logLevel });
-const store = new PetShopStore({
-  traitRelationMode: configuration.traitRelationMode,
-});
+const store = new PetShopStore(
+  createIo(configuration, logger.child({ component: 'storage' })),
+  { traitRelationMode: configuration.traitRelationMode },
+);
 const orchestrator = new RoleOrchestrator(
   configuration,
   logger.child({ component: 'orchestrator' }),

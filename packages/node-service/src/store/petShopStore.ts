@@ -1,5 +1,5 @@
 import { Db } from '@rljson/db';
-import { IoMem } from '@rljson/io';
+import type { Io } from '@rljson/io';
 import {
   Route,
   timeId,
@@ -651,16 +651,20 @@ export type PetShopStoreOptions = Readonly<{
 }>;
 
 /**
- * The node's data: an rljson `Db` over an in-memory `IoMem`. Later slices
- * put SQLite and SQL Server behind the same `Db`. `animalTraits` (the
- * junction-table alternative to `animals.traitsRefs`, slice B6) is always
- * created and seeded, regardless of `traitRelationMode`: the table is part
- * of the domain either way, and switching the mode at runtime must not
- * require reseeding (`docs/findings/n-to-m.md`).
+ * The node's data: an rljson `Db` over the `Io` the configured `STORAGE`
+ * selects (`createIo`: `IoMem`, or `IoSqliteNode` over a file under
+ * `DATA_DIR`; SQL Server follows with slice C4). The store never asks
+ * which one it got: every method reads and writes through `Db` and the
+ * `Io` interface alone, and `docs/findings/stores.md` records where the
+ * implementations behave differently. `animalTraits` (the junction-table
+ * alternative to `animals.traitsRefs`, slice B6) is always created and
+ * seeded, regardless of `traitRelationMode`: the table is part of the
+ * domain either way, and switching the mode at runtime must not require
+ * reseeding (`docs/findings/n-to-m.md`).
  */
 export class PetShopStore {
-  private readonly io = new IoMem();
-  private readonly db = new Db(this.io);
+  private readonly io: Io;
+  private readonly db: Db;
   private readonly traitRelationMode: TraitRelationMode;
   private readonly today: () => string;
 
@@ -699,14 +703,22 @@ export class PetShopStore {
     changeSetsInsertHistoryTableCfg,
   ];
 
-  constructor(options: PetShopStoreOptions = {}) {
+  constructor(io: Io, options: PetShopStoreOptions = {}) {
+    this.io = io;
+    this.db = new Db(io);
     this.traitRelationMode = options.traitRelationMode ?? 'multi-reference';
     this.today = options.today ?? todayInUtc;
   }
 
   /**
    * Opens the store and creates every domain table together with its
-   * InsertHistory companion. Must run before any other method.
+   * InsertHistory companion. Must run once, before any other method, and
+   * only once per instance: `IoSqliteNode.init()` opens a new connection
+   * on every call and leaks the previous one. Safe to run against a
+   * file that already holds these tables and their rows, which is what
+   * every restart of a `sqlite` node does: both `Io` implementations
+   * treat `createOrExtendTable` for an unchanged table configuration as a
+   * no-op (`docs/findings/stores.md`).
    */
   async initialize(): Promise<void> {
     await this.io.init();
@@ -1588,6 +1600,10 @@ export class PetShopStore {
     return changeSet;
   }
 
+  /**
+   * Closes the underlying `Io`: for `sqlite` this closes the database file
+   * so that the process can exit or another store can open the same file.
+   */
   async close(): Promise<void> {
     await this.io.close();
   }

@@ -203,9 +203,10 @@ Survives a `Down`:
 Lost with a `Down`:
 
 - Everything on the server: the k3s cluster, its certificate authority (the
-  kubeconfig changes with every `Up`), all in-cluster data. Today the only
-  store is in memory and reseeds itself at start; the persistent stores of
-  phase C live on the server's local disk and start empty after an `Up`.
+  kubeconfig changes with every `Up`), all in-cluster data. The SQLite
+  file and the node identity of node1 live on a `local-path` volume of the
+  server's disk (slice C1); they survive pod restarts and redeploys but
+  not a `Down`, after which node1 seeds itself again with a fresh node id.
 - The generated SSH key pair. `Up` creates a new one.
 - The Let's Encrypt account and certificates of cert-manager. Every `Up`
   registers a new account and orders the certificates again. The limit

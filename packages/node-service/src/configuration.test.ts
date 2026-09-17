@@ -29,6 +29,7 @@ describe('readConfiguration', () => {
       logLevel: 'info',
       gitCommit: 'unknown',
       webAppDirectory: webAppPublicDirectory,
+      storage: 'memory',
       traitRelationMode: 'multi-reference',
       rljsonDomain: 'petshop-local',
       hubPort: 3000,
@@ -47,6 +48,7 @@ describe('readConfiguration', () => {
       LOG_LEVEL: 'debug',
       GIT_COMMIT: 'abc1234',
       WEB_APP_DIRECTORY: temporaryDirectory,
+      STORAGE: 'sqlite',
       TRAIT_RELATION: 'junction',
       RLJSON_DOMAIN: 'petshop-compose',
       HUB_PORT: '3100',
@@ -63,6 +65,7 @@ describe('readConfiguration', () => {
       logLevel: 'debug',
       gitCommit: 'abc1234',
       webAppDirectory: temporaryDirectory,
+      storage: 'sqlite',
       traitRelationMode: 'junction',
       rljsonDomain: 'petshop-compose',
       hubPort: 3100,
@@ -118,6 +121,21 @@ describe('readConfiguration', () => {
   it('throws a clear error for an invalid log level', () => {
     expect(() => readConfiguration({ LOG_LEVEL: 'verbose' })).toThrow(
       /LOG_LEVEL must be one of/,
+    );
+  });
+
+  it('defaults the storage to memory', () => {
+    expect(readConfiguration({}).storage).toBe('memory');
+  });
+
+  it('accepts both documented storage kinds', () => {
+    expect(readConfiguration({ STORAGE: 'memory' }).storage).toBe('memory');
+    expect(readConfiguration({ STORAGE: 'sqlite' }).storage).toBe('sqlite');
+  });
+
+  it('throws a clear error for a storage kind it does not know yet', () => {
+    expect(() => readConfiguration({ STORAGE: 'mssql' })).toThrow(
+      'STORAGE must be one of memory, sqlite, got "mssql"',
     );
   });
 

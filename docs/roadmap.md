@@ -126,23 +126,23 @@ README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
-| Variable            | Values                                      | Meaning                                                                                                                                                   |
-| ------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_NAME`         | `node1` …                                   | Display name, also used for the hostname                                                                                                                  |
-| `STORAGE`           | `memory`, `sqlite`, `mssql`                 | Which `Io` implementation backs the node                                                                                                                  |
-| `DATA_DIR`          | path                                        | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                   |
-| `MSSQL_CONNECTION`  | connection string                           | Only for `STORAGE=mssql`                                                                                                                                  |
-| `HTTP_PORT`         | default `8080`                              |                                                                                                                                                           |
-| `HUB_PORT`          | default `3000`                              |                                                                                                                                                           |
-| `BROADCAST_PORT`    | default `41234`                             |                                                                                                                                                           |
-| `RLJSON_DOMAIN`     | string, default `petshop-local`             | Network domain for peer discovery                                                                                                                         |
-| `SEED_SIZE`         | `none`, `small`, `medium`, `large`          | Seed imported at first start when the store is empty                                                                                                      |
-| `PUBLIC_URL`        | URL, default `http://localhost:<HTTP_PORT>` | This node's own URL, shown in `/status` and used for links                                                                                                |
-| `NODE_URLS`         | comma separated URLs, default empty         | Public URLs of every node of the environment, this one included; `/status` of each is polled to correlate node ids with URLs and names (slice D1)         |
-| `DISCOVERY`         | `enabled` (default), `disabled`             | `disabled` opens no broadcast or probe socket: unit tests and single-node runs; the node then reports `standalone` with a per-process id                  |
-| `LOG_LEVEL`         | `info`                                      |                                                                                                                                                           |
-| `WEB_APP_DIRECTORY` | path                                        | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                    |
-| `TRAIT_RELATION`    | `multi-reference`, `junction`               | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference` |
+| Variable            | Values                                      | Meaning                                                                                                                                                            |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NODE_NAME`         | `node1` …                                   | Display name, also used for the hostname                                                                                                                           |
+| `STORAGE`           | `memory` (default), `sqlite`, `mssql`       | Which `Io` implementation backs the node: `IoMem`, `IoSqliteNode` over `DATA_DIR/petshop.sqlite` (slice C1), `IoMssql` (slice C4); any other value fails the start |
+| `DATA_DIR`          | path                                        | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                            |
+| `MSSQL_CONNECTION`  | connection string                           | Only for `STORAGE=mssql`                                                                                                                                           |
+| `HTTP_PORT`         | default `8080`                              |                                                                                                                                                                    |
+| `HUB_PORT`          | default `3000`                              |                                                                                                                                                                    |
+| `BROADCAST_PORT`    | default `41234`                             |                                                                                                                                                                    |
+| `RLJSON_DOMAIN`     | string, default `petshop-local`             | Network domain for peer discovery                                                                                                                                  |
+| `SEED_SIZE`         | `none`, `small`, `medium`, `large`          | Seed imported at first start when the store is empty                                                                                                               |
+| `PUBLIC_URL`        | URL, default `http://localhost:<HTTP_PORT>` | This node's own URL, shown in `/status` and used for links                                                                                                         |
+| `NODE_URLS`         | comma separated URLs, default empty         | Public URLs of every node of the environment, this one included; `/status` of each is polled to correlate node ids with URLs and names (slice D1)                  |
+| `DISCOVERY`         | `enabled` (default), `disabled`             | `disabled` opens no broadcast or probe socket: unit tests and single-node runs; the node then reports `standalone` with a per-process id                           |
+| `LOG_LEVEL`         | `info`                                      |                                                                                                                                                                    |
+| `WEB_APP_DIRECTORY` | path                                        | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                             |
+| `TRAIT_RELATION`    | `multi-reference`, `junction`               | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference`          |
 
 ### 2.5 HTTP contract of a node
 
@@ -290,9 +290,17 @@ makes "what arrived from whom" observable.
 @rljson/rljson` that exactly one version is installed. Record the outcome
   in `docs/findings/versions.md`.
 - `IoSqliteNode` stores a relative `dbFileName` under `./data/`; pass an
-  absolute path built from `DATA_DIR`.
+  absolute path built from `DATA_DIR`. It opens the file with SQLite's
+  defaults (`journal_mode = delete`, `synchronous = FULL`) and commits
+  every `Io.write` on its own, two `fsync`s per `Db.insert`; `createIo`
+  switches the connection to WAL with `synchronous = NORMAL`, ten times
+  faster on the seed (`docs/findings/stores.md`). Call `init()` once per
+  instance: a second call leaks the first connection.
 - Long strings and `jsonArray` columns map differently per store; test with
-  the 4 000 character story in every store (slice C1, C4).
+  the 4 000 character story in every store (slice C1, C4). SQLite stores
+  both as `TEXT` and round-trips them byte for byte (slice C1); its
+  `readRows` `where` clause is built without escaping, so never pass user
+  input into it.
 - `Db.insert` on a table without `_type` in the payload writes nothing and
   fails later on the InsertHistory row.
 - Peer requests time out after 30 seconds by default. A hostile or slow peer
@@ -393,7 +401,8 @@ cluster, `up.yml` brings both back (see `docs/operations.md`).
   (HTTP-01, ingress class `traefik`, email from variable).
 - Module `petshop-environment` (every workspace): namespace, one workload
   per node (`Deployment` for memory, `StatefulSet` with a 2 Gi `local-path`
-  claim for sqlite and mssql), `Service` per node, `Ingress` per host with
+  claim for sqlite and mssql, selected by `nodes[*].storage`), `Service`
+  per node, `Ingress` per host with
   `cert-manager.io/cluster-issuer`, optional SQL Server `StatefulSet`
   (`mcr.microsoft.com/mssql/server:2022-latest`, `MSSQL_PID=Express`,
   `MSSQL_MEMORY_LIMIT_MB=1536`, 4 Gi claim) controlled by `enable_mssql`
@@ -839,11 +848,31 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
 
 ### Phase C: persistent stores, one node per engine
 
-- [ ] **C1 SQLite store.** Depends on: B13. `STORAGE=sqlite` with
+- [x] **C1 SQLite store.** Depends on: B13. `STORAGE=sqlite` with
       `IoSqliteNode` under `DATA_DIR`, node1 in production becomes a
       `StatefulSet` with a claim, the Gherkin domain suite runs against both
       stores in CI, `docs/findings/versions.md` and `docs/findings/stores.md`
-      started. Done when an invoice survives a redeploy of node1.
+      started. Done when an invoice survives a redeploy of node1. Deviation:
+      pulled forward before B13 (and B10 to B12), because the store's
+      backend is independent of the remaining domain slices. `PetShopStore`
+      receives its `Io` from the factory `createIo` (`STORAGE=memory` or
+      `sqlite`; `mssql` is rejected until C4 adds it) instead of building
+      an `IoMem` itself, and `createIo` returns `IoSqliteNode` with the
+      connection switched to write-ahead logging and `synchronous = NORMAL`,
+      because the library's defaults cost two `fsync`s per inserted row
+      (seed 698 ms against 49 ms, `docs/findings/stores.md`). The store
+      tests and the Gherkin features run over both stores through
+      `describe.each` with one SQLite file per store under a temporary
+      directory per test file; SQLite-only tests prove the byte-for-byte
+      round trip of a 4 000+ character story with quotes, newlines and
+      non-ASCII characters, of `traitsRefs` and of change set `items`, and
+      that an invoice survives a close and reopen of the file with the
+      seed reporting zeroes. The module's `nodes` entries take a `storage`
+      (`memory` runs as the `Deployment` from D1, `sqlite` as a
+      `StatefulSet` with a 2 Gi `local-path` claim at `/data`), production
+      node1 switches to `sqlite`, previews keep `memory`; the claim also
+      holds the discovery identity, so node1 keeps its node id across
+      restarts (relevant for D7).
 - [ ] **C2 Blobs on disk.** Depends on: C1. `BsFs` under `DATA_DIR/blobs`
       for the sqlite node. Done when species images survive a redeploy.
 - [ ] **C3 Second and third node.** Depends on: C1. node2 (`sqlite` for

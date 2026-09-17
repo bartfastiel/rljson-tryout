@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 
-import type { Configuration } from '../configuration.ts';
+import type { Configuration, StorageKind } from '../configuration.ts';
 import type {
   DirectoryEntry,
   NodeDirectory,
@@ -36,12 +36,12 @@ export type StatusReport = {
   hubAddress: string | null;
   peers: StatusPeer[];
   nodes: StatusNode[];
-  storage: 'memory';
+  storage: StorageKind;
   tables: Record<string, number>;
 };
 
 export type StatusSources = Readonly<{
-  configuration: Pick<Configuration, 'nodeName' | 'publicUrl'>;
+  configuration: Pick<Configuration, 'nodeName' | 'publicUrl' | 'storage'>;
   store: Pick<PetShopStore, 'tableRowCounts'>;
   orchestrator: Pick<RoleOrchestrator, 'snapshot'>;
   directory: Pick<NodeDirectory, 'entries' | 'nameOf'>;
@@ -77,7 +77,7 @@ export const buildStatusReport = async ({
     hubAddress: network.hubAddress,
     peers,
     nodes,
-    storage: 'memory',
+    storage: configuration.storage,
     tables: await store.tableRowCounts(),
   };
 };

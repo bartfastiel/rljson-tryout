@@ -31,7 +31,7 @@ other nodes.
 ## Status
 
 The system is live at [https://node1.rljson-tryout.wer-ist-daniel-schwarz.de](https://node1.rljson-tryout.wer-ist-daniel-schwarz.de) with a production Let's Encrypt certificate.
-Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress.
+Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress, and slice C1 gives node1 in production a SQLite store on a persistent volume, so its invoices survive a redeploy.
 Slice D1 (discovery and roles) was pulled forward: every node discovers the other nodes of its rljson domain by UDP broadcast, takes part in the hub election and reports the outcome at `/status`; the three-node proof runs against a local Docker Compose setup until slice C3 deploys node2 and node3.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
@@ -72,9 +72,9 @@ pnpm --filter @rljson-tryout/node-service start
 
 Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
 answers `GET /health` with `{ status, name, version, commit, startedAt }`.
-At start the node seeds its in-memory rljson store with three Duckburg
-species, eight Duckburg-flavoured traits, eight Duckburg persons, four
-breeders, five customers, ten Duckburg animals, the `animalTraits`
+At start the node seeds its rljson store, if it is empty, with three
+Duckburg species, eight Duckburg-flavoured traits, eight Duckburg persons,
+four breeders, five customers, ten Duckburg animals, the `animalTraits`
 junction table derived from the animals' traits, and six invoices, and
 serves them as `GET /api/species`
 (`[{ id, hash, name, latinName, description }]`), `GET /api/traits`
@@ -141,6 +141,26 @@ single-node run without sockets; the node then reports `standalone` with
 an id that lives for the process only. The node id of a node with
 discovery persists under `DATA_DIR/identity/<domain>/node-id`.
 
+`STORAGE` selects what backs the store. `memory` (the default) keeps
+everything in the process, so a restart starts from the seed again.
+`sqlite` keeps it in `DATA_DIR/petshop.sqlite` through
+`@rljson/io-sqlite-node` on `node:sqlite` (no native module, no flag on
+Node 24): the tables are created once and found again on the next start,
+the seed runs only into an empty database, and every invoice issued
+through the API is still listed after the process was stopped and started
+again. The database runs in write-ahead logging mode with
+`synchronous = NORMAL`, which keeps every committed write across a crash
+of the process (only a power loss can lose the last ones) and makes the
+seed about ten times faster than SQLite's defaults; `/status` reports
+which store is active under `storage`. The store tests and the Gherkin
+features run over both stores, and
+[docs/findings/stores.md](docs/findings/stores.md) lists where the two
+`Io` implementations differ and how fast each one is.
+
+```sh
+STORAGE=sqlite DATA_DIR=/tmp/petshop pnpm --filter @rljson-tryout/node-service start
+```
+
 The web app shows the environment in the header: this node as a badge,
 every other node of `NODE_URLS` as a link outlined green when discovery
 on this node sees it and red otherwise, with a small marker for the
@@ -161,7 +181,8 @@ Environment variables the service understands so far:
 | `RLJSON_DOMAIN`     | `petshop-local`                | rljson network domain; only nodes of the same domain discover each other                                                                                                                  |
 | `HUB_PORT`          | `3000`                         | TCP port of the hub transport and of the probe listener                                                                                                                                   |
 | `BROADCAST_PORT`    | `41234`                        | UDP port of the discovery announcements                                                                                                                                                   |
-| `DATA_DIR`          | `packages/node-service/data`   | Where the node identity lives (`identity/<domain>/node-id`); `/data` in the image                                                                                                         |
+| `STORAGE`           | `memory`                       | What backs the store: `memory` (lost on restart) or `sqlite` (`DATA_DIR/petshop.sqlite`, survives restarts); `mssql` follows with slice C4                                                |
+| `DATA_DIR`          | `packages/node-service/data`   | Where the node identity lives (`identity/<domain>/node-id`) and, with `STORAGE=sqlite`, the database file; `/data` in the image                                                           |
 | `PUBLIC_URL`        | `http://localhost:<HTTP_PORT>` | This node's own URL as `/status` reports it and as the other nodes link to it                                                                                                             |
 | `NODE_URLS`         | empty                          | Comma separated public URLs of every node of the environment, this one included; each is polled for its `/status` every three seconds                                                     |
 | `DISCOVERY`         | `enabled`                      | `disabled` turns the broadcast and probe sockets off (unit tests, single-node runs)                                                                                                       |
@@ -266,19 +287,26 @@ plan passes, it is available.
 from the state of the cluster stage, configures the `kubernetes`, `helm`
 and `kubectl` providers from it and calls the module
 `modules/petshop-environment` once per workspace: namespace `petshop` in
-workspace `production`, one `Deployment` of the node service per node (so
-far only `node1` with the in-memory store), a `ClusterIP` service and a
-Traefik `Ingress` per node, plus an ingress for the apex host that routes
-to `node1`. The image is the one the `image` job pushed for the same
-commit, `ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`.
-Every pod receives its discovery configuration from the module:
-`RLJSON_DOMAIN` (`petshop-production`, or `petshop-pr-<number>` in a
-preview, so that the environments sharing the pod network never see each
-other), `HUB_PORT`, `BROADCAST_PORT`, `DATA_DIR=/data` on an `emptyDir`
-(the root filesystem is read-only), `PUBLIC_URL` and the `NODE_URLS` of
-all nodes of the environment; the container ports 3000 (TCP) and 41234
-(UDP) are named in the pod, and the pods share the flannel bridge without
-`hostNetwork`.
+workspace `production`, one workload of the node service per node (so far
+only `node1`), a `ClusterIP` service and a Traefik `Ingress` per node,
+plus an ingress for the apex host that routes to `node1`. The workload
+follows the node's `storage` in the module's `nodes` list: a `memory` node
+is a `Deployment` over an `emptyDir` with a surge rollout, a `sqlite` node
+is a `StatefulSet` with one replica and a 2 Gi `local-path` persistent
+volume claim mounted at `/data`, which holds the SQLite file and the
+discovery identity, so that an invoice and the node id survive a restart
+and a redeploy (a rollout of a `StatefulSet` replaces its single pod, a
+few seconds of downtime the `smoke` job waits out). Production runs
+`node1` over `sqlite`, previews over `memory`. The image is the one the
+`image` job pushed for the same commit,
+`ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`. Every pod
+receives its configuration from the module: `STORAGE`, `RLJSON_DOMAIN`
+(`petshop-production`, or `petshop-pr-<number>` in a preview, so that the
+environments sharing the pod network never see each other), `HUB_PORT`,
+`BROADCAST_PORT`, `DATA_DIR=/data` (the root filesystem is read-only),
+`PUBLIC_URL` and the `NODE_URLS` of all nodes of the environment; the
+container ports 3000 (TCP) and 41234 (UDP) are named in the pod, and the
+pods share the flannel bridge without `hostNetwork`.
 
 Every push to `main` deploys automatically: the `image` job pushes
 `ghcr.io/<repository>/node-service:<commit sha>`, the `terraform-workloads`

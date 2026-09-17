@@ -2,16 +2,16 @@ import { animalsSeed, breedersSeed, speciesSeed } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { PetShopStore } from '../store/petShopStore.ts';
+import type { PetShopStore } from '../store/petShopStore.ts';
 import { buildTestServer } from '../testing/testServer.ts';
+import { memoryStore } from '../testing/testStores.ts';
 
 describe('GET /api/animals', () => {
   let store: PetShopStore;
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     server = buildTestServer(store);
   });
 
@@ -195,8 +195,7 @@ describe('GET /api/animals/:id', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     server = buildTestServer(store);
   });
 
@@ -288,8 +287,7 @@ describe('GET /api/animals/:id?version=<hash>', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     await store.seedIfEmpty();
     server = buildTestServer(store);
   });
@@ -344,8 +342,7 @@ describe('GET /api/animals/:id/history', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     await store.seedIfEmpty();
     server = buildTestServer(store);
   });
@@ -412,8 +409,7 @@ describe('PUT /api/animals/:id', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     await store.seedIfEmpty();
     server = buildTestServer(store);
   });
