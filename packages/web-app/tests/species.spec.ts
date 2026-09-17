@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
 
-import { speciesCards } from './support.ts';
+import { animalCards, speciesCards } from './support.ts';
 
 test('lists the three species of the node as cards', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/#/species');
 
   const cards = speciesCards(page);
   await expect(cards).toHaveCount(3);
@@ -17,7 +17,7 @@ test('lists the three species of the node as cards', async ({ page }) => {
 });
 
 test('shows the full description of a species', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/#/species');
 
   await expect(
     page.getByText(
@@ -46,7 +46,7 @@ test('shows an error with a retry button when the node answers 500', async ({
     }
   });
 
-  await page.goto('/');
+  await page.goto('/#/species');
 
   const alert = page.getByRole('alert');
   await expect(alert).toContainText('Could not load the species.');
@@ -63,7 +63,7 @@ test('shows an error with a retry button when the node answers 500', async ({
 test('shows an error when the network fails', async ({ page }) => {
   await page.route('**/api/species', (route) => route.abort('failed'));
 
-  await page.goto('/');
+  await page.goto('/#/species');
 
   const alert = page.getByRole('alert');
   await expect(alert).toContainText('Could not load the species.');
@@ -75,8 +75,25 @@ test('says so when the node has no species', async ({ page }) => {
     route.fulfill({ status: 200, json: [] }),
   );
 
-  await page.goto('/');
+  await page.goto('/#/species');
 
   await expect(page.getByRole('status')).toHaveText('No species yet.');
   await expect(speciesCards(page)).toHaveCount(0);
+});
+
+test('links a species card to its filtered animals view', async ({ page }) => {
+  await page.goto('/#/species');
+
+  await page
+    .getByRole('heading', { level: 2, name: 'Duck' })
+    .locator('..')
+    .getByRole('link', { name: 'See animals' })
+    .click();
+
+  await expect(page).toHaveURL(/#\/animals\?species=duck$/);
+  const cards = animalCards(page);
+  await expect(cards).not.toHaveCount(0);
+  for (const card of await cards.all()) {
+    await expect(card.locator('.animal-species')).toHaveText('Duck');
+  }
 });

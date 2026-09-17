@@ -24,6 +24,12 @@ export const mainNavigation = (page: Page): Locator =>
 export const speciesCards = (page: Page): Locator =>
   page.getByRole('main').getByRole('listitem');
 
+export const animalCards = (page: Page): Locator =>
+  page.getByRole('main').getByRole('listitem');
+
+export const speciesFilterChips = (page: Page): Locator =>
+  page.getByRole('navigation', { name: 'Filter by species' }).getByRole('link');
+
 /**
  * Relative luminance per WCAG 2 of a computed `rgb(r, g, b)` colour, from 0
  * for black to 1 for white.

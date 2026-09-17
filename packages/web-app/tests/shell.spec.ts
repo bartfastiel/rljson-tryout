@@ -11,7 +11,7 @@ test('loads with the application name in the tab title and the header', async ({
 }) => {
   await page.goto('/');
 
-  await expect(page).toHaveTitle('Species · Duckburg Pet Shop');
+  await expect(page).toHaveTitle('Animals · Duckburg Pet Shop');
   await expect(page.getByRole('banner')).toContainText('Duckburg Pet Shop');
 });
 
@@ -29,24 +29,24 @@ test('labels the node as unknown when /health fails', async ({ page }) => {
   await expect(page.getByRole('banner')).toContainText('unknown node');
 });
 
-test('redirects an empty hash to the species view and marks it current', async ({
+test('redirects an empty hash to the animals view and marks it current', async ({
   page,
 }) => {
   await page.goto('/');
 
-  await expect(page).toHaveURL(/#\/species$/);
+  await expect(page).toHaveURL(/#\/animals$/);
   await expect(
-    mainNavigation(page).getByRole('link', { name: 'Species' }),
+    mainNavigation(page).getByRole('link', { name: 'Animals' }),
   ).toHaveAttribute('aria-current', 'page');
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Species' }),
+    page.getByRole('heading', { level: 1, name: 'Animals' }),
   ).toBeVisible();
 });
 
-test('redirects a bare #/ to the species view', async ({ page }) => {
+test('redirects a bare #/ to the animals view', async ({ page }) => {
   await page.goto('/#/');
 
-  await expect(page).toHaveURL(/#\/species$/);
+  await expect(page).toHaveURL(/#\/animals$/);
 });
 
 test('shows a not found page with a way back for an unknown route', async ({
@@ -59,14 +59,17 @@ test('shows a not found page with a way back for an unknown route', async ({
   ).toBeVisible();
   await expect(page).toHaveTitle('Page not found · Duckburg Pet Shop');
   await expect(
+    mainNavigation(page).getByRole('link', { name: 'Animals' }),
+  ).not.toHaveAttribute('aria-current');
+  await expect(
     mainNavigation(page).getByRole('link', { name: 'Species' }),
   ).not.toHaveAttribute('aria-current');
 
-  await page.getByRole('link', { name: 'Back to Species' }).click();
+  await page.getByRole('link', { name: 'Back to Animals' }).click();
 
-  await expect(page).toHaveURL(/#\/species$/);
+  await expect(page).toHaveURL(/#\/animals$/);
   await expect(
-    page.getByRole('heading', { level: 1, name: 'Species' }),
+    page.getByRole('heading', { level: 1, name: 'Animals' }),
   ).toBeVisible();
 });
 
@@ -75,7 +78,7 @@ test('gives every navigation item a tap target of at least 44 by 44 CSS pixels',
 }) => {
   await page.goto('/');
   const links = mainNavigation(page).getByRole('link');
-  await expect(links).not.toHaveCount(0);
+  await expect(links).toHaveCount(2);
 
   for (const link of await links.all()) {
     const box = await boundingBoxOf(link);

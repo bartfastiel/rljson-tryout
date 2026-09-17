@@ -1,13 +1,19 @@
 // @ts-check
+import './components/animals-list.js';
 import './components/species-list.js';
 import { fetchJson } from './api.js';
 import { element, requiredElement } from './dom.js';
+import { viewNameFromHash } from './hash-route.js';
 
 const applicationName = 'Duckburg Pet Shop';
-const defaultViewName = 'species';
+const defaultViewName = 'animals';
 
 /** @type {Record<string, { title: string, render: () => HTMLElement }>} */
 const views = {
+  animals: {
+    title: 'Animals',
+    render: () => document.createElement('animals-list'),
+  },
   species: {
     title: 'Species',
     render: () => document.createElement('species-list'),
@@ -16,15 +22,6 @@ const views = {
 
 const main = requiredElement('main');
 const navigationLinks = document.querySelectorAll('nav a[data-view]');
-
-/**
- * Reads the view name from a hash such as `#/species` or `#/species/duck`.
- * Returns an empty string for a missing or bare hash.
- *
- * @param {string} hash
- */
-const viewNameFromHash = (hash) =>
-  hash.startsWith('#/') ? hash.slice(2).split('/')[0] : '';
 
 /**
  * @param {string} viewName
