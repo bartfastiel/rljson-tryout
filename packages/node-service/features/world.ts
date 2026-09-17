@@ -1,39 +1,8 @@
-import { resolve } from 'node:path';
-
 import type { FastifyInstance } from 'fastify';
 
-import type { Configuration } from '../src/configuration.ts';
-import { buildServer } from '../src/server.ts';
 import { PetShopStore } from '../src/store/petShopStore.ts';
 import type { TraitRelationMode } from '../src/store/traitRelation.ts';
-
-const webAppDirectory = resolve(
-  import.meta.dirname,
-  '..',
-  '..',
-  'web-app',
-  'public',
-);
-
-/**
- * The configuration every feature's Fastify instance runs with: a random
- * port (never bound, since features use `inject`) and the real web app
- * directory, matching the pattern `src/routes/animals.test.ts` already uses.
- * `traitRelationMode` defaults to `multi-reference` and is overridden by
- * `createWorld`'s parameter for the scenario outline in `traits.feature`
- * that runs the same filter in both modes.
- */
-const worldConfiguration = (
-  traitRelationMode: TraitRelationMode,
-): Configuration =>
-  Object.freeze({
-    nodeName: 'node-under-test',
-    httpPort: 0,
-    logLevel: 'error',
-    gitCommit: 'test-commit',
-    webAppDirectory,
-    traitRelationMode,
-  });
+import { buildTestServer } from '../src/testing/testServer.ts';
 
 /**
  * A pet shop store plus a Fastify instance over it, initialized but not
@@ -50,14 +19,19 @@ export type World = {
 
 /**
  * Builds a world whose store reads the animal-trait relation in the given
- * mode, `multi-reference` by default (`docs/findings/n-to-m.md`).
+ * mode, `multi-reference` by default (`docs/findings/n-to-m.md`). The
+ * server runs with the shared test configuration (`src/testing/testServer.ts`,
+ * discovery disabled, never bound) under the node name `node-under-test`.
  */
 export const createWorld = async (
   traitRelationMode: TraitRelationMode = 'multi-reference',
 ): Promise<World> => {
   const store = new PetShopStore({ traitRelationMode });
   await store.initialize();
-  const server = buildServer(worldConfiguration(traitRelationMode), store);
+  const server = buildTestServer(store, {
+    nodeName: 'node-under-test',
+    traitRelationMode,
+  });
   return { store, server };
 };
 

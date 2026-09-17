@@ -1,18 +1,39 @@
+import pino from 'pino';
+
 import { readConfiguration } from './configuration.ts';
+import { NodeDirectory } from './network/nodeDirectory.ts';
+import { RoleOrchestrator } from './network/roleOrchestrator.ts';
 import { buildServer } from './server.ts';
 import { PetShopStore } from './store/petShopStore.ts';
 
 const configuration = readConfiguration();
+const logger = pino({ level: configuration.logLevel });
 const store = new PetShopStore({
   traitRelationMode: configuration.traitRelationMode,
 });
-const server = buildServer(configuration, store);
+const orchestrator = new RoleOrchestrator(
+  configuration,
+  logger.child({ component: 'orchestrator' }),
+);
+const directory = new NodeDirectory(
+  configuration,
+  logger.child({ component: 'directory' }),
+);
+const server = buildServer({
+  configuration,
+  store,
+  orchestrator,
+  directory,
+  logger,
+});
 
 const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
   server.log.info({ signal }, 'shutting down');
 
   try {
+    directory.stop();
     await server.close();
+    await orchestrator.stop();
     await store.close();
     process.exit(0);
   } catch (error) {
@@ -34,6 +55,11 @@ try {
     port: configuration.httpPort,
   });
   server.log.info(`node service listening on ${address}`);
+
+  // Discovery starts once `/status` answers, so a peer that learns this
+  // node's id from a broadcast can immediately correlate it with a URL.
+  await orchestrator.start();
+  await directory.start();
 } catch (error) {
   server.log.error(error, 'failed to start the server');
   process.exit(1);

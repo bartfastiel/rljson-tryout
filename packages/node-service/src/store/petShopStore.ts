@@ -573,6 +573,33 @@ export class PetShopStore {
    */
   private pendingWrite: Promise<unknown> = Promise.resolve();
 
+  /**
+   * Every table this store creates, each domain table followed by its
+   * InsertHistory companion; `tableRowCounts` reports them in this order.
+   */
+  private readonly tableCfgs = [
+    speciesTableCfg,
+    speciesInsertHistoryTableCfg,
+    traitsTableCfg,
+    traitsInsertHistoryTableCfg,
+    personsTableCfg,
+    personsInsertHistoryTableCfg,
+    breedersTableCfg,
+    breedersInsertHistoryTableCfg,
+    animalsTableCfg,
+    animalsInsertHistoryTableCfg,
+    animalTraitsTableCfg,
+    animalTraitsInsertHistoryTableCfg,
+    customersTableCfg,
+    customersInsertHistoryTableCfg,
+    invoicesTableCfg,
+    invoicesInsertHistoryTableCfg,
+    invoiceItemsTableCfg,
+    invoiceItemsInsertHistoryTableCfg,
+    changeSetsTableCfg,
+    changeSetsInsertHistoryTableCfg,
+  ];
+
   constructor(options: PetShopStoreOptions = {}) {
     this.traitRelationMode = options.traitRelationMode ?? 'multi-reference';
     this.today = options.today ?? todayInUtc;
@@ -585,30 +612,21 @@ export class PetShopStore {
   async initialize(): Promise<void> {
     await this.io.init();
     await this.io.isReady();
-    for (const tableCfg of [
-      speciesTableCfg,
-      speciesInsertHistoryTableCfg,
-      traitsTableCfg,
-      traitsInsertHistoryTableCfg,
-      personsTableCfg,
-      personsInsertHistoryTableCfg,
-      breedersTableCfg,
-      breedersInsertHistoryTableCfg,
-      animalsTableCfg,
-      animalsInsertHistoryTableCfg,
-      animalTraitsTableCfg,
-      animalTraitsInsertHistoryTableCfg,
-      customersTableCfg,
-      customersInsertHistoryTableCfg,
-      invoicesTableCfg,
-      invoicesInsertHistoryTableCfg,
-      invoiceItemsTableCfg,
-      invoiceItemsInsertHistoryTableCfg,
-      changeSetsTableCfg,
-      changeSetsInsertHistoryTableCfg,
-    ]) {
+    for (const tableCfg of this.tableCfgs) {
       await this.db.core.createTable(tableCfg);
     }
+  }
+
+  /**
+   * The number of rows in every table of the store, keyed by table, in the
+   * shape `GET /status` serves under `tables` (roadmap section 2.5).
+   */
+  async tableRowCounts(): Promise<Record<string, number>> {
+    const counts: Record<string, number> = {};
+    for (const tableCfg of this.tableCfgs) {
+      counts[tableCfg.key] = await this.io.rowCount(tableCfg.key);
+    }
+    return counts;
   }
 
   /**
