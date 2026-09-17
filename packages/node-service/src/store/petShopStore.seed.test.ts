@@ -13,7 +13,7 @@ import {
   traitsSeed,
   type SeedSize,
 } from '@rljson-tryout/domain';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type { StorageKind } from '../configuration.ts';
 import {
@@ -47,6 +47,13 @@ const internals = (store: PetShopStore): StoreInternals =>
 
 const dataDirectories = useTemporaryDataDirectories();
 
+/**
+ * Seeding `medium` takes under a second in memory and a few seconds into
+ * SQLite on a CI runner, so every test that seeds it gets this budget, and
+ * the read-only tests share one medium store per storage kind.
+ */
+const seedingTimeout = 60_000;
+
 const stores: PetShopStore[] = [];
 afterEach(async () => {
   for (const store of stores.splice(0)) {
@@ -54,14 +61,14 @@ afterEach(async () => {
   }
 });
 
+const openStore = async (storage: StorageKind): Promise<PetShopStore> =>
+  testStore({ storage, dataDirectory: dataDirectories.next() });
+
 const seededStore = async (
   storage: StorageKind,
   size: SeedSize,
 ): Promise<{ store: PetShopStore; report: SeedReport }> => {
-  const store = await testStore({
-    storage,
-    dataDirectory: dataDirectories.next(),
-  });
+  const store = await openStore(storage);
   stores.push(store);
   const report = await store.seedIfEmpty(size);
   return { store, report };
@@ -93,11 +100,26 @@ const changeSetIds = async (store: PetShopStore): Promise<string[]> => {
 describe.each(storageKinds)(
   'PetShopStore.seedIfEmpty over the %s store',
   (storage) => {
-    it('leaves every table empty for the size none', async () => {
-      const { store, report } = await seededStore(storage, 'none');
+    let store: PetShopStore;
+    let report: SeedReport;
 
-      expect(report).toMatchObject({ seedSize: 'none', animalsSeeded: 0 });
-      expect(Object.values(await store.tableRowCounts())).toStrictEqual(
+    beforeAll(async () => {
+      store = await openStore(storage);
+      report = await store.seedIfEmpty('medium');
+    }, seedingTimeout);
+
+    afterAll(async () => {
+      await store.close();
+    });
+
+    it('leaves every table empty for the size none', async () => {
+      const { store: empty, report: nothing } = await seededStore(
+        storage,
+        'none',
+      );
+
+      expect(nothing).toMatchObject({ seedSize: 'none', animalsSeeded: 0 });
+      expect(Object.values(await empty.tableRowCounts())).toStrictEqual(
         Array.from({ length: 20 }, () => 0),
       );
     });
@@ -105,8 +127,6 @@ describe.each(storageKinds)(
     it('seeds the hand-written rows plus the generated counts of the medium plan, with a history row and a change set for every generated entity', async () => {
       const plan = seedPlans.medium.generated!;
       const generated = generatedSeedFor('medium')!;
-
-      const { store, report } = await seededStore(storage, 'medium');
 
       expect(report).toStrictEqual({
         seedSize: 'medium',
@@ -151,7 +171,6 @@ describe.each(storageKinds)(
     });
 
     it('serves the generated rows through every list with their references resolved', async () => {
-      const { store } = await seededStore(storage, 'medium');
       const generated = generatedSeedFor('medium')!;
 
       const animals = await store.listAnimals({}, { limit: 200, offset: 0 });
@@ -183,8 +202,6 @@ describe.each(storageKinds)(
     });
 
     it('makes some breeders customers and leaves some invoices open or cancelled', async () => {
-      const { store } = await seededStore(storage, 'medium');
-
       const breederPersons = new Set(
         (await store.listBreeders()).map((breeder) => breeder.person?.id),
       );
@@ -206,7 +223,6 @@ describe.each(storageKinds)(
     });
 
     it('serves a generated animal with its story naming its breeder, its traits resolved and one version', async () => {
-      const { store } = await seededStore(storage, 'medium');
       const generated = generatedSeedFor('medium')!;
 
       for (const row of generated.animals.slice(0, 5)) {
@@ -227,7 +243,6 @@ describe.each(storageKinds)(
     });
 
     it('prices every generated invoice item at the animal it sells and names its change set', async () => {
-      const { store } = await seededStore(storage, 'medium');
       const generated = generatedSeedFor('medium')!;
 
       for (const row of generated.invoices.slice(0, 5)) {
@@ -242,31 +257,32 @@ describe.each(storageKinds)(
       }
     });
 
-    it('gives two stores seeded with the same size the same hashes', async () => {
-      const first = (await seededStore(storage, 'medium')).store;
-      const second = (await seededStore(storage, 'medium')).store;
-      const page = { limit: 200, offset: 0 };
+    it(
+      'gives two stores seeded with the same size the same hashes',
+      async () => {
+        const second = (await seededStore(storage, 'medium')).store;
+        const page = { limit: 200, offset: 0 };
 
-      const firstHashes = (await first.listAnimals({}, page)).items.map(
-        (animal) => animal.hash,
-      );
-      const secondHashes = (await second.listAnimals({}, page)).items.map(
-        (animal) => animal.hash,
-      );
-      const firstInvoices = (await first.listInvoices()).map(
-        (invoice) => invoice.hash,
-      );
-      const secondInvoices = (await second.listInvoices()).map(
-        (invoice) => invoice.hash,
-      );
+        const firstHashes = (await store.listAnimals({}, page)).items.map(
+          (animal) => animal.hash,
+        );
+        const secondHashes = (await second.listAnimals({}, page)).items.map(
+          (animal) => animal.hash,
+        );
+        const firstInvoices = (await store.listInvoices()).map(
+          (invoice) => invoice.hash,
+        );
+        const secondInvoices = (await second.listInvoices()).map(
+          (invoice) => invoice.hash,
+        );
 
-      expect(firstHashes).toStrictEqual(secondHashes);
-      expect(firstInvoices).toStrictEqual(secondInvoices);
-    });
+        expect(firstHashes).toStrictEqual(secondHashes);
+        expect(firstInvoices).toStrictEqual(secondInvoices);
+      },
+      seedingTimeout,
+    );
 
     it('validates the medium store as one rljson document with every reference and change set item resolved', async () => {
-      const { store } = await seededStore(storage, 'medium');
-
       const errors = await validationErrors(
         validatableDocument(await internals(store).io.dump()),
       );
@@ -275,9 +291,9 @@ describe.each(storageKinds)(
     });
 
     it('seeds nothing into a store that already holds rows, whatever the size', async () => {
-      const { store } = await seededStore(storage, 'small');
+      const { store: small } = await seededStore(storage, 'small');
 
-      const again = await store.seedIfEmpty('medium');
+      const again = await small.seedIfEmpty('medium');
 
       expect(again).toMatchObject({
         seedSize: 'medium',
@@ -286,19 +302,23 @@ describe.each(storageKinds)(
         invoicesSeeded: 0,
         changeSetsSeeded: 0,
       });
-      expect((await store.listAnimals()).total).toBe(handWrittenCounts.animals);
+      expect((await small.listAnimals()).total).toBe(handWrittenCounts.animals);
     });
 
-    it('continues the invoice numbers of the current year after the hand-written seed', async () => {
-      const { store } = await seededStore(storage, 'medium');
+    it(
+      'continues the invoice numbers of the current year after the hand-written seed',
+      async () => {
+        const { store: own } = await seededStore(storage, 'medium');
 
-      const issued = await store.issueInvoice({
-        customerId: 'donald-duck',
-        items: [{ animalId: 'donald-the-third', quantity: 1 }],
-      });
+        const issued = await own.issueInvoice({
+          customerId: 'donald-duck',
+          items: [{ animalId: 'donald-the-third', quantity: 1 }],
+        });
 
-      expect(issued.invoiceNumber).toBe('2026-0007');
-    });
+        expect(issued.invoiceNumber).toBe('2026-0007');
+      },
+      seedingTimeout,
+    );
   },
 );
 

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import type { SeedSize } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
-import { describe, expect } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 
 import type { StorageKind } from '../../src/configuration.ts';
 import {
@@ -31,6 +31,10 @@ type AnimalPageResponse = {
 type Response = Awaited<ReturnType<FastifyInstance['inject']>>;
 
 const dataDirectories = useTemporaryDataDirectories();
+
+// Seeding `medium` into SQLite takes a few seconds on a CI runner, and
+// every step of a scenario is one vitest test with the default timeout.
+vi.setConfig({ testTimeout: 60_000 });
 
 const seededWorld = async (
   storage: StorageKind,
