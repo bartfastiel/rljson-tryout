@@ -9,7 +9,7 @@
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint . --fix && prettier --write .",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r typecheck && tsc -p infra/scripts",
     "test": "vitest run"
   },
   "devDependencies": {

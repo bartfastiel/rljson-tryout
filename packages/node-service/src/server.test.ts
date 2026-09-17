@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Configuration } from './configuration.ts';
 import { buildServer } from './server.ts';
@@ -33,9 +33,36 @@ describe('buildServer', () => {
       name: 'node1',
       version: packageJson.version,
       commit: 'test-commit',
+      startedAt: expect.stringMatching(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      ) as string,
     });
 
     await server.close();
+  });
+
+  it('fixes startedAt when the server is built, not per request', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-09-17T10:00:00.000Z'));
+      const server = buildServer(testConfiguration, new PetShopStore());
+
+      vi.setSystemTime(new Date('2026-09-17T10:00:05.000Z'));
+      const first = await server.inject({ method: 'GET', url: '/health' });
+      vi.setSystemTime(new Date('2026-09-17T11:30:00.000Z'));
+      const second = await server.inject({ method: 'GET', url: '/health' });
+
+      expect(first.json()).toMatchObject({
+        startedAt: '2026-09-17T10:00:00.000Z',
+      });
+      expect(second.json()).toMatchObject({
+        startedAt: '2026-09-17T10:00:00.000Z',
+      });
+
+      await server.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('takes name and commit from the given configuration', async () => {

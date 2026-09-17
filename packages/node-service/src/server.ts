@@ -34,12 +34,14 @@ export const buildServer = (
     logger: { level: configuration.logLevel },
   });
   const version = readPackageVersion();
+  const startedAt = new Date().toISOString();
 
   server.get('/health', async () => ({
     status: 'ok',
     name: configuration.nodeName,
     version,
     commit: configuration.gitCommit,
+    startedAt,
   }));
 
   registerSpeciesRoutes(server, store);

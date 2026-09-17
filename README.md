@@ -68,9 +68,9 @@ pnpm --filter @rljson-tryout/node-service start
 ```
 
 Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
-answers `GET /health` with `{ status, name, version, commit }`. At start the
-node seeds its in-memory rljson store with three Duckburg species and ten
-Duckburg animals and serves them as `GET /api/species`
+answers `GET /health` with `{ status, name, version, commit, startedAt }`.
+At start the node seeds its in-memory rljson store with three Duckburg
+species and ten Duckburg animals and serves them as `GET /api/species`
 (`[{ id, hash, name, latinName, description }]`), `GET /api/animals`
 (optionally narrowed with `?species=<id>`, returning
 `[{ id, hash, name, speciesId, speciesName, bornOn, priceCents }]` with the
@@ -159,9 +159,14 @@ only `node1` with the in-memory store), a `ClusterIP` service and a Traefik
 `node1`. The image is the one the `image` job pushed for the same commit,
 `ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`.
 
-Every push to `main` deploys automatically: the `terraform-workloads` job
-plans and applies workspace `production`, then polls `/health` until it
-reports the commit that was just pushed. Pull requests only plan. The
+Every push to `main` deploys automatically: the `image` job pushes
+`ghcr.io/<repository>/node-service:<commit sha>`, the `terraform-workloads`
+job plans and applies workspace `production` with exactly that reference
+and exposes the deployed URLs as a job output, and the `smoke` job runs
+`infra/scripts/verify-deployment.sh` against them: it polls `/health` until
+it reports the commit that was just pushed with a certificate the runner
+trusts, then checks that `http://` redirects, that `/api/species` lists
+species and that `/` serves the web app. Pull requests only plan. The
 hostnames follow `<node>.<base_domain>` with the apex host as an alias of
 `node1`; with the default `base_domain` that is
 
@@ -180,9 +185,9 @@ cert-manager keeps one certificate per host. The root module names
 `letsencrypt-staging` first (certificates no browser trusts, `curl -k`),
 because Let's Encrypt production issues at most five identical
 certificates per week. To reproduce under another domain, set the
-Terraform variable `base_domain` (and `image_repository` for another
-registry) and the repository secret `LETSENCRYPT_EMAIL`;
-nothing else in the stage knows the domain.
+Terraform variable `base_domain` and the repository secret
+`LETSENCRYPT_EMAIL`; nothing else in the stage knows the domain, and the
+image reference follows the repository that runs the pipeline.
 
 ## License
 

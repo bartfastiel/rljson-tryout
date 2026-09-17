@@ -1,17 +1,11 @@
-variable "image_tag" {
-  description = "Tag of the node service image to deploy; the pipeline passes the commit sha the image job pushed."
+variable "image" {
+  description = "Full reference of the node service image to deploy, registry path and tag; the pipeline passes what the image job pushed for the same commit."
   type        = string
 
   validation {
-    condition     = length(var.image_tag) > 0
-    error_message = "The image tag must not be empty."
+    condition     = can(regex("^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+:[A-Za-z0-9_.-]+$", var.image))
+    error_message = "The image must be a lower-case registry host with optional port, at least one path segment, a colon and a tag."
   }
-}
-
-variable "image_repository" {
-  description = "Container image repository of the node service."
-  type        = string
-  default     = "ghcr.io/bartfastiel/rljson-tryout/node-service"
 }
 
 variable "base_domain" {
