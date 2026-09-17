@@ -28,6 +28,16 @@ variable "hostname_infix" {
   }
 }
 
+variable "cluster_issuer" {
+  description = "Name of the cert-manager ClusterIssuer that signs the certificate of every ingress host."
+  type        = string
+
+  validation {
+    condition     = length(var.cluster_issuer) > 0
+    error_message = "The cluster issuer name must not be empty."
+  }
+}
+
 variable "nodes" {
   description = "Nodes of this environment in display order; the first one also answers on the apex host. Every node runs the in-memory store."
   type = list(object({

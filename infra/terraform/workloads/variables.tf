@@ -19,3 +19,14 @@ variable "base_domain" {
   type        = string
   default     = "rljson-tryout.wer-ist-daniel-schwarz.de"
 }
+
+variable "letsencrypt_email" {
+  description = "Contact address of the ACME account at Let's Encrypt; the pipeline passes the repository variable LETSENCRYPT_EMAIL."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.letsencrypt_email))
+    error_message = "The Let's Encrypt email must be an address of the form name@domain.tld."
+  }
+}

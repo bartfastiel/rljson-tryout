@@ -4,6 +4,12 @@ locals {
   apex_hostname = var.hostname_infix == "" ? var.base_domain : "${trimprefix(var.hostname_infix, "-")}.${var.base_domain}"
   apex_node     = var.nodes[0].name
 
+  # cert-manager's ingress shim turns the annotation and the tls block into
+  # one Certificate per ingress.
+  ingress_annotations = {
+    "cert-manager.io/cluster-issuer" = var.cluster_issuer
+  }
+
   # A Deployment's selector is immutable, so these two labels never change;
   # everything else goes into the metadata labels below.
   selector_labels = {
@@ -171,13 +177,19 @@ resource "kubernetes_ingress_v1" "node" {
   for_each = local.nodes_by_name
 
   metadata {
-    name      = each.key
-    namespace = kubernetes_namespace_v1.environment.metadata[0].name
-    labels    = local.labels[each.key]
+    name        = each.key
+    namespace   = kubernetes_namespace_v1.environment.metadata[0].name
+    labels      = local.labels[each.key]
+    annotations = local.ingress_annotations
   }
 
   spec {
     ingress_class_name = "traefik"
+
+    tls {
+      hosts       = [local.hostnames[each.key]]
+      secret_name = "${each.key}-tls"
+    }
 
     rule {
       host = local.hostnames[each.key]
@@ -204,13 +216,19 @@ resource "kubernetes_ingress_v1" "node" {
 
 resource "kubernetes_ingress_v1" "apex" {
   metadata {
-    name      = "apex"
-    namespace = kubernetes_namespace_v1.environment.metadata[0].name
-    labels    = local.labels[local.apex_node]
+    name        = "apex"
+    namespace   = kubernetes_namespace_v1.environment.metadata[0].name
+    labels      = local.labels[local.apex_node]
+    annotations = local.ingress_annotations
   }
 
   spec {
     ingress_class_name = "traefik"
+
+    tls {
+      hosts       = [local.apex_hostname]
+      secret_name = "apex-tls"
+    }
 
     rule {
       host = local.apex_hostname
