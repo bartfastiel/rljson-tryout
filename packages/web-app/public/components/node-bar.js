@@ -1,6 +1,9 @@
 // @ts-check
 import { element } from '../dom.js';
-import { browserProbeMarker } from '../node-indicators.js';
+import {
+  browserProbeMarker,
+  connectedClientsBadge,
+} from '../node-indicators.js';
 import { statusFeed } from '../status-feed.js';
 
 /**
@@ -12,7 +15,8 @@ const nodeLabel = (node) => node.name ?? new URL(node.url).host;
  * The header's node bar: this node as a light active badge, every other
  * node of the environment as a compact link outlined green when discovery
  * on this node sees it and red otherwise, each with a small secondary
- * marker for this browser's own probe. Refreshed with every status poll,
+ * marker for this browser's own probe, and a small count of connected
+ * clients on the node that is the hub. Refreshed with every status poll,
  * so the outlines follow the topology while the page is open. With a
  * single node only the badge shows; when `/status` cannot be read the
  * badge says so.
@@ -37,12 +41,19 @@ class NodeBar extends HTMLElement {
    */
   #render(update) {
     if (update.status === null) {
-      this.replaceChildren(this.#badge('unknown node'));
+      this.replaceChildren(this.#badge('unknown node', null));
       return;
     }
 
     const { status, browserProbes } = update;
-    const children = [this.#badge(status.nodeName)];
+    const children = [
+      this.#badge(
+        status.nodeName,
+        status.transport.role === 'hub'
+          ? (status.transport.connectedClients ?? 0)
+          : null,
+      ),
+    ];
     for (const node of status.nodes) {
       if (node.self) {
         continue;
@@ -61,6 +72,9 @@ class NodeBar extends HTMLElement {
             ? ', in the discovery topology'
             : ', not in the discovery topology',
         ),
+        ...[connectedClientsBadge(node.connectedClients)].filter(
+          (badge) => badge !== null,
+        ),
         browserProbeMarker(browserProbes.get(node.url)),
       );
       children.push(link);
@@ -70,13 +84,17 @@ class NodeBar extends HTMLElement {
 
   /**
    * @param {string} name
+   * @param {number | null} connectedClients
    */
-  #badge(name) {
+  #badge(name, connectedClients) {
     const badge = element('span', 'node-badge node-badge-active');
     badge.setAttribute('aria-current', 'true');
     badge.append(
       element('span', 'visually-hidden', 'Connected to node '),
       element('span', 'node-badge-name', name),
+      ...[connectedClientsBadge(connectedClients)].filter(
+        (clients) => clients !== null,
+      ),
     );
     return badge;
   }

@@ -47,6 +47,7 @@ const threeNodeStatus = {
       name: 'node1',
       nodeId: 'id-node1',
       role: 'client',
+      connectedClients: null,
       reachable: true,
       lastSeen: '2026-09-17T10:05:00.000Z',
       seenInTopology: true,
@@ -57,6 +58,7 @@ const threeNodeStatus = {
       name: 'node2',
       nodeId: 'id-node2',
       role: 'hub',
+      connectedClients: 2,
       reachable: true,
       lastSeen: '2026-09-17T10:05:00.000Z',
       seenInTopology: true,
@@ -67,11 +69,18 @@ const threeNodeStatus = {
       name: 'node3',
       nodeId: null,
       role: null,
+      connectedClients: null,
       reachable: false,
       lastSeen: null,
       seenInTopology: false,
     },
   ],
+  transport: {
+    role: 'client',
+    hubAddress: '10.42.0.12:3000',
+    connectedToHub: true,
+    lastError: null,
+  },
   storage: 'memory',
   tables: { species: 3, animals: 10 },
 };
@@ -167,6 +176,28 @@ test.describe('with three nodes in the environment', () => {
     );
   });
 
+  test('shows the connected clients of the hub as a small badge', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    const bar = nodeBar(page);
+
+    const hubBadge = bar
+      .getByRole('link', { name: /node2/ })
+      .locator('.node-clients');
+    await expect(hubBadge).toHaveText(/2/);
+    await expect(hubBadge).toHaveAttribute('title', '2 connected clients');
+    await expect(bar.getByRole('link', { name: /node2/ })).toContainText(
+      '2 connected clients',
+    );
+    await expect(
+      bar.getByRole('link', { name: /node3/ }).locator('.node-clients'),
+    ).toHaveCount(0);
+    await expect(bar.locator('.node-badge-active .node-clients')).toHaveCount(
+      0,
+    );
+  });
+
   test('keeps every node of the header visible without scrolling, at least 44 pixels tall', async ({
     page,
   }) => {
@@ -207,6 +238,9 @@ test.describe('with three nodes in the environment', () => {
     await expect(thisNode).toContainText('id-node1');
     await expect(thisNode).toContainText('petshop-test');
     await expect(thisNode).toContainText('node2 (10.42.0.12:3000)');
+    await expect(thisNode).toContainText(
+      'connected to the hub at 10.42.0.12:3000',
+    );
 
     const cards = page.locator('.node-card');
     await expect(cards).toHaveCount(3);
@@ -216,6 +250,8 @@ test.describe('with three nodes in the environment', () => {
       cards.nth(1).getByRole('link', { name: 'node2' }),
     ).toHaveAttribute('href', node2Url);
     await expect(cards.nth(1).locator('.role-badge')).toHaveText('hub');
+    await expect(cards.nth(1).locator('.node-clients')).toHaveText(/2/);
+    await expect(cards.nth(0).locator('.node-clients')).toHaveCount(0);
     await expect(cards.nth(1).locator('.topology-dot')).toHaveClass(
       /topology-dot-seen/,
     );
@@ -265,6 +301,8 @@ test.describe('with a single node', () => {
     const thisNode = page.locator('.network-section').first();
     await expect(thisNode.locator('.role-badge')).toHaveText('standalone');
     await expect(thisNode).toContainText('none elected');
+    await expect(thisNode).toContainText('idle, this node runs on its own');
+    await expect(page.locator('.node-clients')).toHaveCount(0);
     await expect(page.locator('.node-card')).toHaveCount(1);
     await expect(page.locator('.node-card').first()).toContainText(
       'node-under-test (this node)',

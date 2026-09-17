@@ -34,6 +34,27 @@ export const topologyDot = (seenInTopology) => {
 };
 
 /**
+ * The number of clients a hub holds on its hub transport, as a small pill
+ * next to the node's name, or nothing for a node that is not the hub (the
+ * count is `null` then). Read by screen readers as "2 connected clients".
+ *
+ * @param {number | null} connectedClients
+ */
+export const connectedClientsBadge = (connectedClients) => {
+  if (connectedClients === null) {
+    return null;
+  }
+  const label = `${connectedClients} connected ${connectedClients === 1 ? 'client' : 'clients'}`;
+  const badge = element('span', 'node-clients');
+  badge.title = label;
+  badge.append(
+    element('span', 'node-clients-count', String(connectedClients)),
+    element('span', 'visually-hidden', ` ${label}`),
+  );
+  return badge;
+};
+
+/**
  * A small marker for the browser's own probe: a check when this browser
  * reached the node, a cross when it did not, and a hollow marker while
  * the probe has not run yet.
