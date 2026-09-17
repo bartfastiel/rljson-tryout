@@ -853,7 +853,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       `StatefulSet` with a claim, the Gherkin domain suite runs against both
       stores in CI, `docs/findings/versions.md` and `docs/findings/stores.md`
       started. Done when an invoice survives a redeploy of node1. Deviation:
-      pulled forward before B13 (and B9 to B12), because the store's
+      pulled forward before B13 (and B10 to B12), because the store's
       backend is independent of the remaining domain slices. `PetShopStore`
       receives its `Io` from the factory `createIo` (`STORAGE=memory` or
       `sqlite`; `mssql` is rejected until C4 adds it) instead of building
