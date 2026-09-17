@@ -450,11 +450,16 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       step. Deviation: the workflow-step proof of the role moves to A6, whose
       first `terraform init` in CI assumes the role; this slice only bootstraps
       the AWS side and confirms the script is idempotent by running it twice.
-- [ ] **A6 Server with k3s.** Depends on: A5. Stage 1 per 4.3 with an
+- [x] **A6 Server with k3s.** Depends on: A5. Stage 1 per 4.3 with an
       ephemeral address and without the kubeconfig provisioner;
       `terraform-cluster` job. Done when
       `curl -k https://<server_ipv4>:6443/version` answers from CI after
-      `apply` on `main`.
+      `apply` on `main`. Deviation: the server attaches the pre-created
+      primary IP from the start, because Hetzner attaches a primary IP only to
+      a stopped server and switching later would have forced a replacement;
+      the server takes `location` (not the deprecated `datacenter`) from the
+      data source. Runs on `main` are no longer cancelled by a newer push, so
+      an apply is never interrupted.
 - [ ] **A7 Kubeconfig hand-off.** Depends on: A6. The `terraform_data`
       provisioner and the `kubeconfig` output. Done when a workflow step runs
       `kubectl get nodes` with the output and sees the node `Ready`.
@@ -464,7 +469,8 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       your own domain" describing the primary IP and the two DNS records. Done
       when `dig +short node1.rljson-tryout.wer-ist-daniel-schwarz.de` returns
       the primary IP and a `terraform destroy` plus `apply` of the cluster
-      brings the same address back.
+      brings the same address back. README part done in A6; the destroy and
+      apply proof follows with the destroy workflow of A13.
 - [ ] **A9 First workload on the internet.** Depends on: A4, A7, A8. Stage 2
       with the module for node1 only (`STORAGE=memory`), plain HTTP ingress,
       `terraform-workloads` job for workspace `production`. Done when
