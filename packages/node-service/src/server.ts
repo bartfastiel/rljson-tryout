@@ -8,6 +8,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Configuration } from './configuration.ts';
 import { registerAnimalsRoutes } from './routes/animals.ts';
 import { registerBreedersRoutes } from './routes/breeders.ts';
+import { registerCustomersRoutes } from './routes/customers.ts';
+import { registerInvoicesRoutes } from './routes/invoices.ts';
 import { registerSpeciesRoutes } from './routes/species.ts';
 import { registerTraitsRoutes } from './routes/traits.ts';
 import type { PetShopStore } from './store/petShopStore.ts';
@@ -49,7 +51,9 @@ export const buildServer = (
   registerSpeciesRoutes(server, store);
   registerTraitsRoutes(server, store);
   registerBreedersRoutes(server, store);
+  registerCustomersRoutes(server, store);
   registerAnimalsRoutes(server, store);
+  registerInvoicesRoutes(server, store);
 
   // The app has no build step and no hashed file names, so browsers must
   // revalidate the entry document on every load to pick up new versions.
