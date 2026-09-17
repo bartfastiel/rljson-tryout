@@ -1,6 +1,7 @@
 import { IoMem, IoMulti, type Io } from '@rljson/io';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { recordingLogger } from '../testing/recordingLogger.ts';
 import { memoryStore } from '../testing/testStores.ts';
 import { PetShopStore } from './petShopStore.ts';
 
@@ -150,8 +151,16 @@ describe('PetShopStore reading through the network', () => {
     ).toBeUndefined();
   });
 
-  it('answers with local data when the cascade cannot answer', async () => {
-    const { hub, client } = await hubAndClient();
+  it('answers with local data and logs a warning when the cascade cannot answer', async () => {
+    const { logger, records } = recordingLogger();
+    const hub = await memoryStore();
+    const client = await memoryStore({ logger });
+    cleanups.push(
+      () => hub.close(),
+      () => client.close(),
+    );
+    await hub.seedIfEmpty();
+    await client.seedIfEmpty();
     const issued = await hub.issueInvoice({
       customerId: 'scrooge-mcduck',
       items: [{ animalId: 'donald-the-third', quantity: 1 }],
@@ -165,6 +174,15 @@ describe('PetShopStore reading through the network', () => {
     expect(await client.getInvoice(issued.id)).toBeUndefined();
     expect(await client.getInvoice('invoice-2026-0001')).toBeDefined();
     expect((await client.listAnimals()).total).toBe(10);
+    expect(records).toContainEqual({
+      level: 'warn',
+      message: 'read through the network failed, answering from local data',
+      fields: {
+        err: expect.any(Error) as Error,
+        table: 'invoices',
+        where: { id: issued.id },
+      },
+    });
   });
 
   it('keeps the single-node behaviour when the cascade is the local store itself', async () => {

@@ -18,7 +18,10 @@ const logger = pino({ level: configuration.logLevel });
 try {
   const store = new PetShopStore(
     createIo(configuration, logger.child({ component: 'storage' })),
-    { traitRelationMode: configuration.traitRelationMode },
+    {
+      traitRelationMode: configuration.traitRelationMode,
+      logger: logger.child({ component: 'store' }),
+    },
   );
   // Blobs stay in memory until slice C2 puts them on disk; nothing writes
   // one before slice B12, but the hub transport serves them to peers from

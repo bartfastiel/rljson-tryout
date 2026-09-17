@@ -140,6 +140,7 @@ export class HubTransport {
   private state: TransportState = { role: 'standalone' };
   private lastError: string | null = null;
   private queue: Promise<void> = Promise.resolve();
+  private retry: NodeJS.Timeout | null = null;
 
   constructor(
     configuration: Pick<Configuration, 'hubPort'>,
@@ -332,6 +333,13 @@ export class HubTransport {
         'client disconnected from hub',
       );
     });
+    // A connection can arrive between `server.tearDown()` and the close
+    // of the socket server; `Server.addSocket` has no torn-down guard and
+    // would register it and restart the health check.
+    if (this.state.role !== 'hub' || this.state.server !== server) {
+      socket.disconnect(true);
+      return;
+    }
     try {
       await server.addSocket(new SocketIoBridge(socket));
       this.logger.info(
@@ -374,6 +382,13 @@ export class HubTransport {
     socket.on('disconnect', (reason) => {
       state.connected = false;
       this.noteError(`disconnected from hub ${hubAddress}: ${reason}`);
+      // socket.io reconnects on its own after every reason but a
+      // disconnect the server asked for (a hub that shut down), and a hub
+      // that comes back behind the same address is the one this node
+      // still follows, so the socket is told to keep trying.
+      if (reason === 'io server disconnect') {
+        socket.connect();
+      }
     });
     socket.on('connect_error', (error) => {
       this.noteError(`cannot reach hub ${hubAddress}: ${error.message}`);
@@ -392,27 +407,38 @@ export class HubTransport {
    * Builds the `Client` over the connected socket. Runs as a queued
    * transition of its own, so a teardown that was requested meanwhile
    * runs after it and finds the client to tear down; `state` is stale by
-   * then, and the client is dropped again.
+   * then, and the client is dropped again. A `Client` that fails to
+   * initialize has already started its peer bridges on the socket, and
+   * `Client.tearDown()` leaves them there (`docs/findings/hub-transport.md`),
+   * so the socket is dropped with it and a fresh one is tried after
+   * `connectTimeoutMs`, rather than letting the next `connect` build a
+   * second `Client` on a socket that already answers the hub.
    */
   private async attachClient(state: ClientState): Promise<void> {
     if (this.state !== state || state.client !== null) {
       return;
     }
-    const client = new Client(
-      new SocketIoBridge(state.socket),
-      new BorrowedIo(this.store.localIo),
-      this.blobs,
-      changeSetsRoute,
-      { logger: serverLoggerOver(this.logger), ownsStores: false },
-    );
+    let client: Client | null = null;
     try {
+      client = new Client(
+        new SocketIoBridge(state.socket),
+        new BorrowedIo(this.store.localIo),
+        this.blobs,
+        changeSetsRoute,
+        { logger: serverLoggerOver(this.logger), ownsStores: false },
+      );
       await client.init();
       await client.createTables({ withInsertHistory: [...domainTableCfgs] });
     } catch (error) {
       this.noteError(
         `client over hub ${state.hubAddress} failed to initialize: ${errorMessage(error)}`,
       );
-      await client.tearDown();
+      await client?.tearDown();
+      await this.tearDown();
+      this.retry = setTimeout(() => {
+        this.retry = null;
+        void this.becomeClient(state.hubAddress);
+      }, this.connectTimeoutMs);
       return;
     }
 
@@ -431,6 +457,10 @@ export class HubTransport {
   }
 
   private async tearDown(): Promise<void> {
+    if (this.retry !== null) {
+      clearTimeout(this.retry);
+      this.retry = null;
+    }
     const state = this.state;
     this.state = { role: 'standalone' };
     this.store.readThrough(null);

@@ -156,10 +156,20 @@ What `IoPeer` requests look like on the wire:
   `rawTableCfgs`, `write`, `readRows`, `readRowsByHashes` and `rowCount`.
   Nothing on either side distinguishes a read from a write or from
   `close`: a peer that emits `write` writes into the other node's store,
-  and a peer that emits `close` closes it (with `BorrowedIo` in between,
-  `close` closes nothing here). The multis themselves never emit anything
-  but reads to a peer, because peers are registered `write: false`; the
-  protection is by convention, not by the transport (slices D14 to D16).
+  and a peer that emits `close` closes it. On a client the bridge sits
+  over `BorrowedIo`, so `close` closes nothing there; on the hub the
+  `IoServer` sits over the hub's `IoMulti`, so a client's `close` runs
+  `IoMulti.close()`: the local store stays open behind `BorrowedIo`, but
+  every other client's `IoPeer.close()` disconnects its socket (they
+  reconnect and are added again). A `where` a peer sends is run by the
+  hub on its own store as it came, so the unescaped clause of
+  `IoSqliteNode` (`docs/findings/stores.md`) is reachable from the wire on
+  the SQLite production nodes; `isSafeWhereValue` guards only what this
+  node's own API puts into a clause. The multis themselves never emit
+  anything but reads to a peer, because peers are registered
+  `write: false`; the protection is by convention, not by the transport
+  (slices D14 to D16). The Kubernetes `Service` maps only port 80 to
+  8080, so the hub port is reachable from the pod network alone.
 - The sync protocol of slice D3 uses the route as event name:
   `changeSets` for a reference, `changeSets:ack`, `changeSets:ack:client`,
   `changeSets:gapfill:req`, `changeSets:gapfill:res` and
@@ -179,6 +189,18 @@ Timeouts:
   `IoPeer: socket closed (readRows)`, and `IoMulti` skips closed readables
   before asking; a read miss with the hub gone therefore threw
   `Io "io-1" is closed` after 1 ms, not after 30 s.
+- A priority group waits for its slowest member: `IoMulti.readRows` asks
+  every readable of a group in parallel and collects them with
+  `Promise.allSettled` before it picks an answer, so on the hub one frozen
+  client (`docker pause`) delays a hit served by the other client to the
+  full 30 s, and since every client miss fans out through the hub, one
+  slow client delays every cascading read on every node (measured by the
+  reviewer of #38: a local hit 3 ms, a miss 30.0 s, the HTTP call hanging
+  for the whole time since Fastify has no request timeout). The 30 s is
+  hard-wired in `new IoPeer(socket)` inside `Server` and `Client` with no
+  option, a dropped socket does not fail a pending acknowledgement early
+  (socket.io only fails acks flagged `withError`), so slice D14 needs an
+  application-level bound around `readMatching` or a wrapped socket.
 - `Server.addSocket` and `Client.init` wait `peerInitTimeoutMs` (30 s) for
   the peer on the other side to answer `init` and `isReady`; measured
   0 ms in-process and about 5 ms between containers, because the socket
@@ -269,7 +291,12 @@ transport.
   access is what you want.
 - A cached row is not a version. The cascade writes the row it found into
   the local store, not its InsertHistory row, so anything that derives
-  "current" from the history ignores it until the change set arrives.
+  "current" from the history ignores it until the change set arrives. It
+  is a row, though: `nextInvoiceSequence` reads every `invoices` row, so a
+  node that read `invoice-2026-0007` from the hub numbers its next invoice
+  `2026-0008` while a node that never read it issues its own `2026-0007`;
+  the next number depends on what was read until D3 gives every node the
+  same rows.
 - Validate what enters a `where` clause that cascades: `IoSqliteNode`
   interpolates it into SQL (`docs/findings/stores.md`) and the hub runs
   the same clause on every store of the network.
@@ -277,7 +304,8 @@ transport.
   and `close` included, is a socket event on both sides. Anything that
   connects to the hub port can write into the hub's store; anything the
   hub connects to can be written into by the hub. Treat the hub port as
-  trusted-network-only until an authorization layer exists.
+  trusted-network-only until an authorization layer exists; here it is
+  the pod network, nothing maps it.
 - Expect the socket to outlive the hub: socket.io reconnects on its own,
   and a client whose hub stopped reconnects to whatever listens on that
   port next (the probe listener of a node that is no longer hub). Tear

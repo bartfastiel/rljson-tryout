@@ -6,8 +6,10 @@ import { recordingLogger } from '../testing/recordingLogger.ts';
 import { buildTestTransport } from '../testing/testServer.ts';
 import { memoryStore } from '../testing/testStores.ts';
 import type { PetShopStore } from '../store/petShopStore.ts';
-import { HubTransport } from './hubTransport.ts';
+import { HubTransport, type TransportStore } from './hubTransport.ts';
+import { BorrowedIo } from '../store/borrowedIo.ts';
 import { BsMem } from '@rljson/bs';
+import type { TableCfg } from '@rljson/rljson';
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
@@ -267,7 +269,9 @@ describe('HubTransport as client', () => {
     expect(clientNode.transport.snapshot()).toMatchObject({
       role: 'client',
       connectedToHub: false,
-      lastError: expect.stringContaining('disconnected from hub') as string,
+      lastError: expect.stringMatching(
+        /^(disconnected from hub|cannot reach hub) 127\.0\.0\.1:\d+: /u,
+      ) as string,
     });
     expect(await probe(hubNode.transport.boundPort() ?? 0)).toBe('refused');
     expect(await clientNode.store.getInvoice(issued.id)).toBeUndefined();
@@ -300,6 +304,114 @@ describe('HubTransport as client', () => {
     });
     expect(store.readsThroughNetwork).toBe(false);
     expect((await store.listAnimals()).total).toBe(10);
+  });
+});
+
+describe('HubTransport with a client that fails to initialize', () => {
+  it('drops the socket and connects again with a fresh one once the store works', async () => {
+    const hubNode = await hub();
+    const clientNode = await seededStore();
+    let broken = true;
+    class RefusingIo extends BorrowedIo {
+      override createOrExtendTable(request: {
+        tableCfg: TableCfg;
+      }): Promise<void> {
+        return broken
+          ? Promise.reject(new Error('table creation refused'))
+          : super.createOrExtendTable(request);
+      }
+    }
+    const store: TransportStore = {
+      localIo: new RefusingIo(clientNode.localIo),
+      readThrough: (cascade) => clientNode.readThrough(cascade),
+    };
+    const transport = new HubTransport(
+      { hubPort: 0 },
+      recordingLogger().logger,
+      store,
+      new BsMem(),
+      { connectTimeoutMs: 300 },
+    );
+    cleanups.push(() => transport.stop());
+    const connectedClients = () =>
+      (hubNode.transport.snapshot() as { connectedClients: number })
+        .connectedClients;
+
+    await transport.becomeClient(hubNode.address);
+    await until(
+      () =>
+        transport.snapshot().role === 'standalone' &&
+        transport.snapshot().lastError?.includes('refused') === true,
+    );
+    await until(() => connectedClients() === 0);
+
+    expect(transport.snapshot()).toMatchObject({
+      role: 'standalone',
+      lastError: expect.stringContaining('failed to initialize') as string,
+    });
+    expect(clientNode.readsThroughNetwork).toBe(false);
+
+    broken = false;
+    await until(
+      () =>
+        transport.snapshot().role === 'client' &&
+        (transport.snapshot() as { connectedToHub: boolean }).connectedToHub,
+    );
+    await until(() => connectedClients() === 1);
+
+    expect(transport.snapshot().lastError).toBeNull();
+    expect(clientNode.readsThroughNetwork).toBe(true);
+  });
+});
+
+describe('HubTransport with a hub that changes identity behind its address', () => {
+  it('keeps the client, whose socket reconnects to the new server', async () => {
+    const first = await hub();
+    const port = first.transport.boundPort()!;
+    const clientNode = await client(first.address);
+    await until(() => clientNode.store.readsThroughNetwork);
+
+    await first.transport.becomeStandalone();
+    await until(
+      () =>
+        !(clientNode.transport.snapshot() as { connectedToHub: boolean })
+          .connectedToHub,
+    );
+    const secondStore = await seededStore();
+    const second = new HubTransport(
+      { hubPort: port },
+      recordingLogger().logger,
+      secondStore,
+      new BsMem(),
+    );
+    cleanups.push(() => second.stop());
+    await second.becomeHub(first.address);
+    await clientNode.transport.becomeClient(first.address);
+
+    await until(
+      () =>
+        (second.snapshot() as { connectedClients: number }).connectedClients ===
+        1,
+      10_000,
+    );
+    await until(
+      () =>
+        (clientNode.transport.snapshot() as { connectedToHub: boolean })
+          .connectedToHub,
+    );
+    const updated = await secondStore.updateAnimal('donald-the-third', {
+      priceCents: 63_000,
+    });
+    const byHash = await clientNode.store.getAnimal('donald-the-third', {
+      version: updated!.hash,
+    });
+
+    expect(byHash).toMatchObject({ hash: updated!.hash, priceCents: 63_000 });
+    expect(clientNode.transport.snapshot()).toMatchObject({
+      role: 'client',
+      hubAddress: first.address,
+      connectedToHub: true,
+    });
   });
 });
 

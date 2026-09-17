@@ -1,5 +1,6 @@
 import { Db } from '@rljson/db';
 import type { Io } from '@rljson/io';
+import type { FastifyBaseLogger } from 'fastify';
 import {
   Route,
   timeId,
@@ -765,11 +766,14 @@ const resolveAnimalBreeder = (
  * picks the implementation of the animal-trait relation
  * (`docs/findings/n-to-m.md`, default `multi-reference`); `today` returns
  * the ISO date an issued invoice is dated with, replaceable in tests so
- * that an invoice number and date can be asserted exactly.
+ * that an invoice number and date can be asserted exactly; `logger`
+ * receives the warning when a read through the network fails (a silent
+ * default for tests that build a store without one).
  */
 export type PetShopStoreOptions = Readonly<{
   traitRelationMode?: TraitRelationMode;
   today?: () => string;
+  logger?: Pick<FastifyBaseLogger, 'warn'>;
 }>;
 
 /**
@@ -804,6 +808,7 @@ export class PetShopStore {
   private readonly db: Db;
   private readonly traitRelationMode: TraitRelationMode;
   private readonly today: () => string;
+  private readonly logger: Pick<FastifyBaseLogger, 'warn'>;
 
   /**
    * Writes that must not interleave (issuing an invoice reads the invoice
@@ -825,6 +830,7 @@ export class PetShopStore {
     this.db = new Db(this.io);
     this.traitRelationMode = options.traitRelationMode ?? 'multi-reference';
     this.today = options.today ?? todayInUtc;
+    this.logger = options.logger ?? { warn: () => undefined };
   }
 
   /**
@@ -1080,9 +1086,10 @@ export class PetShopStore {
    * cached in the local store on the way (`docs/findings/hub-transport.md`).
    * Values are checked with `isSafeWhereValue` first; an unsafe value reads
    * as "nothing found". A cascade that cannot answer (the hub gone between
-   * two probe cycles) reads as "nothing found" too, so the node stays
-   * usable on its local data; the hub transport reports the failure in
-   * `/status` under `transport.lastError`.
+   * two probe cycles, a peer that did not answer within the 30 s of
+   * `IoPeer`) reads as "nothing found" too, so the node stays usable on
+   * its local data; the failure is logged here and the hub transport
+   * reports socket-level failures in `/status` under `transport.lastError`.
    */
   private async readMatching<Row extends { _hash: string }>(
     tableCfg: TableCfg,
@@ -1094,7 +1101,11 @@ export class PetShopStore {
     try {
       const rljson = await this.io.readRows({ table: tableCfg.key, where });
       return (rljson[tableCfg.key] as ComponentsTable<Row>)._data;
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        { err: error, table: tableCfg.key, where },
+        'read through the network failed, answering from local data',
+      );
       return [];
     }
   }
@@ -1749,7 +1760,12 @@ export class PetShopStore {
    * stays `null` until then: a change set names the invoice inside its
    * `items` array, which no `where` clause can match, and the invoice list
    * does not show the invoice either, since its InsertHistory row is not
-   * fetched and only a version with a history row is current.
+   * fetched and only a version with a history row is current. The cached
+   * invoice row does count for `nextInvoiceSequence`, which reads every
+   * `invoices` row: a node that read `invoice-2026-0007` from the hub
+   * numbers its next invoice `2026-0008`, a node that never read it issues
+   * its own `2026-0007` (`docs/findings/change-sets.md`, "Invoice numbers
+   * across nodes"), until D3 gives every node the same rows.
    */
   private async getInvoiceThroughNetwork(
     id: string,
