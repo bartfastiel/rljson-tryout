@@ -910,9 +910,10 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       the bar and the hub election on the three production hosts. Outcome:
       production runs `node1` (`sqlite`), `node2` (`sqlite`) and `node3`
       (`memory`), each with its own Service, Ingress and Let's Encrypt
-      certificate, the apex host still on node1, every pod with
-      `SEED_SIZE=small` (every node seeds the same pet shop for now, see
-      D3) and `NODE_STATUS_URLS`, the ClusterIP service URLs at the same
+      certificate, the apex host still on node1, every pod with the
+      environment's `SEED_SIZE` (`small` then, `medium` since B10; every
+      node seeds the same pet shop for now, see D3) and
+      `NODE_STATUS_URLS`, the ClusterIP service URLs at the same
       positions as `NODE_URLS`, which the `NodeDirectory` polls instead of
       the public hosts, because Node's `fetch` rejects the staging chain of
       a preview (the open point of D1); `NODE_URLS` stays the public link
