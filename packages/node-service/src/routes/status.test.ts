@@ -9,7 +9,7 @@ import type { Configuration } from '../configuration.ts';
 import { NodeDirectory } from '../network/nodeDirectory.ts';
 import { RoleOrchestrator } from '../network/roleOrchestrator.ts';
 import { buildServer } from '../server.ts';
-import { PetShopStore } from '../store/petShopStore.ts';
+import type { PetShopStore } from '../store/petShopStore.ts';
 import {
   FakeDiscoveryManager,
   fakeNodeInfo,
@@ -19,6 +19,7 @@ import {
   silentLogger,
   testConfiguration,
 } from '../testing/testServer.ts';
+import { memoryStore, testStore } from '../testing/testStores.ts';
 
 const expectedTables = [
   'species',
@@ -51,8 +52,7 @@ afterEach(async () => {
 });
 
 const seededStore = async (): Promise<PetShopStore> => {
-  const store = new PetShopStore();
-  await store.initialize();
+  const store = await memoryStore();
   await store.seedIfEmpty();
   cleanups.push(() => store.close());
   return store;
@@ -170,8 +170,7 @@ describe('GET /status', () => {
   });
 
   it('reports zero rows per table for an unseeded store', async () => {
-    const store = new PetShopStore();
-    await store.initialize();
+    const store = await memoryStore();
     cleanups.push(() => store.close());
     const server = closing(buildTestServer(store));
 
@@ -182,6 +181,22 @@ describe('GET /status', () => {
     ).toStrictEqual(
       Object.fromEntries(expectedTables.map((table) => [table, 0])),
     );
+  });
+
+  it('reports the storage kind of the configuration', async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), 'status-sqlite-'));
+    cleanups.push(() =>
+      rmSync(dataDirectory, { recursive: true, force: true }),
+    );
+    const store = await testStore({ storage: 'sqlite', dataDirectory });
+    cleanups.push(() => store.close());
+    const server = closing(
+      buildTestServer(store, { storage: 'sqlite', dataDirectory }),
+    );
+
+    const response = await server.inject({ method: 'GET', url: '/status' });
+
+    expect(response.json<{ storage: string }>().storage).toBe('sqlite');
   });
 
   it('reports the hub role, the peers with their names and every node of the environment', async () => {

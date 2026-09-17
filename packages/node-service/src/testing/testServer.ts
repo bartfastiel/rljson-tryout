@@ -14,7 +14,9 @@ import type { PetShopStore } from '../store/petShopStore.ts';
  * The configuration every unit test and Gherkin feature builds its Fastify
  * instance with: a random port (never bound, since tests use `inject`),
  * the real web app directory, discovery disabled so that no test opens a
- * socket, and a data directory nothing writes to while discovery is off.
+ * socket, and a data directory nothing writes to while discovery is off
+ * and the store is the in-memory one; a test over the SQLite store passes
+ * its own `storage` and `dataDirectory` (`testStores.ts`).
  */
 export const testConfiguration: Configuration = Object.freeze({
   nodeName: 'node1',
@@ -29,6 +31,7 @@ export const testConfiguration: Configuration = Object.freeze({
     'web-app',
     'public',
   ),
+  storage: 'memory',
   traitRelationMode: 'multi-reference',
   rljsonDomain: 'petshop-test',
   hubPort: 0,

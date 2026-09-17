@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { IoMem } from '@rljson/io';
 import { describe, expect, it, vi } from 'vitest';
 
 import { PetShopStore } from './store/petShopStore.ts';
@@ -14,7 +15,7 @@ const packageJson = JSON.parse(
 
 describe('buildServer', () => {
   it('answers /health with status 200 and the documented shape', async () => {
-    const server = buildTestServer(new PetShopStore());
+    const server = buildTestServer(new PetShopStore(new IoMem()));
 
     const response = await server.inject({ method: 'GET', url: '/health' });
 
@@ -33,7 +34,7 @@ describe('buildServer', () => {
   });
 
   it('allows a browser on another node to read /health', async () => {
-    const server = buildTestServer(new PetShopStore());
+    const server = buildTestServer(new PetShopStore(new IoMem()));
 
     const response = await server.inject({
       method: 'GET',
@@ -50,7 +51,7 @@ describe('buildServer', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date('2026-09-17T10:00:00.000Z'));
-      const server = buildTestServer(new PetShopStore());
+      const server = buildTestServer(new PetShopStore(new IoMem()));
 
       vi.setSystemTime(new Date('2026-09-17T10:00:05.000Z'));
       const first = await server.inject({ method: 'GET', url: '/health' });
@@ -71,7 +72,7 @@ describe('buildServer', () => {
   });
 
   it('takes name and commit from the given configuration', async () => {
-    const server = buildTestServer(new PetShopStore(), {
+    const server = buildTestServer(new PetShopStore(new IoMem()), {
       nodeName: 'node2',
       gitCommit: 'abc1234',
     });
@@ -89,7 +90,7 @@ describe('buildServer', () => {
 
 describe('web app', () => {
   it('serves index.html at / with revalidation on every load', async () => {
-    const server = buildTestServer(new PetShopStore());
+    const server = buildTestServer(new PetShopStore(new IoMem()));
 
     const response = await server.inject({ method: 'GET', url: '/' });
 
@@ -102,7 +103,7 @@ describe('web app', () => {
   });
 
   it('answers HEAD / like GET / without a body', async () => {
-    const server = buildTestServer(new PetShopStore());
+    const server = buildTestServer(new PetShopStore(new IoMem()));
 
     const response = await server.inject({ method: 'HEAD', url: '/' });
 
@@ -114,7 +115,7 @@ describe('web app', () => {
   });
 
   it('serves the other files with the default cache headers', async () => {
-    const server = buildTestServer(new PetShopStore());
+    const server = buildTestServer(new PetShopStore(new IoMem()));
 
     const stylesheet = await server.inject({
       method: 'GET',
@@ -132,7 +133,7 @@ describe('web app', () => {
   });
 
   it('serves the directory the configuration names', async () => {
-    const server = buildTestServer(new PetShopStore(), {
+    const server = buildTestServer(new PetShopStore(new IoMem()), {
       webAppDirectory: resolve(packageDirectory, '..', '..', 'web-app'),
     });
 
@@ -148,7 +149,7 @@ describe('web app', () => {
   });
 
   it('answers unknown paths with the 404 of Fastify', async () => {
-    const server = buildTestServer(new PetShopStore());
+    const server = buildTestServer(new PetShopStore(new IoMem()));
 
     const page = await server.inject({ method: 'GET', url: '/does-not-exist' });
     const api = await server.inject({

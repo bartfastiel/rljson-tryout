@@ -2,8 +2,9 @@ import { invoicesSeed } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { PetShopStore } from '../store/petShopStore.ts';
+import type { PetShopStore } from '../store/petShopStore.ts';
 import { buildTestServer } from '../testing/testServer.ts';
+import { memoryStore } from '../testing/testStores.ts';
 
 const summaryKeys = [
   'customer',
@@ -33,8 +34,7 @@ describe('/api/invoices', () => {
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore({ today: () => '2026-09-17' });
-    await store.initialize();
+    store = await memoryStore({ today: () => '2026-09-17' });
     server = buildTestServer(store);
   });
 

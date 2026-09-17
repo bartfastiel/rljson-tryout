@@ -2,16 +2,16 @@ import { breedersSeed, personsSeed } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { PetShopStore } from '../store/petShopStore.ts';
+import type { PetShopStore } from '../store/petShopStore.ts';
 import { buildTestServer } from '../testing/testServer.ts';
+import { memoryStore } from '../testing/testStores.ts';
 
 describe('GET /api/breeders', () => {
   let store: PetShopStore;
   let server: FastifyInstance;
 
   beforeEach(async () => {
-    store = new PetShopStore();
-    await store.initialize();
+    store = await memoryStore();
     server = buildTestServer(store);
   });
 
