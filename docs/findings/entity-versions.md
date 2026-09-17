@@ -45,7 +45,11 @@ epoch>:<4 nanoid characters>` (`1789654560429:vqqc`), issued by
   hash, it gets `previous: <every timeId whose history row references that
 hash>` (`getTimeIdsForRef`), which is one `timeId` for a row written once
   and several for a row written more than once. Without a reference,
-  `previous` is `[]`.
+  `previous` is `[]`. Neither form is checked against the history: a
+  `timeId` no history row has (`animals@1234567890123:zzzz`) is accepted
+  verbatim into `previous`, and a hash nobody has gives `previous: []`,
+  the same as no reference at all; neither is an error, so a caller that
+  mistypes a hash silently starts a new, unchained version.
 - The history row `Db.insert` returns for a chained write is
   `{ animalsRef: <new row hash>, route: '/animals@1789654560429:vqqc', origin: 'db.insert', timeId: '1789654560430:OQDW', previous: ['1789654560429:vqqc'] }`:
   the `route` column keeps the reference the caller used, so the history
@@ -109,6 +113,14 @@ hash, one pass to group history rows by entity, one `Set` of superseded
 costs more than applying the rule: in `PetShopStore` every list now reads
 the entity table plus its history table (`readVersioned`), 55 ms of
 `Db.get` plus `getInsertHistory` at 10 000 rows against 1.4 ms for the rule.
+One edit is the most expensive operation: `updateAnimal` reads the animal
+tables once to build the new version, reads `animalTraits` with its history
+to chain the junction rows, and reads the animal tables again to answer
+with the new detail, three full reads of every version of every table
+involved; at the 10 000 row scale of the measurements that is a few hundred
+milliseconds per edit, acceptable now and the first place to revisit when
+slice B10's `large` seed arrives (an incremental read of only the rows a
+change set names, or a cached tip set the way `Db._dagTips` keeps one).
 
 Behaviour decisions the rule makes, each covered by a unit test:
 
@@ -161,6 +173,14 @@ edits always chain; two nodes editing the same animal will produce two tips
 - The `route` column of a history row records the reference used for the
   write and is the only place that says whether the writer chained by
   `timeId` or by hash.
+- Order a `jsonArray` of references canonically before hashing. The order
+  of `traitsRefs` carries no meaning, but it is content and therefore part
+  of the row hash; read back through the junction table it comes in hash
+  order, through the multi-reference column in stored order, so an edit
+  that kept the traits produced a different row hash per
+  `TraitRelation` mode until `traitsRefsOf` sorted them by trait id
+  (`packages/domain/src/tables/animals.ts`), which also makes a restore
+  of the seed content reproduce the seed hash.
 
 ## Candidates for upstream issues
 
@@ -183,3 +203,10 @@ edits always chain; two nodes editing the same animal will produce two tips
   so through the hash form. Reproduction: insert row A, then row B through
   `table@<A timeId>`, then A again through `table@<B timeId>`, then C
   through `table@<A hash>`: C's `previous` has two entries.
+- `Db.insert` does not check the reference of the route against the
+  history: a `timeId` that does not exist is written into `previous` as
+  given, and a hash that does not exist silently yields `previous: []`.
+  Reproduction: `db.insert(Route.fromFlat('animals@1234567890123:zzzz'), ...)`
+  returns `previous: ['1234567890123:zzzz']`;
+  `db.insert(Route.fromFlat('animals@NoSuchHash'), ...)` returns
+  `previous: []`.

@@ -774,9 +774,14 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       detail view uses for its read-only view of a version. The
       `animalTraits` junction rows of a new animal version are written as
       new versions of their pairings (`<animalId>--<traitId>`), chained
-      onto the previous pairing row. Two findings of the B8 review are
-      applied here: the invoice sequence is derived from the highest
-      existing number of the year (`nextInvoiceSequence`), and
+      onto the previous pairing row. `traitsRefs` is written in one
+      canonical order (by trait id, `traitsRefsOf`), in the seed as in an
+      edit, so the same set of traits hashes the same in both trait
+      relation modes; five seed animal hashes changed with it. The server
+      validates bodies without Ajv type coercion, so a value of the wrong
+      JSON type is refused instead of rewritten. Two findings of the B8
+      review are applied here: the invoice sequence is derived from the
+      highest existing number of the year (`nextInvoiceSequence`), and
       `issueInvoice` resolves customers and animals through the
       current-version rule.
 - [ ] **B10 Seed generator.** Depends on: B9. Deterministic generator with
