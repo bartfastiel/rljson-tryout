@@ -39,8 +39,9 @@ export const memoryStore = async (
  * the file's tests and removed after them, with a fresh subdirectory per
  * store so that no two stores of the file share a database. Returned as a
  * function because the directory only exists between the hooks. The
- * removal retries because Windows keeps a just-closed database file
- * locked for a moment (`docs/findings/stores.md`).
+ * removal retries as a safety net: the library's own `deleteDatabase`
+ * expects a just-closed file to stay locked briefly on Windows
+ * (`docs/findings/stores.md`).
  */
 export type TemporaryDataDirectories = {
   next: () => string;

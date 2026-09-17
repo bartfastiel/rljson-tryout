@@ -94,3 +94,56 @@ stay on disk until the next clean install but nothing resolves to them.
   so a fresh install duplicates them. Reproduction:
   `pnpm add @rljson/db@0.0.42 && pnpm why @rljson/rljson` in an empty
   package shows two versions.
+
+## Adding `@rljson/io-sqlite-node` (slice C1)
+
+### What we tried
+
+- `pnpm --filter @rljson-tryout/node-service add --save-exact @rljson/io-sqlite-node@1.0.7`
+  (published 2026-09-14, still the latest) on 2026-09-17 with the four
+  overrides from above already in `pnpm-workspace.yaml`, then
+  `pnpm why -r` for `@rljson/rljson`, `@rljson/io`, `@rljson/hash`,
+  `@rljson/json`, `@rljson/is-ready` and `@rljson/io-sqlite-node`.
+- Read `package.json` and `dist/index.js` of the installed package to see
+  what it really needs at runtime.
+
+### What happened
+
+- `@rljson/io-sqlite-node` 1.0.7 declares `@rljson/rljson ^0.0.73`,
+  `@rljson/io ^0.0.63`, `@rljson/hash ^0.0.17`, `@rljson/json ^0.0.23` and
+  `@rljson/is-ready ^0.0.17`. Without the overrides that would be a third
+  copy of `rljson` (0.0.73 next to 0.0.55 and 0.0.81), a second `io` and a
+  second `hash`. With the overrides in place `pnpm why -r` ends in
+  `Found 1 version` for every one of the four overridden packages and the
+  package links to `rljson` 0.0.81, `io` 0.0.78, `hash` 0.0.19 and `json`
+  0.0.23; `@rljson/is-ready` 0.0.17 is shared with `@rljson/io` without an
+  override because both ask for the same version.
+- The package runs on `node:sqlite` (`import { DatabaseSync } from 'node:sqlite'`),
+  which Node 24 ships without a flag and without an experimental warning;
+  the esbuild bundle of the service keeps `node:sqlite` external like
+  every other `node:` module and grew from 1.4 MB to 2.1 MB. The image
+  built from the unchanged Dockerfile runs it on `node:24-alpine`
+  (`docs/findings/stores.md`).
+- Its `dependencies` also list `sql.js` 1.14.2 (a 9.4 MB WebAssembly
+  build of SQLite), `path-browserify` and `shx`, none of which
+  `dist/index.js` imports. They are installed and locked for nothing.
+
+### What it means for rljson users
+
+- The overrides of roadmap section 3.5 are the same four as for the core
+  set; nothing else was needed for the SQLite store. Repeat the
+  `pnpm why -r` check after adding it, as after every `@rljson/*` change.
+- Expect a 10 MB download for `sql.js` that the package never loads.
+
+### Candidates for upstream issues
+
+- `@rljson/io-sqlite-node` 1.0.7 lists `sql.js`, `path-browserify` and
+  `shx` as runtime dependencies although `dist/index.js` imports only
+  `node:sqlite`, `node:fs`, `node:path` and `@rljson/*`. Reproduction:
+  `grep -c "sql.js" node_modules/@rljson/io-sqlite-node/dist/index.js`
+  prints 0.
+- Its `@rljson/*` ranges (`rljson ^0.0.73`, `io ^0.0.63`, `hash ^0.0.17`)
+  lag behind `@rljson/io` 0.0.78 and `@rljson/db` 0.0.42, so a project
+  without overrides gets a third `rljson` and a second `io` and `hash`.
+  Reproduction: `pnpm add @rljson/db@0.0.42 @rljson/io-sqlite-node@1.0.7`
+  in an empty package, then `pnpm why @rljson/rljson`.
