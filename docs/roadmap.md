@@ -405,12 +405,22 @@ merged.
       via `gh api` (pull request required, status checks `checks` and the Sonar
       quality gate required, linear history, no required reviewers). Done when
       a test pull request shows both checks and merges only after they pass.
-- [ ] **A3 Node service with health endpoint.** Depends on: A1. Package
+- [x] **A3 Node service with health endpoint.** Depends on: A1. Package
       `node-service`: Fastify server, `GET /health` per 2.5 with version from
       `package.json` and commit from `GIT_COMMIT` env, configuration module for
       the variables in 2.4 (only the ones used so far), structured logging,
       graceful shutdown, tests via `fastify.inject`. Done when `pnpm --filter
-node-service start` answers on 8080 and tests pass.
+node-service start` answers on 8080 and tests pass. Deviation: the package is
+      named `@rljson-tryout/node-service` per the repository's npm scope, run
+      with `pnpm --filter @rljson-tryout/node-service start`. Graceful
+      shutdown on `SIGTERM`/`SIGINT` was verified by code review and by
+      confirming the server starts, listens and answers `/health`; sending the
+      signal from another process on this Windows development machine could
+      not exercise the JS handler because Node.js has no POSIX signal delivery
+      on Windows outside a real console `Ctrl-C` (`process.kill` there
+      unconditionally terminates the target instead of invoking its listener),
+      so the handler will be exercised for real the first time this runs in
+      the Linux container this service is built for.
 - [ ] **A4 Container image.** Depends on: A3. Dockerfile per 4.1,
       `.dockerignore`, `image` job in the pipeline pushing to GHCR. Done when
       `docker run -p 8080:8080 ghcr.io/bartfastiel/rljson-tryout/node-service:<sha>`

@@ -41,6 +41,26 @@ Node 24 runs the TypeScript sources directly (type stripping); there is no
 build step in the monorepo. Per-package scripts live in
 `packages/*/package.json`.
 
+### Running the node service
+
+```sh
+pnpm --filter @rljson-tryout/node-service start
+```
+
+Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
+answers `GET /health` with `{ status, name, version, commit }`. Use
+`pnpm --filter @rljson-tryout/node-service dev` to restart on file changes.
+Stop it with `Ctrl-C`; it closes the server and exits cleanly.
+
+Environment variables the service understands so far:
+
+| Variable     | Default   | Meaning                                                             |
+| ------------ | --------- | ------------------------------------------------------------------- |
+| `NODE_NAME`  | `node1`   | Display name, reported by `/health`                                 |
+| `HTTP_PORT`  | `8080`    | Port to listen on, must be an integer 0 to 65535                    |
+| `LOG_LEVEL`  | `info`    | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`) |
+| `GIT_COMMIT` | `unknown` | Commit shown by `/health`, set by the container build               |
+
 ## Reproducing
 
 ### Terraform state backend
