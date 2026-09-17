@@ -5,14 +5,15 @@ import { hashQuery } from '../hash-route.js';
 
 /**
  * One animal as `GET /api/animals` returns it, with its species already
- * joined in.
+ * joined in. `speciesId` and `speciesName` are `null` for the unreachable
+ * case of a dangling `speciesRef` (see `PetShopStore.listAnimals`).
  *
  * @typedef {object} Animal
  * @property {string} id
  * @property {string} hash
  * @property {string} name
- * @property {string} speciesId
- * @property {string} speciesName
+ * @property {string | null} speciesId
+ * @property {string | null} speciesName
  * @property {string} bornOn
  * @property {number} priceCents
  */
@@ -32,6 +33,21 @@ const priceFormat = new Intl.NumberFormat(undefined, {
   style: 'currency',
   currency: 'EUR',
 });
+
+/**
+ * Parses a date-only string such as `"2020-07-22"` into a `Date` at
+ * midnight in the viewer's own time zone. `new Date(dateOnlyString)` parses
+ * the same string as UTC midnight instead, which `dateFormat` then renders
+ * in the viewer's time zone: anyone west of UTC sees the previous day.
+ * Building the `Date` from its numeric year, month and day keeps the
+ * calendar day independent of the viewer's time zone.
+ *
+ * @param {string} dateOnly
+ */
+const parseDateOnly = (dateOnly) => {
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
 
 /**
  * @param {string} text
@@ -88,11 +104,11 @@ const speciesFilter = (species) => {
 const animalCard = (animal) => {
   const meta = element('p', 'animal-meta');
   meta.append(
-    element('span', 'animal-species', animal.speciesName),
+    element('span', 'animal-species', animal.speciesName ?? 'Unknown species'),
     element(
       'span',
       'animal-born-on',
-      `Born ${dateFormat.format(new Date(animal.bornOn))}`,
+      `Born ${dateFormat.format(parseDateOnly(animal.bornOn))}`,
     ),
   );
 
