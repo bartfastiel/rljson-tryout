@@ -124,6 +124,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/node-service
     outputs:
       image: ${{ steps.image-reference.outputs.image }}
     steps:
@@ -164,7 +166,7 @@ jobs:
         id: metadata
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/bartfastiel/rljson-tryout/node-service
+          images: ${{ env.IMAGE_REPOSITORY }}
           tags: |
             type=sha,format=long,prefix=
             type=raw,value=main,enable={{is_default_branch}}
@@ -183,9 +185,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Registry paths are lower-case; the repository name in the env block
+      # keeps the owner's spelling.
       - name: Expose the image reference
         id: image-reference
-        run: echo "image=ghcr.io/bartfastiel/rljson-tryout/node-service:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${IMAGE_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
   terraform-cluster:
     name: terraform-cluster
@@ -303,9 +307,10 @@ jobs:
       run:
         working-directory: infra/terraform/workloads
     env:
-      # The image job pushed this tag for the current commit.
-      TF_VAR_image_tag: ${{ github.sha }}
+      TF_VAR_image: ${{ needs.image.outputs.image }}
       TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
+    outputs:
+      deployment_urls: ${{ steps.deployment.outputs.urls }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -346,57 +351,24 @@ jobs:
         if: github.event_name == 'push'
         run: terraform apply -input=false -no-color tfplan
 
-      # curl verifies the certificate against the runner's trust store, so
-      # the poll only succeeds once Let's Encrypt has issued; the issuer line
-      # documents which authority signed, and http must redirect.
-      - name: Verify the deployed commit
+      - name: Expose the deployment URLs
+        id: deployment
         if: github.event_name == 'push'
-        env:
-          EXPECTED_COMMIT: ${{ github.sha }}
-        run: |
-          urls="$(terraform output -json node_urls | jq -r '.[]') $(terraform output -raw apex_url)"
-          for base_url in ${urls}; do
-            health_url="${base_url}/health"
-            deadline=$((SECONDS + 300))
-            while true; do
-              payload="$(curl -s --max-time 10 "${health_url}" || true)"
-              commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2>/dev/null || true)"
-              if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
-                break
-              fi
-              if ((SECONDS >= deadline)); then
-                echo "::error::${health_url} did not report commit ${EXPECTED_COMMIT} within five minutes. Last payload: ${payload}"
-                exit 1
-              fi
-              sleep 10
-            done
-            echo "${health_url} answered:"
-            printf '%s\n' "${payload}"
-            host="${base_url#https://}"
-            deadline=$((SECONDS + 300))
-            while true; do
-              issuer="$(timeout 15 openssl s_client -connect "${host}:443" -servername "${host}" </dev/null 2>/dev/null | openssl x509 -noout -issuer 2>/dev/null || true)"
-              case "${issuer}" in
-                *"Let's Encrypt"*)
-                  break
-                  ;;
-              esac
-              if ((SECONDS >= deadline)); then
-                echo "::error::${health_url} does not serve a Let's Encrypt certificate after five minutes. Last issuer: ${issuer}"
-                exit 1
-              fi
-              sleep 10
-            done
-            echo "${health_url} certificate issuer: ${issuer}"
-            plain_http_url="http://${base_url#https://}/health"
-            redirect="$(curl -s -o /dev/null --max-time 10 -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"
-            case "${redirect}" in
-              "301 ${health_url}" | "307 ${health_url}" | "308 ${health_url}")
-                echo "${plain_http_url} redirects: ${redirect}"
-                ;;
-              *)
-                echo "::error::${plain_http_url} does not redirect to ${health_url}, got: ${redirect}"
-                exit 1
-                ;;
-            esac
-          done
+        run: echo "urls=$(terraform output -json node_urls | jq -r 'join(" ")') $(terraform output -raw apex_url)" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    name: smoke
+    needs: [terraform-workloads]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DEPLOYMENT_URLS: ${{ needs.terraform-workloads.outputs.deployment_urls }}
+      EXPECTED_COMMIT: ${{ github.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Verify the deployment
+        run: infra/scripts/verify-deployment.sh

@@ -55,7 +55,7 @@ module "production" {
   source = "./modules/petshop-environment"
 
   environment_name = "petshop"
-  image            = "${var.image_repository}:${var.image_tag}"
+  image            = var.image
   base_domain      = var.base_domain
   hostname_infix   = ""
   cluster_issuer   = local.cluster_issuer_names.production
