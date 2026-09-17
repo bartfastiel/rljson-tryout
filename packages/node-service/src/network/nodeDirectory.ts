@@ -45,12 +45,12 @@ type PolledStatus = {
   lastSeen: number | null;
 };
 
-const nodeRoles: readonly NodeRole[] = [
+const nodeRoles: ReadonlySet<NodeRole> = new Set<NodeRole>([
   'starting',
   'standalone',
   'hub',
   'client',
-];
+]);
 
 const unknownStatus = (): PolledStatus => ({
   name: null,
@@ -64,7 +64,7 @@ const readString = (value: unknown): string | null =>
   typeof value === 'string' && value !== '' ? value : null;
 
 const readRole = (value: unknown): NodeRole | null =>
-  nodeRoles.includes(value as NodeRole) ? (value as NodeRole) : null;
+  nodeRoles.has(value as NodeRole) ? (value as NodeRole) : null;
 
 /**
  * Polls `GET /status` of every other node named in `NODE_URLS` every few

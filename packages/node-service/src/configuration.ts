@@ -121,7 +121,12 @@ const readUrl = (variableName: string, value: string): string => {
     );
   }
 
-  return `${url.origin}${url.pathname.replace(/\/+$/u, '')}`;
+  let pathname = url.pathname;
+  while (pathname.endsWith('/')) {
+    pathname = pathname.slice(0, -1);
+  }
+
+  return `${url.origin}${pathname}`;
 };
 
 const readPublicUrl = (value: string | undefined, httpPort: number): string =>
