@@ -62,7 +62,7 @@ slice), `io-indexed-db` and `io-fs` (not published to npm).
    node3.rljson-tryout.wer-ist-daniel-schwarz.de ─┤
    node1-pr-42.rljson-tryout.wer-ist-daniel-schwarz.de (preview) ─┘
                                                             │
-   ┌──────────── one Hetzner Cloud server (cx32), single-node k3s ─────────────┐
+   ┌──────────── one Hetzner Cloud server (cpx32), single-node k3s ────────────┐
    │  flannel bridge: one layer 2 segment, UDP broadcast reaches every pod     │
    │                                                                            │
    │  namespace petshop (production)            namespace pr-42 (preview)      │
@@ -138,7 +138,12 @@ PNG so that no licensing questions arise.
 CX32 server (4 vCPU, 8 GB) costs about 0.0113 EUR per hour, so a week is
 under 2 EUR. AWS would need VPC, subnets, gateway and security groups for the
 same result. Alternative: AWS with an equivalent module; the application side
-does not change.
+does not change. Update from slice A6: Hetzner retired the CX32 name in
+October 2025 and its successor CX33 (0.0136 EUR per hour) is sold out in
+Nuremberg, so the server is a regular-performance CPX32 (4 AMD vCPU, 8 GB,
+160 GB) at 0.0569 EUR per hour since the price adjustment of 15 June 2026;
+a week is about 9.60 EUR. The type is a Terraform variable, so switching
+back to CX33 when it is in stock is a one-line pull request.
 
 **D2. One server, single-node k3s, several node pods.** AWS VPC forwards
 unicast only, Hetzner Cloud subnets are routed at layer 3, and Azure behaves
@@ -240,18 +245,18 @@ model `claude-opus-5`, key as a deployment secret.
 
 ## 5. Budget estimate
 
-| Item                                            | Rate                          | Assumption       | Cost               |
-| ----------------------------------------------- | ----------------------------- | ---------------- | ------------------ |
-| Server CX32                                     | 0.0113 EUR/h                  | 7 days = 168 h   | 1.90 EUR           |
-| Primary IPv4 address                            | about 0.50 EUR/month          | one month        | 0.50 EUR           |
-| Previews                                        | namespaces on the same server |                  | 0.00 EUR           |
-| Terraform state in S3                           |                               |                  | 0.01 EUR           |
-| GitHub Actions, GHCR, Let's Encrypt, SonarCloud | free for public repos         |                  | 0.00 EUR           |
-| Claude API (optional assistant)                 | per token                     | light manual use | < 1 EUR            |
-| **Total**                                       |                               |                  | **about 3.50 EUR** |
+| Item                                            | Rate                          | Assumption       | Cost             |
+| ----------------------------------------------- | ----------------------------- | ---------------- | ---------------- |
+| Server CPX32 (planned: CX32 at 0.0113 EUR/h)    | 0.0569 EUR/h                  | 7 days = 168 h   | 9.56 EUR         |
+| Primary IPv4 address                            | about 0.50 EUR/month          | one month        | 0.50 EUR         |
+| Previews                                        | namespaces on the same server |                  | 0.00 EUR         |
+| Terraform state in S3                           |                               |                  | 0.01 EUR         |
+| GitHub Actions, GHCR, Let's Encrypt, SonarCloud | free for public repos         |                  | 0.00 EUR         |
+| Claude API (optional assistant)                 | per token                     | light manual use | < 1 EUR          |
+| **Total**                                       |                               |                  | **about 11 EUR** |
 
 Hetzner bills hourly and caps at the monthly price, so a forgotten server
-costs at most 6.49 EUR per month. The destroy workflow is the budget guard.
+costs at most 35.49 EUR per month. The destroy workflow is the budget guard.
 
 ## 6. Slices
 
