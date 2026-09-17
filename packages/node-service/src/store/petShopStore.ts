@@ -44,6 +44,7 @@ import {
   speciesSeed,
   speciesTableCfg,
   traitsInsertHistoryTableCfg,
+  traitsRefsOf,
   traitsSeed,
   traitsTableCfg,
   updateAnimalChangeSetId,
@@ -428,6 +429,20 @@ type WrittenRow = {
 const byHash = <Row extends { _hash: string }>(
   rows: readonly Row[],
 ): Map<string, Row> => new Map(rows.map((row) => [row._hash, row]));
+
+/**
+ * The ids of the traits an animal version carries, ordered by id: the
+ * `TraitRelation` reports them in storage order, which differs between
+ * the multi-reference and the junction representation, and the API must
+ * answer identically in both modes (`docs/findings/n-to-m.md`).
+ */
+const traitIdsOf = (
+  traitRelation: TraitRelation,
+  animalHash: string,
+): string[] =>
+  traitRelation
+    .traitIdsOfAnimal(animalHash)
+    .sort((left, right) => left.localeCompare(right));
 
 const sumCents = (items: readonly { lineTotalCents: number }[]): number =>
   items.reduce((total, item) => total + item.lineTotalCents, 0);
@@ -1052,8 +1067,10 @@ export class PetShopStore {
     );
     const species = speciesByHash.get(animal.speciesRef);
     const breeder = breedersByHash.get(animal.breederRef);
-    const traits: TraitSummary[] = tables.traitRelation
-      .traitIdsOfAnimal(animal._hash)
+    const traits: TraitSummary[] = traitIdsOf(
+      tables.traitRelation,
+      animal._hash,
+    )
       .map((traitId) => traitsById.get(traitId))
       .filter((trait): trait is HashedTraitRow => trait !== undefined)
       .map((trait) => ({ id: trait.id, name: trait.name }));
@@ -1147,7 +1164,7 @@ export class PetShopStore {
       bornOn: version.row.bornOn,
       speciesId: speciesByHash.get(version.row.speciesRef)?.id ?? null,
       breederId: breedersByHash.get(version.row.breederRef)?.id ?? null,
-      traitIds: tables.traitRelation.traitIdsOfAnimal(version.row._hash),
+      traitIds: traitIdsOf(tables.traitRelation, version.row._hash),
       storyLength: version.row.backgroundStory.length,
     }));
   }
@@ -1160,6 +1177,8 @@ export class PetShopStore {
    * `speciesId`, `breederId` and `traitIds` are resolved to the current
    * version of the named species, breeder and traits; fields the changes
    * do not name keep the current version's values, references included.
+   * `traitsRefs` is written in the canonical order of `traitsRefsOf`, so
+   * the same edit produces the same row hash in both trait relation modes.
    * The `animalTraits` junction rows are re-created for the new animal
    * hash, each as a new version of its pairing (`docs/findings/n-to-m.md`,
    * "Versioning consequences"), and one change set names every row this
@@ -1202,8 +1221,7 @@ export class PetShopStore {
     }
 
     const traitIds =
-      changes.traitIds ??
-      tables.traitRelation.traitIdsOfAnimal(current.row._hash);
+      changes.traitIds ?? traitIdsOf(tables.traitRelation, current.row._hash);
     const traitsById = new Map(
       tables.traits.current.map((trait) => [trait.id, trait]),
     );
@@ -1232,7 +1250,7 @@ export class PetShopStore {
       bornOn: changes.bornOn ?? current.row.bornOn,
       priceCents: changes.priceCents ?? current.row.priceCents,
       backgroundStory: changes.backgroundStory ?? current.row.backgroundStory,
-      traitsRefs: traits.map((trait) => trait._hash),
+      traitsRefs: traitsRefsOf(traits),
     });
 
     const written = await this.writeRow(

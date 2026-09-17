@@ -1,5 +1,9 @@
 import { hashed } from '../hashing.ts';
-import type { AnimalRow, HashedAnimalRow } from '../tables/animals.ts';
+import {
+  traitsRefsOf,
+  type AnimalRow,
+  type HashedAnimalRow,
+} from '../tables/animals.ts';
 import { breedersSeed } from './breeders.ts';
 import { speciesSeed } from './species.ts';
 import { traitsSeed } from './traits.ts';
@@ -31,19 +35,21 @@ const breederRefFor = (breederId: string): string => {
 };
 
 /**
- * Looks up seeded traits by their `id`s and returns their `_hash`es, the
- * values an `animals` row needs in `traitsRefs`. Throws when an id is
- * unknown so a typo in this file fails loudly instead of writing a dangling
- * reference.
+ * Looks up seeded traits by their `id`s and returns their `_hash`es in the
+ * canonical order of `traitsRefsOf`, the value an `animals` row needs in
+ * `traitsRefs`. Throws when an id is unknown so a typo in this file fails
+ * loudly instead of writing a dangling reference.
  */
 const traitsRefsFor = (traitIds: readonly string[]): string[] =>
-  traitIds.map((traitId) => {
-    const trait = traitsSeed.find((row) => row.id === traitId);
-    if (trait === undefined) {
-      throw new Error(`No seeded trait with id "${traitId}".`);
-    }
-    return trait._hash;
-  });
+  traitsRefsOf(
+    traitIds.map((traitId) => {
+      const trait = traitsSeed.find((row) => row.id === traitId);
+      if (trait === undefined) {
+        throw new Error(`No seeded trait with id "${traitId}".`);
+      }
+      return trait;
+    }),
+  );
 
 /**
  * Sir Quackington's background story, hand-written across several

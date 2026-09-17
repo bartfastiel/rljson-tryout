@@ -45,6 +45,7 @@ export {
 export {
   animalsInsertHistoryTableCfg,
   animalsTableCfg,
+  traitsRefsOf,
   type AnimalRow,
   type HashedAnimalRow,
 } from './tables/animals.ts';

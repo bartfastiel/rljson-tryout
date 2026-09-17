@@ -36,6 +36,21 @@ export type AnimalRow = {
  */
 export type HashedAnimalRow = Hashed<AnimalRow>;
 
+/**
+ * The `traitsRefs` value for a set of traits: their hashes ordered by trait
+ * `id`. The order of traits carries no meaning, but it is part of the row's
+ * content and therefore of its hash, so one canonical order makes the same
+ * set of traits hash the same wherever the row is built: in the seed, in
+ * an edit that names the traits, and in an edit that keeps them, whichever
+ * `TraitRelation` the node reads them through (`docs/findings/n-to-m.md`).
+ */
+export const traitsRefsOf = (
+  traits: readonly { id: string; _hash: string }[],
+): string[] =>
+  [...traits]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((trait) => trait._hash);
+
 const stringColumn = (
   key: keyof AnimalRow | '_hash',
   titleLong: string,

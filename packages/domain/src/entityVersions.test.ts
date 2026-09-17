@@ -50,6 +50,14 @@ describe('compareTimeIdsNewestFirst', () => {
     expect(compareTimeIdsNewestFirst('100:aaaa', '100:aaaa')).toBe(0);
   });
 
+  it('breaks the tie by code points, not by locale collation', () => {
+    expect(compareTimeIdsNewestFirst('100:Zaaa', '100:abbb')).toBeGreaterThan(
+      0,
+    );
+    expect(compareTimeIdsNewestFirst('100:_aaa', '100:-aaa')).toBeLessThan(0);
+    expect(compareTimeIdsNewestFirst('100:a', '100:-')).toBeLessThan(0);
+  });
+
   it('sorts a list newest first', () => {
     const sorted = ['100:aaaa', '300:aaaa', '200:aaaa', '200:bbbb'].sort(
       compareTimeIdsNewestFirst,
