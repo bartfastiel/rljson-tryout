@@ -1,12 +1,15 @@
 # The workspace name selects the environment. `production` deploys the
-# namespace `petshop` with the plain hostnames, the apex host and the
-# production issuer. `pr-<number>` deploys the preview of that pull request:
-# a namespace of the same name, `-pr-<number>` inside every hostname, no apex
-# host, and certificates from the staging issuer, because Let's Encrypt
-# allows 50 new certificates per registered domain per week and previews
-# must never use up the budget production needs for its own hosts (see
-# docs/findings/tls-cert-manager.md). Any other workspace fails the plan
-# through the precondition in main.tf.
+# namespace `petshop` with the plain hostnames, the apex host, the
+# production issuer and node1 over the SQLite store on a persistent volume,
+# so that its data survives a redeploy. `pr-<number>` deploys the preview of
+# that pull request: a namespace of the same name, `-pr-<number>` inside
+# every hostname, no apex host, certificates from the staging issuer,
+# because Let's Encrypt allows 50 new certificates per registered domain
+# per week and previews must never use up the budget production needs for
+# its own hosts (see docs/findings/tls-cert-manager.md), and the in-memory
+# store, because a preview is thrown away with its pull request and needs
+# no volume. Any other workspace fails the plan through the precondition in
+# main.tf.
 locals {
   is_production_workspace = terraform.workspace == "production"
   is_preview_workspace    = can(regex("^pr-[1-9][0-9]*$", terraform.workspace))
@@ -17,12 +20,14 @@ locals {
     cluster_issuer      = local.cluster_issuer_names.production
     enable_apex_ingress = true
     rljson_domain       = "petshop-production"
+    storage             = "sqlite"
     } : {
     name                = terraform.workspace
     hostname_infix      = "-${terraform.workspace}"
     cluster_issuer      = local.cluster_issuer_names.staging
     enable_apex_ingress = false
     rljson_domain       = "petshop-${terraform.workspace}"
+    storage             = "memory"
   }
 }
 
@@ -40,7 +45,7 @@ module "environment" {
   enable_apex_ingress = local.environment.enable_apex_ingress
   rljson_domain       = local.environment.rljson_domain
   nodes = [
-    { name = "node1" },
+    { name = "node1", storage = local.environment.storage },
   ]
 
   depends_on = [kubectl_manifest.cluster_issuer]

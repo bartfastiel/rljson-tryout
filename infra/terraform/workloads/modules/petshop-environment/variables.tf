@@ -44,14 +44,20 @@ variable "enable_apex_ingress" {
 }
 
 variable "nodes" {
-  description = "Nodes of this environment in display order; the first one also answers on the apex host when enable_apex_ingress is set. Every node runs the in-memory store."
+  description = "Nodes of this environment in display order; the first one also answers on the apex host when enable_apex_ingress is set. A node's storage selects its workload: memory runs as a Deployment over an emptyDir, sqlite as a StatefulSet over a persistent volume claim."
   type = list(object({
-    name = string
+    name    = string
+    storage = optional(string, "memory")
   }))
 
   validation {
     condition     = length(var.nodes) > 0
     error_message = "An environment needs at least one node."
+  }
+
+  validation {
+    condition     = alltrue([for node in var.nodes : contains(["memory", "sqlite"], node.storage)])
+    error_message = "A node's storage must be memory or sqlite."
   }
 
   validation {
