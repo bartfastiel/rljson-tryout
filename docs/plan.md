@@ -29,17 +29,17 @@ rljson is a young ecosystem (organisation created in 2025, all packages on
 `0.0.x`, two core maintainers, commits from this week). Expect rough edges and
 breaking changes. The parts we build on:
 
-| Package                 | Version | What it gives us                                                                                                                                                                  |
-| ----------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@rljson/rljson`        | 0.0.81  | The format: tables of rows, every row and table deeply hashed, `_hash` is the primary key, references are `<table>Ref` columns holding hashes. Table schemas (`TableCfg`), validation, routes, the sync wire protocol, `InsertHistory` as an append-only log whose `previous` links form a DAG, conflict detection types. |
-| `@rljson/hash`          | 0.0.19  | Deep hashing (`hip`, `hsh`).                                                                                                                                                      |
-| `@rljson/io`            | 0.0.78  | The `Io` storage interface (12 methods) plus `IoMem`, `IoMulti` (priority cascade with write-back caching), `IoPeer` and `IoPeerBridge` (remote `Io` over a socket).             |
-| `@rljson/io-sqlite-node`| 1.0.7   | `Io` on SQLite through `node:sqlite`, persisted to a file.                                                                                                                        |
-| `@rljson/io-mssql`      | 0.0.30  | `Io` on Microsoft SQL Server.                                                                                                                                                     |
-| `@rljson/bs`, `bs-fs`   | 0.0.26 / 0.0.4 | Content-addressed blob storage (SHA-256 ids), in memory or on the file system, plus the same peer and multi composition as `io`. This is where binary images go.          |
-| `@rljson/db`            | 0.0.42  | High-level `Db`: `get(route, where)` joins across referenced tables, `insert(route, data)` writes rows and `InsertHistory`, observers, `detectDagBranch` conflict detection, and the `Connector` that speaks the sync protocol over a socket. |
-| `@rljson/network`       | 0.0.21  | Peer discovery and hub election with zero rljson knowledge: UDP broadcast first, an optional cloud coordinator second, a static hub address third, manual override always. TCP probing, deterministic election (incumbent, earliest start, node id). |
-| `@rljson/server`        | 0.0.64  | `Server` (hub) and `Client` (spoke): the hub multicasts references and aggregates all clients' stores; clients keep writes local and pull data by reference through the hub, which in turn pulls from the client that has it. Its `Node` class is hard-wired to in-memory storage (see decision D4). |
+| Package                  | Version        | What it gives us                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@rljson/rljson`         | 0.0.81         | The format: tables of rows, every row and table deeply hashed, `_hash` is the primary key, references are `<table>Ref` columns holding hashes. Table schemas (`TableCfg`), validation, routes, the sync wire protocol, `InsertHistory` as an append-only log whose `previous` links form a DAG, conflict detection types. |
+| `@rljson/hash`           | 0.0.19         | Deep hashing (`hip`, `hsh`).                                                                                                                                                                                                                                                                                              |
+| `@rljson/io`             | 0.0.78         | The `Io` storage interface (12 methods) plus `IoMem`, `IoMulti` (priority cascade with write-back caching), `IoPeer` and `IoPeerBridge` (remote `Io` over a socket).                                                                                                                                                      |
+| `@rljson/io-sqlite-node` | 1.0.7          | `Io` on SQLite through `node:sqlite`, persisted to a file.                                                                                                                                                                                                                                                                |
+| `@rljson/io-mssql`       | 0.0.30         | `Io` on Microsoft SQL Server.                                                                                                                                                                                                                                                                                             |
+| `@rljson/bs`, `bs-fs`    | 0.0.26 / 0.0.4 | Content-addressed blob storage (SHA-256 ids), in memory or on the file system, plus the same peer and multi composition as `io`. This is where binary images go.                                                                                                                                                          |
+| `@rljson/db`             | 0.0.42         | High-level `Db`: `get(route, where)` joins across referenced tables, `insert(route, data)` writes rows and `InsertHistory`, observers, `detectDagBranch` conflict detection, and the `Connector` that speaks the sync protocol over a socket.                                                                             |
+| `@rljson/network`        | 0.0.21         | Peer discovery and hub election with zero rljson knowledge: UDP broadcast first, an optional cloud coordinator second, a static hub address third, manual override always. TCP probing, deterministic election (incumbent, earliest start, node id).                                                                      |
+| `@rljson/server`         | 0.0.64         | `Server` (hub) and `Client` (spoke): the hub multicasts references and aggregates all clients' stores; clients keep writes local and pull data by reference through the hub, which in turn pulls from the client that has it. Its `Node` class is hard-wired to in-memory storage (see decision D4).                      |
 
 The central idea to keep in mind: **references travel, data is pulled.** A
 write stays local. Only the hash is announced. Whoever wants the row asks for
@@ -106,18 +106,18 @@ Every table is an rljson `components` table with a `TableCfg`. Identity
 across versions is an explicit `id` column (rljson calls that a slice id);
 `_hash` identifies one immutable version of a row.
 
-| Table          | Columns (besides `_hash`, `id`)                                        | Edge case it exercises                        |
-| -------------- | ---------------------------------------------------------------------- | --------------------------------------------- |
-| `species`      | `name`, `latinName`, `description`, `imageBlobId`, `imageMimeType`     | binary data (image lives in blob storage)     |
-| `traits`       | `name`, `description`                                                  |                                               |
+| Table          | Columns (besides `_hash`, `id`)                                                                         | Edge case it exercises                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `species`      | `name`, `latinName`, `description`, `imageBlobId`, `imageMimeType`                                      | binary data (image lives in blob storage)                         |
+| `traits`       | `name`, `description`                                                                                   |                                                                   |
 | `animals`      | `name`, `speciesRef`, `breederRef`, `bornOn`, `priceCents`, `backgroundStory`, `traitsRefs` (jsonArray) | large content (story > 4000 chars), n-to-m via a multi-ref column |
-| `animalTraits` | `animalRef`, `traitRef`                                                | n-to-m via a junction table, to compare both patterns |
-| `persons`      | `name`, `street`, `city`, `email`                                      |                                               |
-| `customers`    | `personRef`, `customerNumber`                                          |                                               |
-| `breeders`     | `personRef`, `farmName`, `suppliesSince`                               | a breeder can also be a customer (same person) |
-| `invoices`     | `invoiceNumber`, `customerRef`, `issuedOn`, `status`                   |                                               |
-| `invoiceItems` | `invoiceRef`, `animalRef`, `quantity`, `unitPriceCents`                | references in both directions of a query      |
-| `changeSets`   | rljson `buffets` table listing the rows of one business operation      | the single sync route, atomic visibility      |
+| `animalTraits` | `animalRef`, `traitRef`                                                                                 | n-to-m via a junction table, to compare both patterns             |
+| `persons`      | `name`, `street`, `city`, `email`                                                                       |                                                                   |
+| `customers`    | `personRef`, `customerNumber`                                                                           |                                                                   |
+| `breeders`     | `personRef`, `farmName`, `suppliesSince`                                                                | a breeder can also be a customer (same person)                    |
+| `invoices`     | `invoiceNumber`, `customerRef`, `issuedOn`, `status`                                                    |                                                                   |
+| `invoiceItems` | `invoiceRef`, `animalRef`, `quantity`, `unitPriceCents`                                                 | references in both directions of a query                          |
+| `changeSets`   | rljson `buffets` table listing the rows of one business operation                                       | the single sync route, atomic visibility                          |
 
 Every table gets its `InsertHistory` companion table so that edits form a
 DAG and conflicts become detectable. A later slice models the shop
@@ -240,15 +240,15 @@ model `claude-opus-5`, key as a deployment secret.
 
 ## 5. Budget estimate
 
-| Item                                           | Rate                    | Assumption            | Cost     |
-| ---------------------------------------------- | ----------------------- | --------------------- | -------- |
-| Server CX32                                    | 0.0113 EUR/h            | 7 days = 168 h        | 1.90 EUR |
-| Primary IPv4 address                           | about 0.50 EUR/month    | one month             | 0.50 EUR |
-| Previews                                       | namespaces on the same server |                 | 0.00 EUR |
-| Terraform state in S3                          |                         |                       | 0.01 EUR |
-| GitHub Actions, GHCR, Let's Encrypt, SonarCloud| free for public repos   |                       | 0.00 EUR |
-| Claude API (optional assistant)                | per token               | light manual use      | < 1 EUR  |
-| **Total**                                      |                         |                       | **about 3.50 EUR** |
+| Item                                            | Rate                          | Assumption       | Cost               |
+| ----------------------------------------------- | ----------------------------- | ---------------- | ------------------ |
+| Server CX32                                     | 0.0113 EUR/h                  | 7 days = 168 h   | 1.90 EUR           |
+| Primary IPv4 address                            | about 0.50 EUR/month          | one month        | 0.50 EUR           |
+| Previews                                        | namespaces on the same server |                  | 0.00 EUR           |
+| Terraform state in S3                           |                               |                  | 0.01 EUR           |
+| GitHub Actions, GHCR, Let's Encrypt, SonarCloud | free for public repos         |                  | 0.00 EUR           |
+| Claude API (optional assistant)                 | per token                     | light manual use | < 1 EUR            |
+| **Total**                                       |                               |                  | **about 3.50 EUR** |
 
 Hetzner bills hourly and caps at the monthly price, so a forgotten server
 costs at most 6.49 EUR per month. The destroy workflow is the budget guard.
@@ -259,16 +259,16 @@ See [roadmap.md](roadmap.md), section 5.
 
 ## 7. Edge cases mapped to slices
 
-| Edge case                                   | Slices             |
-| ------------------------------------------- | ------------------ |
-| n-to-m relations (multi-ref and junction)   | B5, B6, D17        |
-| binary data                                 | B12, C2, D5        |
-| large content                               | B4, B11, C5, D8    |
-| merge conflicts                             | B9, D11, D12, D13  |
-| concurrency                                 | D9, D10            |
-| corrupt payloads from other nodes           | D14, D15, D16      |
-| restarts, volatile stores, hub loss         | D4, D6, D7         |
-| different database engines                  | C1, C4, E1, E6     |
+| Edge case                                 | Slices            |
+| ----------------------------------------- | ----------------- |
+| n-to-m relations (multi-ref and junction) | B5, B6, D17       |
+| binary data                               | B12, C2, D5       |
+| large content                             | B4, B11, C5, D8   |
+| merge conflicts                           | B9, D11, D12, D13 |
+| concurrency                               | D9, D10           |
+| corrupt payloads from other nodes         | D14, D15, D16     |
+| restarts, volatile stores, hub loss       | D4, D6, D7        |
+| different database engines                | C1, C4, E1, E6    |
 
 ## 8. Risks
 
