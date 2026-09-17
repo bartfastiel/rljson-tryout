@@ -21,10 +21,23 @@ import {
  */
 
 /**
+ * The breeder behind an animal, as `GET /api/animals/:id` joins it in.
+ * `null` for the unreachable case of a dangling `breederRef` (see
+ * `PetShopStore.getAnimal`).
+ *
+ * @typedef {object} AnimalBreeder
+ * @property {string} id
+ * @property {string} farmName
+ * @property {string | null} personName
+ * @property {string | null} city
+ */
+
+/**
  * One animal as `GET /api/animals/:id` returns it: the fields the detail
- * view needs, with its species joined, its traits resolved and the full
- * background story. `speciesId` and `speciesName` are `null` for the
- * unreachable case of a dangling `speciesRef` (see `PetShopStore.getAnimal`).
+ * view needs, with its species and breeder joined, its traits resolved and
+ * the full background story. `speciesId` and `speciesName` are `null` for
+ * the unreachable case of a dangling `speciesRef` (see
+ * `PetShopStore.getAnimal`).
  *
  * @typedef {object} AnimalDetail
  * @property {string} id
@@ -32,27 +45,34 @@ import {
  * @property {string} name
  * @property {string | null} speciesId
  * @property {string | null} speciesName
+ * @property {string | null} breederId
+ * @property {string | null} breederFarmName
  * @property {string} bornOn
  * @property {number} priceCents
  * @property {string} backgroundStory
  * @property {AnimalTrait[]} traits
+ * @property {AnimalBreeder | null} breeder
  */
 
 /**
  * The href of the list a "back" link should return to: the filtered list
- * the detail was opened from, carrying along whichever of `species` and
- * `trait` this view's own hash query holds (the animal card that links here
- * puts them there, see `animals-list.js`), the full list when neither is
- * present.
+ * the detail was opened from, carrying along whichever of `species`,
+ * `breeder` and `trait` this view's own hash query holds (the animal card
+ * that links here puts them there, see `animals-list.js`), the full list
+ * when none is present.
  */
 const listHref = () => {
   const query = hashQuery(location.hash);
   const speciesId = query.get('species');
+  const breederId = query.get('breeder');
   const traitId = query.get('trait');
 
   const params = new URLSearchParams();
   if (speciesId !== null) {
     params.set('species', speciesId);
+  }
+  if (breederId !== null) {
+    params.set('breeder', breederId);
   }
   if (traitId !== null) {
     params.set('trait', traitId);
@@ -91,8 +111,8 @@ const storyParagraphs = (story) => {
 };
 
 /**
- * The compact facts block: species as a link to the filtered list, born
- * date and price.
+ * The compact facts block: species as a link to the filtered list, breeder
+ * as a link to the breeders view, born date and price.
  *
  * @param {AnimalDetail} animal
  */
@@ -105,10 +125,21 @@ const factsBlock = (animal) => {
   const speciesValue = element('dd', '');
   speciesValue.append(speciesLink);
 
+  const breederLink = element(
+    'a',
+    '',
+    animal.breeder?.farmName ?? 'Unknown breeder',
+  );
+  breederLink.href = '#/breeders';
+  const breederValue = element('dd', '');
+  breederValue.append(breederLink);
+
   const facts = element('dl', 'animal-facts');
   facts.append(
     element('dt', '', 'Species'),
     speciesValue,
+    element('dt', '', 'Breeder'),
+    breederValue,
     element('dt', '', 'Born'),
     element('dd', '', dateFormat.format(parseDateOnly(animal.bornOn))),
     element('dt', '', 'Price'),

@@ -65,6 +65,24 @@ test('links the species fact to the filtered animals list', async ({
   }
 });
 
+test('names the breeder in the facts block and links to the breeders view', async ({
+  page,
+}) => {
+  await page.goto('/#/animals/sir-quackington');
+
+  const breederLink = page
+    .locator('.animal-facts')
+    .getByRole('link', { name: "Daisy's Duckling Nursery", exact: true });
+  await expect(breederLink).toBeVisible();
+
+  await breederLink.click();
+
+  await expect(page).toHaveURL(/#\/breeders$/);
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Breeders' }),
+  ).toBeVisible();
+});
+
 test('shows trait chips and tapping one filters the animals list', async ({
   page,
 }) => {
