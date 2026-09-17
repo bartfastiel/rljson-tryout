@@ -1,0 +1,67 @@
+# Three node services of the same rljson domain on one bridge network, for
+# the network integration tests (`pnpm --filter @rljson-tryout/node-service
+# test:integration`) and for trying discovery out locally:
+#
+#   docker compose -f deploy/compose/three-nodes.yml up --build --wait
+#   curl -s http://localhost:8301/status | jq '{nodeName, role, hubAddress}'
+#   docker compose -f deploy/compose/three-nodes.yml down
+#
+# Every container hears the others' UDP broadcasts on the user-defined
+# bridge, probes them on the hub port and elects one hub. `NODE_URLS` names
+# the container-internal URLs so that the nodes can poll each other's
+# `/status`; a browser on the host reaches the nodes on the mapped ports
+# instead and therefore cannot open those links, which is what the header's
+# browser probe marker is there to show. `NODE_SERVICE_IMAGE` selects a
+# pushed image (the CI job does) instead of building from the repository;
+# only node1 carries the build section, because three services building
+# the same tag at once collide on the image store, and the other two reuse
+# the image node1 built or the pushed one.
+name: rljson-tryout-three-nodes
+
+x-node: &node
+  image: ${NODE_SERVICE_IMAGE:-rljson-tryout/node-service:local}
+  pull_policy: ${NODE_SERVICE_PULL_POLICY:-never}
+  environment: &node-environment
+    RLJSON_DOMAIN: petshop-compose
+    NODE_URLS: http://node1:8080,http://node2:8080,http://node3:8080
+    LOG_LEVEL: ${NODE_SERVICE_LOG_LEVEL:-info}
+  networks:
+    - petshop
+
+services:
+  node1:
+    <<: *node
+    build:
+      context: ../..
+      dockerfile: packages/node-service/Dockerfile
+    hostname: node1
+    environment:
+      <<: *node-environment
+      NODE_NAME: node1
+      PUBLIC_URL: http://node1:8080
+    ports:
+      - '${NODE1_PORT:-8301}:8080'
+
+  node2:
+    <<: *node
+    hostname: node2
+    environment:
+      <<: *node-environment
+      NODE_NAME: node2
+      PUBLIC_URL: http://node2:8080
+    ports:
+      - '${NODE2_PORT:-8302}:8080'
+
+  node3:
+    <<: *node
+    hostname: node3
+    environment:
+      <<: *node-environment
+      NODE_NAME: node3
+      PUBLIC_URL: http://node3:8080
+    ports:
+      - '${NODE3_PORT:-8303}:8080'
+
+networks:
+  petshop:
+    driver: bridge

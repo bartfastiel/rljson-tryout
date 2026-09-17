@@ -1,28 +1,9 @@
-import { resolve } from 'node:path';
-
 import { breedersSeed, personsSeed } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Configuration } from '../configuration.ts';
-import { buildServer } from '../server.ts';
 import { PetShopStore } from '../store/petShopStore.ts';
-
-const testConfiguration: Configuration = Object.freeze({
-  nodeName: 'node1',
-  httpPort: 0,
-  logLevel: 'error',
-  gitCommit: 'test-commit',
-  webAppDirectory: resolve(
-    import.meta.dirname,
-    '..',
-    '..',
-    '..',
-    'web-app',
-    'public',
-  ),
-  traitRelationMode: 'multi-reference',
-});
+import { buildTestServer } from '../testing/testServer.ts';
 
 describe('GET /api/breeders', () => {
   let store: PetShopStore;
@@ -31,7 +12,7 @@ describe('GET /api/breeders', () => {
   beforeEach(async () => {
     store = new PetShopStore();
     await store.initialize();
-    server = buildServer(testConfiguration, store);
+    server = buildTestServer(store);
   });
 
   afterEach(async () => {

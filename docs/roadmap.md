@@ -126,21 +126,23 @@ README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
-| Variable            | Values                             | Meaning                                                                                                                                                   |
-| ------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_NAME`         | `node1` …                          | Display name, also used for the hostname                                                                                                                  |
-| `STORAGE`           | `memory`, `sqlite`, `mssql`        | Which `Io` implementation backs the node                                                                                                                  |
-| `DATA_DIR`          | path                               | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                   |
-| `MSSQL_CONNECTION`  | connection string                  | Only for `STORAGE=mssql`                                                                                                                                  |
-| `HTTP_PORT`         | default `8080`                     |                                                                                                                                                           |
-| `HUB_PORT`          | default `3000`                     |                                                                                                                                                           |
-| `BROADCAST_PORT`    | default `41234`                    |                                                                                                                                                           |
-| `RLJSON_DOMAIN`     | string                             | Network domain for peer discovery                                                                                                                         |
-| `SEED_SIZE`         | `none`, `small`, `medium`, `large` | Seed imported at first start when the store is empty                                                                                                      |
-| `PUBLIC_URL`        | URL                                | Shown in status and used for links                                                                                                                        |
-| `LOG_LEVEL`         | `info`                             |                                                                                                                                                           |
-| `WEB_APP_DIRECTORY` | path                               | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                    |
-| `TRAIT_RELATION`    | `multi-reference`, `junction`      | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference` |
+| Variable            | Values                                      | Meaning                                                                                                                                                   |
+| ------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_NAME`         | `node1` …                                   | Display name, also used for the hostname                                                                                                                  |
+| `STORAGE`           | `memory`, `sqlite`, `mssql`                 | Which `Io` implementation backs the node                                                                                                                  |
+| `DATA_DIR`          | path                                        | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                   |
+| `MSSQL_CONNECTION`  | connection string                           | Only for `STORAGE=mssql`                                                                                                                                  |
+| `HTTP_PORT`         | default `8080`                              |                                                                                                                                                           |
+| `HUB_PORT`          | default `3000`                              |                                                                                                                                                           |
+| `BROADCAST_PORT`    | default `41234`                             |                                                                                                                                                           |
+| `RLJSON_DOMAIN`     | string, default `petshop-local`             | Network domain for peer discovery                                                                                                                         |
+| `SEED_SIZE`         | `none`, `small`, `medium`, `large`          | Seed imported at first start when the store is empty                                                                                                      |
+| `PUBLIC_URL`        | URL, default `http://localhost:<HTTP_PORT>` | This node's own URL, shown in `/status` and used for links                                                                                                |
+| `NODE_URLS`         | comma separated URLs, default empty         | Public URLs of every node of the environment, this one included; `/status` of each is polled to correlate node ids with URLs and names (slice D1)         |
+| `DISCOVERY`         | `enabled` (default), `disabled`             | `disabled` opens no broadcast or probe socket: unit tests and single-node runs; the node then reports `standalone` with a per-process id                  |
+| `LOG_LEVEL`         | `info`                                      |                                                                                                                                                           |
+| `WEB_APP_DIRECTORY` | path                                        | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                    |
+| `TRAIT_RELATION`    | `multi-reference`, `junction`               | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference` |
 
 ### 2.5 HTTP contract of a node
 
@@ -148,25 +150,25 @@ All responses are JSON unless noted. Identifiers: `id` is the stable
 identity of an entity across versions (rljson slice id), `hash` is one
 immutable version (`_hash`).
 
-| Method and path                                                  | Purpose                                                                                        |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `GET /health`                                                    | `{ status: "ok", name, version, commit, startedAt }`                                           |
-| `GET /status`                                                    | `{ nodeName, nodeId, role, hubAddress, peers: [...], storage, tables: { <table>: rowCount } }` |
-| `GET /api/stats`                                                 | Row counts per table, seed size, uptime                                                        |
-| `GET /api/species`                                               | List of current species versions                                                               |
-| `GET /api/species/:hash/image`                                   | PNG bytes, `Content-Type: image/png`                                                           |
-| `GET /api/traits`                                                | List of current trait versions                                                                 |
-| `GET /api/animals?species=<id>&breeder=<id>&trait=<id>&q=<text>` | Current animal versions with species and breeder joined                                        |
-| `GET /api/animals/:id`                                           | Current version with species, breeder and traits joined                                        |
-| `GET /api/animals/:id/history`                                   | All versions with InsertHistory rows, newest first                                             |
-| `PUT /api/animals/:id`                                           | Creates a new version from the current one plus the changed fields; returns it                 |
-| `GET /api/customers`, `GET /api/breeders`                        | Lists with the person joined                                                                   |
-| `GET /api/invoices`, `GET /api/invoices/:id`                     | Invoice with items and animals joined                                                          |
-| `POST /api/invoices`                                             | Body `{ customerId, items: [{ animalId, quantity }] }`, issues an invoice                      |
-| `GET /api/conflicts`                                             | Open DAG branch conflicts (slice D11)                                                          |
-| `POST /api/conflicts/:table/:id/resolve`                         | Runs the deterministic resolution (slice D12)                                                  |
-| `GET /api/events`                                                | Server-sent events: `insert`, `sync`, `topology`, `conflict`                                   |
-| `GET /` and static files                                         | The web app                                                                                    |
+| Method and path                                                  | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                                                    | `{ status: "ok", name, version, commit, startedAt }`, cross-origin readable                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `GET /status`                                                    | `{ nodeName, nodeId, publicUrl, domain, role, hubNodeId, hubAddress, peers: [...], nodes: [...], storage, tables: { <table>: rowCount } }`, cross-origin readable; `role` is `starting`, `standalone`, `hub` or `client`; `peers` from discovery (`nodeId`, `name`, `hostname`, `addresses`, `port`, `role`, `startedAt`, `firstSeen`, `lastSeen`, `probe`); `nodes` one entry per `NODE_URLS` URL (`url`, `self`, `name`, `nodeId`, `role`, `reachable`, `lastSeen`, `seenInTopology`) |
+| `GET /api/stats`                                                 | Row counts per table, seed size, uptime                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GET /api/species`                                               | List of current species versions                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `GET /api/species/:hash/image`                                   | PNG bytes, `Content-Type: image/png`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `GET /api/traits`                                                | List of current trait versions                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `GET /api/animals?species=<id>&breeder=<id>&trait=<id>&q=<text>` | Current animal versions with species and breeder joined                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GET /api/animals/:id`                                           | Current version with species, breeder and traits joined                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `GET /api/animals/:id/history`                                   | All versions with InsertHistory rows, newest first                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `PUT /api/animals/:id`                                           | Creates a new version from the current one plus the changed fields; returns it                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `GET /api/customers`, `GET /api/breeders`                        | Lists with the person joined                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GET /api/invoices`, `GET /api/invoices/:id`                     | Invoice with items and animals joined                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `POST /api/invoices`                                             | Body `{ customerId, items: [{ animalId, quantity }] }`, issues an invoice                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `GET /api/conflicts`                                             | Open DAG branch conflicts (slice D11)                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `POST /api/conflicts/:table/:id/resolve`                         | Runs the deterministic resolution (slice D12)                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `GET /api/events`                                                | Server-sent events: `insert`, `sync`, `topology`, `conflict`                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GET /` and static files                                         | The web app                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Errors use Fastify's default shape `{ statusCode, error, message }`.
 
@@ -333,15 +335,22 @@ Triggers: `pull_request` and `push` to `main`. Jobs:
 2. `image`: build and push `node-service` (and later `chaos-node`) tagged
    with the commit sha; on `main` additionally `main`. Needs
    `packages: write`.
-3. `terraform-cluster`: `plan` on pull requests, `apply` on `main`.
+3. `integration` (needs `image`, skipped for forks and Dependabot like the
+   deploy jobs, bounded by `timeout-minutes`): pulls that image and runs
+   `pnpm --filter @rljson-tryout/node-service test:integration`, the
+   Gherkin features that need the three-node Docker Compose setup of
+   `deploy/compose`, and uploads the compose logs on failure.
+4. `terraform-cluster`: `plan` on pull requests, `apply` on `main`.
    Workspace `default`. Needs `id-token: write` for AWS and `HCLOUD_TOKEN`.
-4. `terraform-workloads`: on `main` workspace `production`, on pull requests
+5. `terraform-workloads`: on `main` workspace `production`, on pull requests
    workspace `pr-<n>` with `apply` (this is the preview, skipped when the
    pull request is no longer open by the time the job starts), image tag
    from job 2, `TF_VAR_letsencrypt_email` from the repository secret.
-5. `smoke`: waits until `https://<host>/health` returns the deployed commit
-   sha, for production and preview alike; on a pull request it then
-   comments the preview links (updating the same comment on later runs).
+6. `smoke`: waits until `https://<host>/health` returns the deployed commit
+   sha, for production and preview alike, and until `/status` reports a
+   settled discovery role (`standalone`, `hub` or `client`; `starting` is
+   a transient it waits out); on a pull request it then comments the
+   preview links (updating the same comment on later runs).
 
 `concurrency` groups: `cluster`, `workloads-production`, `workloads-pr-<n>`.
 Pull requests from forks get no secrets; that is acceptable.
@@ -827,7 +836,12 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       otherwise; the node service allows cross-origin `GET /health` so a
       browser on any node can probe every other node. Done when all three
       hosts serve the app and each one's header shows the other two nodes,
-      correctly outlined green or red.
+      correctly outlined green or red. Note: the node bar, `NODE_URLS`,
+      `PUBLIC_URL` and the cross-origin `/health` already landed with the
+      pulled-forward D1, with the outline driven by the discovery topology
+      and the browser probe as the secondary marker; C3 adds node2 and
+      node3 to the module (the `nodes` list of `environment.tf`) and proves
+      the bar and the hub election on the three production hosts.
 - [ ] **C4 SQL Server store.** Depends on: C3. `STORAGE=mssql` with
       `IoMssql`, SQL Server `StatefulSet` in production, node2 switched to it,
       CI runs the domain suite against SQL Server as a service container,
@@ -840,7 +854,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
 
 ### Phase D: the network
 
-- [ ] **D1 Discovery and roles.** Depends on: C3. `RoleOrchestrator` over
+- [x] **D1 Discovery and roles.** Depends on: C3. `RoleOrchestrator` over
       `NetworkManager` (broadcast, probing, identity under `DATA_DIR/identity`),
       `/status` shows node id, role, hub, peers; the node bar's green or red
       from C3 now comes primarily from this discovery topology (a peer seen
@@ -851,7 +865,31 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       SSE `topology` event; a local Docker Compose file with three nodes for
       the integration tests. Gherkin: "three nodes start, exactly one
       becomes hub". Done when the production status pages agree on one hub
-      and the node bar reflects the discovery topology live.
+      and the node bar reflects the discovery topology live. Deviation:
+      pulled forward before C3 (and B8 to B13), because the network code is
+      independent of the remaining domain slices; the three-node proof
+      therefore runs against `deploy/compose/three-nodes.yml` locally and
+      in the new `integration` job of the pipeline, and the production
+      three-node agreement follows automatically once C3 deploys node2 and
+      node3 (the module already passes `RLJSON_DOMAIN`, `HUB_PORT`,
+      `BROADCAST_PORT`, `DATA_DIR`, `PUBLIC_URL` and `NODE_URLS` to every
+      pod, so a single node reports `standalone` today). The node bar and
+      the C3 header bar landed together here: `NODE_URLS` and the
+      cross-origin `/health` are in this slice, so C3 only adds the nodes.
+      The web app polls `/status` every five seconds instead of listening
+      to an SSE `topology` event, since B13 (server-sent events) has not
+      landed; B13 replaces the polling. `NetworkManager` hands the hub port
+      to the application the moment a node becomes hub, so the orchestrator
+      owns a `HubPortListener` on `HUB_PORT` until D2 puts the socket.io
+      server there; without it every other node drops the hub on its next
+      probe. A `NodeDirectory` polls `/status` of every `NODE_URLS` entry to
+      map node ids to URLs and names, because the announcements of
+      `@rljson/network` carry neither. With `DISCOVERY=disabled` the node
+      id is not persisted (a fresh UUID per process), so unit tests and the
+      Playwright web server never touch `DATA_DIR`. `/status` additionally
+      reports `publicUrl`, `domain`, `hubNodeId` and the `nodes` list
+      (section 2.5). Findings and measured timings (5 s to agreement, one
+      broadcast interval) in `docs/findings/network-discovery.md`.
 - [ ] **D2 Hub transport.** Depends on: D1. As hub, run `Server` over the
       node's own `Io` and `Bs` with a socket.io server on 3000; as client, run
       `Client` connected to the hub; the API uses the multis from then on.

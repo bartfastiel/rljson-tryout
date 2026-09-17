@@ -7,6 +7,9 @@ coverage/
 test-results/
 playwright-report/
 
+# Node identity and other local state of a node started from the package
+packages/node-service/data/
+
 # Local environment and secrets
 .env
 .env.*

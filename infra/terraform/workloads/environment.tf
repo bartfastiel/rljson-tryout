@@ -16,11 +16,13 @@ locals {
     hostname_infix      = ""
     cluster_issuer      = local.cluster_issuer_names.production
     enable_apex_ingress = true
+    rljson_domain       = "petshop-production"
     } : {
     name                = terraform.workspace
     hostname_infix      = "-${terraform.workspace}"
     cluster_issuer      = local.cluster_issuer_names.staging
     enable_apex_ingress = false
+    rljson_domain       = "petshop-${terraform.workspace}"
   }
 }
 
@@ -36,6 +38,7 @@ module "environment" {
   hostname_infix      = local.environment.hostname_infix
   cluster_issuer      = local.environment.cluster_issuer
   enable_apex_ingress = local.environment.enable_apex_ingress
+  rljson_domain       = local.environment.rljson_domain
   nodes = [
     { name = "node1" },
   ]

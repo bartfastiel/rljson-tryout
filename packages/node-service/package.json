@@ -7,6 +7,7 @@
     "start": "node src/main.ts",
     "dev": "node --watch src/main.ts",
     "typecheck": "tsc --noEmit",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "bundle": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node24 --sourcemap --outfile=dist/main.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
   },
   "dependencies": {
@@ -14,8 +15,10 @@
     "@rljson-tryout/domain": "workspace:*",
     "@rljson/db": "0.0.42",
     "@rljson/io": "0.0.78",
+    "@rljson/network": "0.0.21",
     "@rljson/rljson": "0.0.81",
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.5",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "@amiceli/vitest-cucumber": "^8.0.0",

@@ -64,3 +64,13 @@ variable "nodes" {
     error_message = "Node names must be DNS labels: lower-case letters, digits and dashes."
   }
 }
+
+variable "rljson_domain" {
+  description = "rljson network domain the nodes of this environment discover each other in (RLJSON_DOMAIN); production and previews share the pod network and are kept apart by this value alone."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.rljson_domain))
+    error_message = "The rljson domain must be lower-case letters, digits and dashes."
+  }
+}

@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Proves that every deployed base URL serves the expected commit over https
-# with a Let's Encrypt certificate, redirects http, lists species and serves
-# the web app. In production curl verifies the certificate chain, so the
+# with a Let's Encrypt certificate, redirects http, reports a settled
+# discovery role, lists species and serves the web app. In production curl
+# verifies the certificate chain, so the
 # health poll only succeeds once Let's Encrypt has issued, and the issuer
 # must be the production one. Previews are signed by the staging issuer,
 # whose chain no runner trusts: with ALLOW_STAGING_CERTIFICATE=true the
@@ -100,6 +101,28 @@ for base_url in "${urls[@]}"; do
       fail "${plain_http_url} does not redirect to ${health_url}, got: ${redirect}"
       ;;
   esac
+
+  # Discovery has settled when the node reports a role other than
+  # `starting`: `standalone` while it is the only node of its domain,
+  # `hub` or `client` once it has peers. `starting` is a legitimate
+  # transient (a node defers while an earlier peer has not answered a
+  # probe yet), so the role is polled with the same patience as the commit.
+  status_url="${base_url}/status"
+  deadline=$((SECONDS + timeout_seconds))
+  while true; do
+    status_body="$(probe "${status_url}" || true)"
+    status_role="$(printf '%s' "${status_body}" | jq -r '.role // empty' 2> /dev/null || true)"
+    case "${status_role}" in
+      standalone | hub | client)
+        break
+        ;;
+    esac
+    if ((SECONDS >= deadline)); then
+      fail "${status_url} did not report a settled role (standalone, hub or client) within ${timeout_seconds} seconds, got: ${status_body}"
+    fi
+    sleep 10
+  done
+  echo "${status_url} reports: $(printf '%s' "${status_body}" | jq -c '{nodeName, nodeId, role, hubAddress}')"
 
   species_url="${base_url}/api/species"
   species_body="$(probe "${species_url}" || true)"

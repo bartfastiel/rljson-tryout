@@ -25,6 +25,38 @@ export const priceFormat = new Intl.NumberFormat(undefined, {
   currency: 'EUR',
 });
 
+export const timeFormat = new Intl.DateTimeFormat(undefined, {
+  timeStyle: 'medium',
+});
+
+const relativeTimeFormat = new Intl.RelativeTimeFormat(undefined, {
+  numeric: 'auto',
+});
+
+/**
+ * A timestamp relative to now in the viewer's language, in the largest
+ * unit that keeps the number small: "5 seconds ago", "in 2 minutes",
+ * "3 hours ago", "yesterday".
+ *
+ * @param {string} iso
+ * @param {Date} [now]
+ */
+export const formatRelativeTime = (iso, now = new Date()) => {
+  const seconds = Math.round((new Date(iso).getTime() - now.getTime()) / 1000);
+  if (Math.abs(seconds) < 60) {
+    return relativeTimeFormat.format(seconds, 'second');
+  }
+  const minutes = Math.round(seconds / 60);
+  if (Math.abs(minutes) < 60) {
+    return relativeTimeFormat.format(minutes, 'minute');
+  }
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) {
+    return relativeTimeFormat.format(hours, 'hour');
+  }
+  return relativeTimeFormat.format(Math.round(hours / 24), 'day');
+};
+
 /**
  * Parses a date-only string such as `"2020-07-22"` into a `Date` at
  * midnight in the viewer's own time zone. `new Date(dateOnlyString)` parses

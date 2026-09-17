@@ -18,6 +18,8 @@
   --color-paid-tint: #dff3e6;
   --color-cancelled: #5c5c66;
   --color-cancelled-tint: #ebebef;
+  --color-seen: #1a7f37;
+  --color-unseen: #c62828;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -60,6 +62,8 @@
     --color-paid-tint: #1d3a28;
     --color-cancelled: #b5b5c0;
     --color-cancelled-tint: #2f2f36;
+    --color-seen: #57d27a;
+    --color-unseen: #ff8a80;
   }
 }
 
@@ -79,6 +83,9 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   display: grid;
+  /* The column may shrink below the header's content width, so that the
+     node bar scrolls within itself instead of widening the page. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr auto;
   grid-template-areas:
     'header'
@@ -139,18 +146,159 @@ a {
   white-space: nowrap;
 }
 
-.node-badge {
-  margin: 0;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  font-size: 0.8125rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
+/*
+ * The node bar lists every node of the environment next to the title. From
+ * 768 px the header has room for a row of nodes; should it still overflow,
+ * the bar scrolls sideways within itself instead of the page growing wider,
+ * and the active badge comes first so that it always stays in view. Below
+ * 768 px a bar with other nodes takes a row of its own under the title and
+ * wraps, so that every node is visible without scrolling (see the phone
+ * rule further down).
+ */
+.node-bar {
+  /* Positioned so that the visually hidden labels inside the links are
+     clipped with the bar instead of sticking out of the sticky header. */
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
-.node-badge:has(#node-name:empty) {
-  visibility: hidden;
+/*
+ * Right-aligned while there is room; `justify-content: flex-end` would
+ * push an overflowing bar's start, the active badge, into the unscrollable
+ * side, whereas an auto margin collapses to zero once the bar overflows.
+ */
+.node-bar > :first-child {
+  margin-left: auto;
+}
+
+@media (max-width: 767.98px) {
+  .app-header {
+    flex-wrap: wrap;
+    row-gap: 0;
+    height: auto;
+    min-height: var(--header-height);
+  }
+
+  .node-bar:has(.node-link) {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    height: auto;
+    padding-bottom: var(--space-2);
+    overflow: visible;
+  }
+
+  .node-bar:has(.node-link) > :first-child {
+    margin-left: 0;
+  }
+}
+
+.node-badge,
+.node-link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tap-target);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border: 2px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.node-badge-active {
+  border-color: var(--color-accent);
+  background: var(--color-accent-tint);
+}
+
+.node-link-seen {
+  border-color: var(--color-seen);
+}
+
+.node-link-unseen {
+  border-color: var(--color-unseen);
+}
+
+/*
+ * The browser's own probe is the secondary signal, so it is a small glyph
+ * inside the link rather than the outline: a check when this browser
+ * reached the node, a cross when it did not, an ellipsis while pending.
+ */
+.browser-probe {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-accent-contrast);
+  background: var(--color-text-muted);
+}
+
+.browser-probe::before {
+  content: '…';
+}
+
+.browser-probe-ok {
+  background: var(--color-seen);
+}
+
+.browser-probe-ok::before {
+  content: '✓';
+}
+
+.browser-probe-failed {
+  background: var(--color-unseen);
+}
+
+.browser-probe-failed::before {
+  content: '✕';
+}
+
+.topology-dot {
+  display: inline-block;
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+}
+
+.topology-dot-seen {
+  background: var(--color-seen);
+}
+
+.topology-dot-unseen {
+  background: var(--color-unseen);
+}
+
+.probe-mark {
+  display: inline-block;
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 0.125rem;
+}
+
+.probe-mark-ok {
+  background: var(--color-seen);
+}
+
+.probe-mark-failed {
+  background: var(--color-unseen);
 }
 
 .app-navigation {
@@ -292,7 +440,8 @@ a.card {
   text-decoration: none;
 }
 
-.animal-facts {
+.animal-facts,
+.facts {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: var(--space-4);
@@ -302,13 +451,106 @@ a.card {
   font-size: 0.9375rem;
 }
 
-.animal-facts dt {
+.animal-facts dt,
+.facts dt {
   margin: 0;
   color: var(--color-text-muted);
 }
 
-.animal-facts dd {
+.animal-facts dd,
+.facts dd {
+  min-width: 0;
   margin: 0;
+}
+
+.network-section {
+  margin: 0 0 var(--space-6);
+}
+
+.network-section-title {
+  margin: 0 0 var(--space-3);
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.network-section .facts {
+  margin-bottom: 0;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+}
+
+.role-hub {
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.role-client {
+  color: var(--color-text);
+  background: var(--color-accent-tint);
+  border-color: var(--color-accent-tint);
+}
+
+.node-id {
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.node-card-name {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.node-card-self {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.node-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.node-signals {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  font-size: 0.9375rem;
+}
+
+.node-signal {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.node-card-seen {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.peer-card .facts {
+  margin: var(--space-3) 0 0;
+  font-size: 0.875rem;
 }
 
 /*
