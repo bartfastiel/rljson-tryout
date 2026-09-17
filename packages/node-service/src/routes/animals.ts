@@ -8,6 +8,7 @@ import type {
 
 type AnimalsQuery = {
   species?: string;
+  trait?: string;
 };
 
 type AnimalParams = {
@@ -28,12 +29,12 @@ type NotFoundBody = {
  * Registers `GET /api/animals`, the list of current animal versions with
  * their species joined (roadmap section 2.5; `hash` is the row's `_hash`,
  * the identity of this exact version), optionally narrowed with
- * `?species=<id>`, and `GET /api/animals/:id`, the current version of one
- * animal with its species joined and its full `backgroundStory`. The list
- * never includes `backgroundStory`, so it stays light even once a story runs
- * to several thousand characters; only the detail endpoint does. An unknown
- * species id filter answers with an empty list; an unknown animal id answers
- * `404`.
+ * `?species=<id>`, `?trait=<id>` or both, and `GET /api/animals/:id`, the
+ * current version of one animal with its species joined, its traits
+ * resolved and its full `backgroundStory`. The list never includes
+ * `backgroundStory` or `traits`, so it stays light; only the detail
+ * endpoint does. An unknown species or trait id filter answers with an
+ * empty list; an unknown animal id answers `404`.
  */
 export const registerAnimalsRoutes = (
   server: FastifyInstance,
@@ -42,7 +43,10 @@ export const registerAnimalsRoutes = (
   server.get<{ Querystring: AnimalsQuery }>(
     '/api/animals',
     async (request): Promise<AnimalWithSpecies[]> =>
-      store.listAnimals({ speciesId: request.query.species }),
+      store.listAnimals({
+        speciesId: request.query.species,
+        traitId: request.query.trait,
+      }),
   );
 
   server.get<{ Params: AnimalParams }>(

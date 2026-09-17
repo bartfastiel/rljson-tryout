@@ -80,6 +80,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
           bornOn: '2024-01-01',
           priceCents: 1000,
           backgroundStory: generatedStory(4000),
+          traitsRefs: [],
         };
         writtenRow = hashed(row);
       });
