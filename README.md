@@ -89,7 +89,18 @@ with the species and breeder already joined but the background story and
 the traits left out so the list stays light), `GET /api/animals/:id`
 (the same fields plus the full `backgroundStory`, `traits: [{ id, name }]`
 and `breeder: { id, farmName, personName, city } | null`, `404` for an
-unknown id), `GET /api/invoices` (newest first,
+unknown id; `?version=<hash>` serves that exact version of the animal
+instead of the current one), `GET /api/animals/:id/history` (every version
+of the animal newest first,
+`[{ hash, timeId, previous, current, name, priceCents, bornOn, speciesId, breederId, traitIds, storyLength }]`),
+`PUT /api/animals/:id` (body: any subset of `name`, `speciesId`,
+`breederId`, `bornOn`, `priceCents`, `backgroundStory`, `traitIds`; writes
+a new version of the animal chained onto the current one and answers `200`
+with it as the detail endpoint serves it, `400` with
+`{ statusCode, error, message }` for a value that cannot be applied, `404`
+for an unknown id; every list serves the current version of each entity,
+see [docs/findings/entity-versions.md](docs/findings/entity-versions.md)),
+`GET /api/invoices` (newest first,
 `[{ id, hash, invoiceNumber, issuedOn, status, customer: { id, customerNumber, personName } | null, totalCents, itemCount }]`),
 `GET /api/invoices/:id` (the invoice with
 `customer: { id, customerNumber, person } | null`,
