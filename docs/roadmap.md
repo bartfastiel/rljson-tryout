@@ -94,28 +94,30 @@ docs/
 | --- | --- |
 | Hetzner project | `rljson-tryout` |
 | Server | one `cx32` in location `nbg1`, image `ubuntu-24.04`, k3s installed by cloud-init |
-| Public IPv4 | Hetzner Primary IP named `rljson-tryout` in `nbg1`, created once by hand, attached to the server by Terraform, survives server replacement |
-| DNS records | `rljson-tryout` A and `*.rljson-tryout` A in the Robot zone `wer-ist-daniel-schwarz.de`, pointing to that primary IP, entered once by hand, not managed by Terraform |
+| Public IPv4 | Hetzner Primary IP named `rljson-tryout` in `nbg1`, address `162.55.190.77`, created once by hand, attached to the server by Terraform, survives server replacement |
+| DNS records | `rljson-tryout` A and `*.rljson-tryout` A in the zone `wer-ist-daniel-schwarz.de` (Hetzner Cloud Console, project `konsoleH`), pointing to that primary IP, entered once by hand, not managed by Terraform |
 | Production hostnames | `node1.rljson-tryout.wer-ist-daniel-schwarz.de`, `node2…`, `node3…`; the apex host routes to node1 |
 | Preview hostnames | `node1-pr-<n>.rljson-tryout.wer-ist-daniel-schwarz.de`, apex `pr-<n>.rljson-tryout…` |
 | Terraform state | S3 bucket `bartfastiel-rljson-tryout-tfstate`, region `eu-central-1`, keys `cluster/terraform.tfstate` and `workloads/terraform.tfstate` (workspaces add their prefix) |
 | AWS access from CI | OIDC, role ARN in repository variable `AWS_ROLE_ARN`, no access keys |
 | Repository secrets | `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY` |
 | Repository variables | `AWS_ROLE_ARN`, `LETSENCRYPT_EMAIL` |
-| SonarCloud | organization `bartfastiel`, project key `bartfastiel_rljson-tryout`, automatic analysis off |
+| SonarCloud | organization `bartfastiel-github`, project key `bartfastiel_rljson-tryout`, automatic analysis off |
+| Secret expiry | `SONAR_TOKEN` and `ANTHROPIC_API_KEY` expire on 2026-12-16, `HCLOUD_TOKEN` does not expire |
 | Kubernetes namespaces | `petshop` for production, `pr-<n>` for previews |
 | Ingress | Traefik as shipped with k3s, cert-manager with ClusterIssuers `letsencrypt-staging` and `letsencrypt-production`, HTTP redirected to HTTPS |
 | Ports inside a node | HTTP `8080`, hub transport `3000`, UDP broadcast `41234` |
 | rljson network domain | `petshop-production` in production, `petshop-pr-<n>` in previews |
 
-Why DNS is static: the zone `wer-ist-daniel-schwarz.de` lives on Hetzner
-Robot nameservers, which have no API, and Hetzner Cloud DNS rejects zones
-with more than two labels, so the subdomain cannot be delegated. The two
-records therefore point at a primary IP that exists independently of the
-server. Terraform reads it with `data "hcloud_primary_ip"` and attaches it,
-so the server can be destroyed and recreated without touching DNS. Anyone
-reproducing the project in another domain creates their own primary IP and
-the two records once; the README describes it.
+Why DNS is static: Hetzner Cloud DNS rejects zones with more than two
+labels, so the subdomain cannot be delegated into its own zone, and the
+parent zone belongs to another Hetzner project than the one `HCLOUD_TOKEN`
+is scoped to. The two records therefore point at a primary IP that exists
+independently of the server. Terraform reads it with
+`data "hcloud_primary_ip"` and attaches it, so the server can be destroyed
+and recreated without touching DNS. Anyone reproducing the project in
+another domain creates their own primary IP and the two records once; the
+README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
@@ -390,7 +392,7 @@ merged.
   compares to a golden hash; `pipeline.yml` with the `checks` job (lint,
   typecheck, test). Done when the workflow is green on `main`.
 - [ ] **A2 Sonar and branch protection.** Depends on: A1.
-  `sonar-project.properties` (organization `bartfastiel`, project key
+  `sonar-project.properties` (organization `bartfastiel-github`, project key
   `bartfastiel_rljson-tryout`, sources `packages`, lcov path, coverage
   exclusions for `packages/web-app/**`, `**/*.test.ts`, `features/**`),
   Sonar step in `checks`, Dependabot for npm, GitHub Actions and Docker,

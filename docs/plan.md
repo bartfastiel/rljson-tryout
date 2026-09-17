@@ -218,10 +218,11 @@ terminates browser traffic; node-to-node traffic (broadcast, probes, the
 socket.io hub connection) stays inside the pod network and never passes the
 ingress. Server-sent events pass through Traefik without buffering.
 
-**D12. Static DNS on a persistent address.** The zone
-`wer-ist-daniel-schwarz.de` lives on Hetzner Robot nameservers without an
-API, and Hetzner Cloud DNS does not accept a zone with more than two labels,
-so the subdomain cannot be delegated. Therefore a Hetzner primary IP is
+**D12. Static DNS on a persistent address.** Hetzner Cloud DNS does not
+accept a zone with more than two labels, so the subdomain cannot be
+delegated into a zone of its own, and the parent zone
+`wer-ist-daniel-schwarz.de` belongs to a different Hetzner project than the
+one the deployment token is scoped to. Therefore a Hetzner primary IP is
 created once, two records (`rljson-tryout` and `*.rljson-tryout`) point at
 it, and Terraform attaches that address to whatever server it creates. DNS
 never changes again, and the server can be destroyed and recreated freely.
@@ -293,9 +294,9 @@ See [roadmap.md](roadmap.md), section 5.
 - Hetzner project `rljson-tryout` with a read-and-write API token as
   repository secret `HCLOUD_TOKEN`, and a primary IPv4 named `rljson-tryout`
   in location Nuremberg.
-- Two records in the Robot zone `wer-ist-daniel-schwarz.de`:
+- Two records in the zone `wer-ist-daniel-schwarz.de`:
   `rljson-tryout A <primary ip>` and `*.rljson-tryout A <primary ip>`.
-- SonarQube Cloud organization `bartfastiel` with project
+- SonarQube Cloud organization `bartfastiel-github` with project
   `bartfastiel_rljson-tryout`, token as secret `SONAR_TOKEN`.
 - Repository variable `LETSENCRYPT_EMAIL`.
 - AWS credentials on the machine that runs the one-time state backend
