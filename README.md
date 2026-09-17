@@ -87,7 +87,8 @@ node computes the same hashes for the same size; `none` leaves the tables
 empty. Every generated row gets its InsertHistory row and every generated
 entity its change set, the way the API writes them
 ([docs/findings/seed-generator.md](docs/findings/seed-generator.md):
-`large` seeds in about 1.4 seconds). The node serves the data as
+`large` seeds in about 1.4 seconds into the in-memory store and 16 seconds
+into SQLite). The node serves the data as
 `GET /api/species`
 (`[{ id, hash, name, latinName, description }]`), `GET /api/traits`
 (`[{ id, hash, name, description }]`), `GET /api/breeders`

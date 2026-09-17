@@ -809,7 +809,8 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       counts above, and `none` leaves the tables empty; the generated rows
       are written through the same per-row `Db.insert` path as the API with
       one change set per entity (measured against a bulk `Core.import` in
-      `docs/findings/seed-generator.md`, `large` seeds in about 1.4 s),
+      `docs/findings/seed-generator.md`, `large` seeds in about 1.4 s
+      into memory and 16 s into SQLite),
       each generated animal gets a short template story of 300 to 800
       characters until B11 replaces it, and `GET /api/animals` becomes a
       page (`q`, `limit`, `offset`, section 2.5) with a search field and a

@@ -36,6 +36,8 @@
   list endpoints with `curl`.
 - Ran the Playwright suite (178 tests, phone and desktop) against
   `SEED_SIZE=small` and `SEED_SIZE=medium`.
+- After slice C1 landed, seeded `medium` and `large` into the SQLite store
+  through the same path and timed the seed and the reads again.
 
 ## What happened
 
@@ -75,7 +77,14 @@ old code path, generated rows through `writeRow` and `writeChangeSet`):
 | `medium` |                        1 119 |         406 |         78 ms |             84 MB |
 | `large`  |                       24 759 |       7 771 |  1.3 to 1.4 s |     250 to 270 MB |
 
-The process holds 64 MB before any seeding.
+The process holds 64 MB before any seeding. Over the SQLite store of slice
+C1 (`WriteAheadLogSqliteIo`, one transaction per `Io.write`), the same
+path seeds `medium` in 0.7 s and `large` in 16 s, about 0.5 ms per row
+against 0.05 ms in memory, with the reads afterwards still quick
+(`listAnimals` 15 ms, `listInvoices` 105 ms, `updateAnimal` 66 ms,
+`getAnimal` 14 ms) and 208 MB resident, measured by hand: the store test
+seeds `medium` into both stores and `large` into memory only, which keeps
+the unit suite short.
 
 - The node process logs `seedDurationMilliseconds: 1343` and
   `rssBytes: 270557184` for `large` at start; fourteen seconds later

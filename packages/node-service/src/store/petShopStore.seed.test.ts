@@ -305,41 +305,35 @@ describe.each(storageKinds)(
 /**
  * The large seed takes about 1.4 s over the in-memory store and about
  * 16 s over SQLite on the development machine
- * (`docs/findings/seed-generator.md`), so the SQLite run stays a local
- * check and is skipped on CI, where the whole unit suite would otherwise
- * double in length.
+ * (`docs/findings/seed-generator.md`); the medium tests above prove the
+ * generator over both stores, so the large one runs in memory only and
+ * keeps the unit suite short.
  */
-const largeSeedStores: readonly StorageKind[] =
-  process.env.CI === undefined ? storageKinds : ['memory'];
+describe('PetShopStore.seedIfEmpty with the large size over the memory store', () => {
+  it('seeds the large plan within the time budget and validates as one document', async () => {
+    const plan = seedPlans.large.generated!;
+    const started = performance.now();
 
-describe.each(largeSeedStores)(
-  'PetShopStore.seedIfEmpty with the large size over the %s store',
-  (storage) => {
-    it('seeds the large plan within the time budget and validates as one document', async () => {
-      const plan = seedPlans.large.generated!;
-      const started = performance.now();
+    const { store, report } = await seededStore('memory', 'large');
+    const seedingMilliseconds = performance.now() - started;
 
-      const { store, report } = await seededStore(storage, 'large');
-      const seedingMilliseconds = performance.now() - started;
+    expect(seedingMilliseconds).toBeLessThan(30_000);
+    expect(report).toMatchObject({
+      seedSize: 'large',
+      speciesSeeded: handWrittenCounts.species + plan.species,
+      animalsSeeded: handWrittenCounts.animals + plan.animals,
+      invoicesSeeded: handWrittenCounts.invoices + plan.invoices,
+    });
+    expect((await store.tableRowCounts()).invoiceItems).toBe(
+      handWrittenCounts.invoiceItems + plan.invoiceItems,
+    );
+    const page = await store.listAnimals({ query: 'the ' });
+    expect(page.items).toHaveLength(page.limit);
+    expect(page.total).toBeGreaterThan(page.limit);
 
-      expect(seedingMilliseconds).toBeLessThan(30_000);
-      expect(report).toMatchObject({
-        seedSize: 'large',
-        speciesSeeded: handWrittenCounts.species + plan.species,
-        animalsSeeded: handWrittenCounts.animals + plan.animals,
-        invoicesSeeded: handWrittenCounts.invoices + plan.invoices,
-      });
-      expect((await store.tableRowCounts()).invoiceItems).toBe(
-        handWrittenCounts.invoiceItems + plan.invoiceItems,
-      );
-      const page = await store.listAnimals({ query: 'the ' });
-      expect(page.items).toHaveLength(page.limit);
-      expect(page.total).toBeGreaterThan(page.limit);
-
-      const errors = await validationErrors(
-        validatableDocument(await internals(store).io.dump()),
-      );
-      expect(errors).toStrictEqual({});
-    }, 60_000);
-  },
-);
+    const errors = await validationErrors(
+      validatableDocument(await internals(store).io.dump()),
+    );
+    expect(errors).toStrictEqual({});
+  }, 60_000);
+});
