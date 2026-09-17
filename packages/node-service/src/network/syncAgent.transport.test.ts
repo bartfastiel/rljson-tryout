@@ -131,6 +131,7 @@ describe('SyncAgent over the hub transport', () => {
           (invoice) => invoice.id === issued.id,
         ),
       );
+      await until(() => receiver.agent.snapshot().received === 1);
       expect(await receiver.store.getInvoice(issued.id)).toStrictEqual(issued);
       expect(await receiver.store.holdsChangeSet(issued.changeSetHash!)).toBe(
         true,
@@ -173,6 +174,7 @@ describe('SyncAgent over the hub transport', () => {
           (await client.store.getAnimal('bowser-the-guard-dog'))?.hash ===
           renamed.hash,
       );
+      await until(() => client.agent.snapshot().received === 1);
       const history = (await client.store.getAnimalHistory(
         'bowser-the-guard-dog',
       ))!;

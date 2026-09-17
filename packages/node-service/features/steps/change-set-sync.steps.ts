@@ -182,6 +182,9 @@ describe.each(storageKinds)('over the %s store', (storage) => {
               await until(async () =>
                 (await listedInvoiceIds(world(name))).includes(issued.id),
               );
+              await until(
+                async () => (await status(world(name))).sync.received === 1,
+              );
             }
           },
         );
@@ -280,6 +283,9 @@ describe.each(storageKinds)('over the %s store', (storage) => {
                     world(name),
                     'bowser-the-guard-dog',
                   )) === 'Bowser the Retired Guard Dog',
+              );
+              await until(
+                async () => (await status(world(name))).sync.received === 1,
               );
             }
           },
