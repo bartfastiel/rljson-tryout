@@ -1,8 +1,11 @@
-Feature: Traits as a multi-reference
-  Every animal can carry zero or more traits, stored on `animals.traitsRefs`
-  as a `jsonArray` of trait hashes. A visitor filters the animal list by one
-  trait, sees an animal's traits by name on its detail page, and can combine
-  a trait filter with the existing species filter.
+Feature: Traits as a multi-reference and as a junction table
+  Every animal can carry zero or more traits, stored either on
+  `animals.traitsRefs` as a `jsonArray` of trait hashes (slice B5) or as rows
+  of the `animalTraits` junction table (slice B6); `docs/findings/n-to-m.md`
+  compares the two. A visitor filters the animal list by one trait, sees an
+  animal's traits by name on its detail page, and can combine a trait filter
+  with the existing species filter; the filter answers identically no matter
+  which representation is configured.
 
   Scenario: Filtering by a trait returns only animals carrying it
     Given a freshly seeded pet shop store
@@ -24,3 +27,14 @@ Feature: Traits as a multi-reference
     Given a freshly seeded pet shop store
     When the client requests the animals with the trait "telekinesis"
     Then the response is an empty list
+
+  Scenario Outline: The trait filter answers identically in both trait relation modes
+    Given a freshly seeded pet shop store reading traits through "<mode>"
+    When the client requests the animals with the trait "competitive-streak"
+    Then every returned animal carries the trait "competitive-streak"
+    And not every seeded animal is returned
+
+    Examples:
+      | mode            |
+      | multi-reference |
+      | junction        |

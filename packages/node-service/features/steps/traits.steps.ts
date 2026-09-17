@@ -4,6 +4,7 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import type { FastifyInstance } from 'fastify';
 import { expect } from 'vitest';
 
+import type { TraitRelationMode } from '../../src/store/traitRelation.ts';
 import { closeWorld, createWorld, type World } from '../world.ts';
 
 const feature = await loadFeature(
@@ -20,7 +21,7 @@ type AnimalDetailResponse = {
   traits: { id: string; name: string }[];
 };
 
-describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
+describeFeature(feature, ({ Scenario, ScenarioOutline, AfterEachScenario }) => {
   let world: World | undefined;
 
   AfterEachScenario(async () => {
@@ -159,6 +160,55 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
 
       Then('the response is an empty list', () => {
         expect(response.json()).toStrictEqual([]);
+      });
+    },
+  );
+
+  ScenarioOutline(
+    'The trait filter answers identically in both trait relation modes',
+    ({ Given, When, Then, And }, variables) => {
+      let response: Awaited<ReturnType<FastifyInstance['inject']>>;
+
+      Given(
+        'a freshly seeded pet shop store reading traits through "<mode>"',
+        async () => {
+          world = await createWorld(variables.mode as TraitRelationMode);
+          await world.store.seedIfEmpty();
+        },
+      );
+
+      When(
+        'the client requests the animals with the trait "competitive-streak"',
+        async () => {
+          response = await world!.server.inject({
+            method: 'GET',
+            url: '/api/animals?trait=competitive-streak',
+          });
+        },
+      );
+
+      Then(
+        'every returned animal carries the trait "competitive-streak"',
+        async () => {
+          const animals = response.json<AnimalListEntry[]>();
+          expect(animals.length).toBeGreaterThan(0);
+
+          for (const animal of animals) {
+            const detailResponse = await world!.server.inject({
+              method: 'GET',
+              url: `/api/animals/${animal.id}`,
+            });
+            const detail = detailResponse.json<AnimalDetailResponse>();
+            expect(
+              detail.traits.some((trait) => trait.id === 'competitive-streak'),
+            ).toBe(true);
+          }
+        },
+      );
+
+      And('not every seeded animal is returned', () => {
+        const animals = response.json<AnimalListEntry[]>();
+        expect(animals.length).toBeLessThan(10);
       });
     },
   );
