@@ -53,8 +53,10 @@ jobs:
       run:
         working-directory: infra/terraform/workloads
     env:
-      # The stage requires an image tag; a destroy never uses it.
+      # The stage requires these variables and validates them even for a
+      # destroy, which never uses them; the image tag can be anything.
       TF_VAR_image_tag: unused
+      TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7

@@ -11,10 +11,11 @@ workflows switch it off and on with one click each:
 | [`Up`](../.github/workflows/up.yml)     | Applies the cluster, then the production workloads with the image of the current `main` commit, and verifies both. |
 
 Both run only from `main` and both need the same secrets and variables as
-the pipeline (`HCLOUD_TOKEN`, `AWS_ROLE_ARN`). They share the concurrency
-groups `cluster` and `workloads-production` with the pipeline, so they queue
-behind a deployment that is in flight instead of racing it, and a common
-group `lifecycle` keeps `Up` and `Down` from ever overlapping each other.
+the pipeline (`HCLOUD_TOKEN`, `AWS_ROLE_ARN`, `LETSENCRYPT_EMAIL`). They
+share the concurrency groups `cluster` and `workloads-production` with the
+pipeline, so they queue behind a deployment that is in flight instead of
+racing it, and a common group `lifecycle` keeps `Up` and `Down` from ever
+overlapping each other.
 
 ## Bringing the system down
 
