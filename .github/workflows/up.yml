@@ -105,7 +105,7 @@ jobs:
     env:
       # The pipeline pushed this tag when the commit landed on main.
       TF_VAR_image_tag: ${{ github.sha }}
-      TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
+      TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7

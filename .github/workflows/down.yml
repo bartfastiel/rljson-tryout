@@ -56,7 +56,7 @@ jobs:
       # The stage requires these variables and validates them even for a
       # destroy, which never uses them; the image tag can be anything.
       TF_VAR_image_tag: unused
-      TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
+      TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
