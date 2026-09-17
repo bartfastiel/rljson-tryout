@@ -5,9 +5,12 @@ import {
   timeId,
   type BuffetsTable,
   type ComponentsTable,
+  type InsertHistoryTable,
   type TableCfg,
 } from '@rljson/rljson';
 import {
+  animalChangeProblems,
+  animalTraitId,
   animalTraitsInsertHistoryTableCfg,
   animalTraitsSeed,
   animalTraitsTableCfg,
@@ -19,6 +22,7 @@ import {
   breedersTableCfg,
   changeSetsInsertHistoryTableCfg,
   changeSetsTableCfg,
+  currentRows,
   customersInsertHistoryTableCfg,
   customersSeed,
   customersTableCfg,
@@ -32,6 +36,7 @@ import {
   invoicesSeed,
   invoicesTableCfg,
   issueInvoiceChangeSetId,
+  nextInvoiceSequence,
   personsInsertHistoryTableCfg,
   personsSeed,
   personsTableCfg,
@@ -41,6 +46,9 @@ import {
   traitsInsertHistoryTableCfg,
   traitsSeed,
   traitsTableCfg,
+  updateAnimalChangeSetId,
+  versionsOf,
+  type AnimalChanges,
   type ChangeSetItem,
   type HashedAnimalRow,
   type HashedAnimalTraitRow,
@@ -53,6 +61,7 @@ import {
   type HashedSpeciesRow,
   type HashedTraitRow,
   type InvoiceStatus,
+  type VersionHistoryRow,
 } from '@rljson-tryout/domain';
 
 import {
@@ -62,15 +71,6 @@ import {
   type TraitRelationMode,
 } from './traitRelation.ts';
 
-const speciesRoute = Route.fromFlat(speciesTableCfg.key);
-const animalsRoute = Route.fromFlat(animalsTableCfg.key);
-const traitsRoute = Route.fromFlat(traitsTableCfg.key);
-const personsRoute = Route.fromFlat(personsTableCfg.key);
-const breedersRoute = Route.fromFlat(breedersTableCfg.key);
-const animalTraitsRoute = Route.fromFlat(animalTraitsTableCfg.key);
-const customersRoute = Route.fromFlat(customersTableCfg.key);
-const invoicesRoute = Route.fromFlat(invoicesTableCfg.key);
-const invoiceItemsRoute = Route.fromFlat(invoiceItemsTableCfg.key);
 const changeSetsRoute = Route.fromFlat(changeSetsTableCfg.key);
 
 /**
@@ -191,6 +191,46 @@ export type AnimalDetail = AnimalWithSpecies & {
   traits: TraitSummary[];
   breeder: AnimalBreeder | null;
 };
+
+/**
+ * One version of an animal as `PetShopStore.getAnimalHistory` lists it, in
+ * the shape `GET /api/animals/:id/history` serves (roadmap section 2.5):
+ * the version's `hash`, the `timeId` of the InsertHistory row that wrote
+ * it, the `timeId`s in that row's `previous`, whether the version is
+ * `current` (a tip of the animal's DAG, `docs/findings/entity-versions.md`),
+ * and the fields a history list compares between versions. References are
+ * resolved to stable ids the way the list does (`null` for a reference
+ * that does not resolve); the story is reported by its length only, since
+ * the full text of every version is what `GET /api/animals/:id?version=`
+ * is for.
+ */
+export type AnimalVersion = {
+  hash: string;
+  timeId: string;
+  previous: string[];
+  current: boolean;
+  name: string;
+  priceCents: number;
+  bornOn: string;
+  speciesId: string | null;
+  breederId: string | null;
+  traitIds: string[];
+  storyLength: number;
+};
+
+/**
+ * Thrown by `PetShopStore.updateAnimal` when the changes cannot be applied:
+ * a field that is not editable, an invalid value, or a species, breeder or
+ * trait id no current row has. The route turns it into a `400 Bad Request`
+ * whose message is this error's message, written for the person who
+ * filled in the form, the same contract `InvoiceValidationError` has.
+ */
+export class AnimalValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AnimalValidationError';
+  }
+}
 
 /**
  * One customer version as `PetShopStore.listCustomers` returns it, in the
@@ -328,17 +368,61 @@ export type InvoiceDetail = {
 };
 
 /**
+ * One entity table as the store reads it: every row (every version, which
+ * is what a join by hash needs, since a reference names one exact
+ * version), the rows of its InsertHistory companion, and the current
+ * version per entity resolved through the rule of roadmap section 2.6
+ * (`currentRows`), which is what a list and a lookup by `id` need.
+ */
+type VersionedTable<Row extends { _hash: string; id: string }> = {
+  rows: Row[];
+  history: VersionHistoryRow[];
+  current: Row[];
+};
+
+/**
  * The tables an invoice needs joined, read once per call so that a list and
  * a detail resolve their references against one consistent snapshot.
+ * `invoices`, `customers` and `animals` are versioned: the list serves
+ * current invoices, `issueInvoice` resolves a customer or animal id to its
+ * current version, and every join by hash reads all versions.
  */
 type InvoiceTables = {
-  invoices: HashedInvoiceRow[];
+  invoices: VersionedTable<HashedInvoiceRow>;
   invoiceItems: HashedInvoiceItemRow[];
-  customers: HashedCustomerRow[];
+  customers: VersionedTable<HashedCustomerRow>;
   persons: HashedPersonRow[];
-  animals: HashedAnimalRow[];
+  animals: VersionedTable<HashedAnimalRow>;
   species: HashedSpeciesRow[];
   changeSets: HashedChangeSetRow[];
+};
+
+/**
+ * The tables an animal needs joined, read once per call: the animals
+ * themselves, the species, breeders and traits they reference (versioned,
+ * so that an edit can resolve a species, breeder or trait id to its
+ * current version while a join by hash still finds the exact version an
+ * animal row names), the persons behind the breeders, and the
+ * `TraitRelation` for the configured mode, built from whichever table
+ * carries the relation (`docs/findings/n-to-m.md`).
+ */
+type AnimalTables = {
+  animals: VersionedTable<HashedAnimalRow>;
+  species: VersionedTable<HashedSpeciesRow>;
+  breeders: VersionedTable<HashedBreederRow>;
+  traits: VersionedTable<HashedTraitRow>;
+  persons: HashedPersonRow[];
+  traitRelation: TraitRelation;
+};
+
+/**
+ * What `PetShopStore.writeRow` reports about a row it wrote: the change
+ * set items naming the row and its InsertHistory row, and the `timeId` of
+ * that history row, which a follow-up version names in `previous`.
+ */
+type WrittenRow = {
+  changeSetItems: ChangeSetItem[];
+  timeId: string;
 };
 
 const byHash = <Row extends { _hash: string }>(
@@ -372,7 +456,7 @@ const resolveInvoiceItems = (
   invoice: HashedInvoiceRow,
   tables: InvoiceTables,
 ): InvoiceItem[] => {
-  const animalsByHash = byHash(tables.animals);
+  const animalsByHash = byHash(tables.animals.rows);
   const speciesByHash = byHash(tables.species);
 
   return tables.invoiceItems
@@ -418,7 +502,7 @@ const invoiceSummary = (
   invoice: HashedInvoiceRow,
   tables: InvoiceTables,
 ): InvoiceSummary => {
-  const customer = byHash(tables.customers).get(invoice.customerRef);
+  const customer = byHash(tables.customers.rows).get(invoice.customerRef);
   const items = resolveInvoiceItems(invoice, tables);
 
   return {
@@ -446,7 +530,7 @@ const invoiceDetail = (
   invoice: HashedInvoiceRow,
   tables: InvoiceTables,
 ): InvoiceDetail => {
-  const customer = byHash(tables.customers).get(invoice.customerRef);
+  const customer = byHash(tables.customers.rows).get(invoice.customerRef);
   const items = resolveInvoiceItems(invoice, tables);
 
   return {
@@ -656,38 +740,31 @@ export class PetShopStore {
     invoicesSeeded: number;
   }> {
     const speciesSeeded = await this.seedTableIfEmpty(
-      speciesTableCfg.key,
-      speciesRoute,
+      speciesTableCfg,
       speciesSeed,
     );
     const traitsSeeded = await this.seedTableIfEmpty(
-      traitsTableCfg.key,
-      traitsRoute,
+      traitsTableCfg,
       traitsSeed,
     );
     const personsSeeded = await this.seedTableIfEmpty(
-      personsTableCfg.key,
-      personsRoute,
+      personsTableCfg,
       personsSeed,
     );
     const breedersSeeded = await this.seedTableIfEmpty(
-      breedersTableCfg.key,
-      breedersRoute,
+      breedersTableCfg,
       breedersSeed,
     );
     const customersSeeded = await this.seedTableIfEmpty(
-      customersTableCfg.key,
-      customersRoute,
+      customersTableCfg,
       customersSeed,
     );
     const animalsSeeded = await this.seedTableIfEmpty(
-      animalsTableCfg.key,
-      animalsRoute,
+      animalsTableCfg,
       animalsSeed,
     );
     const animalTraitsSeeded = await this.seedTableIfEmpty(
-      animalTraitsTableCfg.key,
-      animalTraitsRoute,
+      animalTraitsTableCfg,
       animalTraitsSeed,
     );
     const invoicesSeeded = await this.seedInvoicesIfEmpty();
@@ -705,8 +782,7 @@ export class PetShopStore {
   }
 
   private async seedTableIfEmpty(
-    tableKey: string,
-    route: Route,
+    tableCfg: TableCfg,
     rows: readonly (
       | HashedSpeciesRow
       | HashedTraitRow
@@ -717,13 +793,14 @@ export class PetShopStore {
       | HashedAnimalTraitRow
     )[],
   ): Promise<number> {
-    if ((await this.io.rowCount(tableKey)) > 0) {
+    if ((await this.io.rowCount(tableCfg.key)) > 0) {
       return 0;
     }
 
+    const route = Route.fromFlat(tableCfg.key);
     for (const row of rows) {
       await this.db.insert(route, {
-        [tableKey]: { _type: 'components', _data: [row] },
+        [tableCfg.key]: { _type: 'components', _data: [row] },
       });
     }
 
@@ -743,198 +820,157 @@ export class PetShopStore {
   }
 
   /**
-   * Reads the tables `listAnimals` and `getAnimal` both need and builds the
-   * `TraitRelation` for the configured `traitRelationMode`: in
-   * `multi-reference` mode `animals` already carries every animal's trait
-   * hashes in `traitsRefs`, so `animalTraits` is not read at all; in
-   * `junction` mode `animalTraits` is read as one additional table instead,
-   * since the relation lives there rather than on `animals`
-   * (`docs/findings/n-to-m.md`, "query shape"). This is the one place
-   * `listAnimals` and `getAnimal` depend on which representation is active;
-   * both build their answer from the interface `TraitRelation` afterwards,
-   * never from `HashedAnimalRow.traitsRefs` or `animalTraits` directly.
+   * Every row of one components table. `Db.get` with an empty `where` is
+   * the one read that is reliable for a table with reference columns
+   * (`docs/findings/db-basics.md`, "Filtering by id"), so every method
+   * below reads whole tables and joins or filters in JavaScript.
    */
-  private async readAnimalTables(): Promise<{
-    animalsTable: ComponentsTable<HashedAnimalRow>;
-    speciesTable: ComponentsTable<HashedSpeciesRow>;
-    breedersTable: ComponentsTable<HashedBreederRow>;
-    personsTable: ComponentsTable<HashedPersonRow>;
-    traitsTable: ComponentsTable<HashedTraitRow>;
-    traitRelation: TraitRelation;
-  }> {
-    if (this.traitRelationMode === 'junction') {
-      const [
-        { rljson: animalsContainer },
-        { rljson: speciesContainer },
-        { rljson: breedersContainer },
-        { rljson: personsContainer },
-        { rljson: traitsContainer },
-        { rljson: animalTraitsContainer },
-      ] = await Promise.all([
-        this.db.get(animalsRoute, {}),
-        this.db.get(speciesRoute, {}),
-        this.db.get(breedersRoute, {}),
-        this.db.get(personsRoute, {}),
-        this.db.get(traitsRoute, {}),
-        this.db.get(animalTraitsRoute, {}),
-      ]);
-      const animalsTable = animalsContainer[
-        animalsTableCfg.key
-      ] as ComponentsTable<HashedAnimalRow>;
-      const speciesTable = speciesContainer[
-        speciesTableCfg.key
-      ] as ComponentsTable<HashedSpeciesRow>;
-      const breedersTable = breedersContainer[
-        breedersTableCfg.key
-      ] as ComponentsTable<HashedBreederRow>;
-      const personsTable = personsContainer[
-        personsTableCfg.key
-      ] as ComponentsTable<HashedPersonRow>;
-      const traitsTable = traitsContainer[
-        traitsTableCfg.key
-      ] as ComponentsTable<HashedTraitRow>;
-      const animalTraitsTable = animalTraitsContainer[
-        animalTraitsTableCfg.key
-      ] as ComponentsTable<HashedAnimalTraitRow>;
-
-      return {
-        animalsTable,
-        speciesTable,
-        breedersTable,
-        personsTable,
-        traitsTable,
-        traitRelation: new JunctionTraitRelation(
-          animalTraitsTable._data,
-          traitsTable._data,
-        ),
-      };
-    }
-
-    const [
-      { rljson: animalsContainer },
-      { rljson: speciesContainer },
-      { rljson: breedersContainer },
-      { rljson: personsContainer },
-      { rljson: traitsContainer },
-    ] = await Promise.all([
-      this.db.get(animalsRoute, {}),
-      this.db.get(speciesRoute, {}),
-      this.db.get(breedersRoute, {}),
-      this.db.get(personsRoute, {}),
-      this.db.get(traitsRoute, {}),
-    ]);
-    const animalsTable = animalsContainer[
-      animalsTableCfg.key
-    ] as ComponentsTable<HashedAnimalRow>;
-    const speciesTable = speciesContainer[
-      speciesTableCfg.key
-    ] as ComponentsTable<HashedSpeciesRow>;
-    const breedersTable = breedersContainer[
-      breedersTableCfg.key
-    ] as ComponentsTable<HashedBreederRow>;
-    const personsTable = personsContainer[
-      personsTableCfg.key
-    ] as ComponentsTable<HashedPersonRow>;
-    const traitsTable = traitsContainer[
-      traitsTableCfg.key
-    ] as ComponentsTable<HashedTraitRow>;
-
-    return {
-      animalsTable,
-      speciesTable,
-      breedersTable,
-      personsTable,
-      traitsTable,
-      traitRelation: new MultiReferenceTraitRelation(
-        animalsTable._data,
-        traitsTable._data,
-      ),
-    };
+  private async readRows<Row extends { _hash: string }>(
+    tableCfg: TableCfg,
+  ): Promise<Row[]> {
+    const { rljson } = await this.db.get(Route.fromFlat(tableCfg.key), {});
+    const table = rljson[tableCfg.key] as ComponentsTable<Row>;
+    return table._data;
   }
 
   /**
-   * Every species version in the store, ordered by `id`. The store hands
-   * rows back sorted by hash, which is stable but meaningless to a reader.
+   * Every row of one entity table together with its InsertHistory rows and
+   * the current version per entity. This is the one place the rule of
+   * roadmap section 2.6 enters the store: every list, every lookup by `id`
+   * and every edit reads its entity table through here
+   * (`docs/findings/entity-versions.md`).
+   */
+  private async readVersioned<Row extends { _hash: string; id: string }>(
+    tableCfg: TableCfg,
+  ): Promise<VersionedTable<Row>> {
+    const historyTableKey = `${tableCfg.key}InsertHistory`;
+    const [rows, historyDump] = await Promise.all([
+      this.readRows<Row>(tableCfg),
+      this.db.getInsertHistory(tableCfg.key),
+    ]);
+    const historyTable = historyDump[
+      historyTableKey
+    ] as InsertHistoryTable<string>;
+    const history = historyTable._data as VersionHistoryRow[];
+
+    return { rows, history, current: currentRows(rows, history, tableCfg.key) };
+  }
+
+  /**
+   * Reads the tables `listAnimals`, `getAnimal`, `getAnimalHistory` and
+   * `updateAnimal` need and builds the `TraitRelation` for the configured
+   * `traitRelationMode`: in `multi-reference` mode `animals` already carries
+   * every animal's trait hashes in `traitsRefs`, so `animalTraits` is not
+   * read at all; in `junction` mode `animalTraits` is read as one additional
+   * table instead, since the relation lives there rather than on `animals`
+   * (`docs/findings/n-to-m.md`, "query shape"). The relation is built from
+   * every version of every row, so it answers for an old animal version
+   * (whose junction rows name the old hash) exactly as for the current one.
+   * This is the one place the animal methods depend on which representation
+   * is active; all of them build their answer from the interface
+   * `TraitRelation` afterwards, never from `HashedAnimalRow.traitsRefs` or
+   * `animalTraits` directly.
+   */
+  private async readAnimalTables(): Promise<AnimalTables> {
+    const [animals, species, breeders, traits, persons] = await Promise.all([
+      this.readVersioned<HashedAnimalRow>(animalsTableCfg),
+      this.readVersioned<HashedSpeciesRow>(speciesTableCfg),
+      this.readVersioned<HashedBreederRow>(breedersTableCfg),
+      this.readVersioned<HashedTraitRow>(traitsTableCfg),
+      this.readRows<HashedPersonRow>(personsTableCfg),
+    ]);
+    const traitRelation =
+      this.traitRelationMode === 'junction'
+        ? new JunctionTraitRelation(
+            await this.readRows<HashedAnimalTraitRow>(animalTraitsTableCfg),
+            traits.rows,
+          )
+        : new MultiReferenceTraitRelation(animals.rows, traits.rows);
+
+    return { animals, species, breeders, traits, persons, traitRelation };
+  }
+
+  /**
+   * Every current species version in the store, ordered by `id`.
    */
   async listSpecies(): Promise<HashedSpeciesRow[]> {
-    const { rljson } = await this.db.get(speciesRoute, {});
-    const table = rljson[
-      speciesTableCfg.key
-    ] as ComponentsTable<HashedSpeciesRow>;
-
-    return [...table._data].sort((left, right) =>
-      left.id.localeCompare(right.id),
-    );
+    return (await this.readVersioned<HashedSpeciesRow>(speciesTableCfg))
+      .current;
   }
 
   /**
-   * Every trait version in the store, ordered by `id`, in the shape `GET
-   * /api/traits` serves (roadmap section 2.5).
+   * Every current trait version in the store, ordered by `id`, in the
+   * shape `GET /api/traits` serves (roadmap section 2.5).
    */
   async listTraits(): Promise<Trait[]> {
-    const { rljson } = await this.db.get(traitsRoute, {});
-    const table = rljson[traitsTableCfg.key] as ComponentsTable<HashedTraitRow>;
+    const traits = await this.readVersioned<HashedTraitRow>(traitsTableCfg);
 
-    return [...table._data]
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((row) => ({
-        id: row.id,
-        hash: row._hash,
-        name: row.name,
-        description: row.description,
-      }));
+    return traits.current.map((row) => ({
+      id: row.id,
+      hash: row._hash,
+      name: row.name,
+      description: row.description,
+    }));
   }
 
   /**
-   * Every breeder version in the store with its person joined, ordered by
-   * `id`, in the shape `GET /api/breeders` serves (roadmap section 2.5).
-   * Fetches `breeders` and `persons` separately and joins them with a local
-   * `Map`, the same explicit fallback `listAnimals` uses for `species`
-   * (`docs/findings/db-basics.md`, "Joining a reference"). A breeder whose
-   * `personRef` does not resolve gets `person: null` instead of failing the
-   * whole list.
+   * Every current breeder version in the store with its person joined,
+   * ordered by `id`, in the shape `GET /api/breeders` serves (roadmap
+   * section 2.5). Fetches `breeders` and `persons` separately and joins
+   * them with a local `Map`, the same explicit fallback `listAnimals` uses
+   * for `species` (`docs/findings/db-basics.md`, "Joining a reference"). A
+   * breeder whose `personRef` does not resolve gets `person: null` instead
+   * of failing the whole list.
    */
   async listBreeders(): Promise<Breeder[]> {
-    const [{ rljson: breedersContainer }, { rljson: personsContainer }] =
-      await Promise.all([
-        this.db.get(breedersRoute, {}),
-        this.db.get(personsRoute, {}),
-      ]);
-    const breedersTable = breedersContainer[
-      breedersTableCfg.key
-    ] as ComponentsTable<HashedBreederRow>;
-    const personsTable = personsContainer[
-      personsTableCfg.key
-    ] as ComponentsTable<HashedPersonRow>;
-    const personsByHash = new Map(
-      personsTable._data.map((person) => [person._hash, person]),
-    );
+    const [breeders, persons] = await Promise.all([
+      this.readVersioned<HashedBreederRow>(breedersTableCfg),
+      this.readRows<HashedPersonRow>(personsTableCfg),
+    ]);
+    const personsByHash = byHash(persons);
 
-    return [...breedersTable._data]
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((breeder) => ({
-        id: breeder.id,
-        hash: breeder._hash,
-        farmName: breeder.farmName,
-        suppliesSince: breeder.suppliesSince,
-        person: resolveBreederPerson(breeder, personsByHash),
-      }));
+    return breeders.current.map((breeder) => ({
+      id: breeder.id,
+      hash: breeder._hash,
+      farmName: breeder.farmName,
+      suppliesSince: breeder.suppliesSince,
+      person: resolveBreederPerson(breeder, personsByHash),
+    }));
   }
 
   /**
-   * Every animal version in the store with its species and breeder joined,
-   * optionally narrowed to one species, one breeder, one trait, or any
-   * combination, ordered by `id`. Fetches `animals`, `species`, `breeders`,
-   * `persons` and `traits` (and, in `junction` mode, `animalTraits`)
-   * separately and joins them with local `Map`s, the explicit fallback of
-   * roadmap section 3.2: the rljson route join `animals/species` was tried
-   * first, but it silently drops an animal row whose `speciesRef` does not
-   * resolve instead of including it with a missing species, which defeats
-   * listing every animal (`docs/findings/db-basics.md`, "Joining a
-   * reference"). Filtering happens here, in plain JavaScript, after this
-   * full read, for the same reason `getAnimal` cannot filter `db.get` by
-   * `where`: `id` collides with a column of a *referenced* table and is
-   * silently mismatched by `ComponentController`'s reference resolution
+   * The `_hash` of every animal version that carries the trait with this
+   * id, in any version of the trait: an animal row names one exact trait
+   * version, so a trait id is matched through every hash it ever had.
+   */
+  private static animalHashesWithTraitId(
+    tables: AnimalTables,
+    traitId: string,
+  ): Set<string> {
+    return new Set(
+      tables.traits.rows
+        .filter((trait) => trait.id === traitId)
+        .flatMap((trait) =>
+          tables.traitRelation.animalHashesWithTrait(trait._hash),
+        ),
+    );
+  }
+
+  /**
+   * Every current animal version in the store with its species and breeder
+   * joined, optionally narrowed to one species, one breeder, one trait, or
+   * any combination, ordered by `id`. Fetches `animals`, `species`,
+   * `breeders`, `persons` and `traits` (and, in `junction` mode,
+   * `animalTraits`) separately and joins them with local `Map`s, the
+   * explicit fallback of roadmap section 3.2: the rljson route join
+   * `animals/species` was tried first, but it silently drops an animal row
+   * whose `speciesRef` does not resolve instead of including it with a
+   * missing species, which defeats listing every animal
+   * (`docs/findings/db-basics.md`, "Joining a reference"). Filtering
+   * happens here, in plain JavaScript, after this full read, for the same
+   * reason `getAnimal` cannot filter `db.get` by `where`: `id` collides
+   * with a column of a *referenced* table and is silently mismatched by
+   * `ComponentController`'s reference resolution
    * (`docs/findings/db-basics.md`, "Filtering by id"), and `traitId` would
    * have to be resolved element by element against whichever table carries
    * the relation besides, a shape `where` cannot express at all. An unknown
@@ -947,32 +983,13 @@ export class PetShopStore {
    * `TraitRelation`, simply does not match.
    */
   async listAnimals(filter: AnimalFilter = {}): Promise<AnimalWithSpecies[]> {
-    const {
-      animalsTable,
-      speciesTable,
-      breedersTable,
-      traitsTable,
-      traitRelation,
-    } = await this.readAnimalTables();
-    const speciesByHash = new Map(
-      speciesTable._data.map((species) => [species._hash, species]),
-    );
-    const breedersByHash = new Map(
-      breedersTable._data.map((breeder) => [breeder._hash, breeder]),
-    );
-    const traitHashById = new Map(
-      traitsTable._data.map((trait) => [trait.id, trait._hash]),
-    );
-
-    let matchingAnimalHashes: Set<string> | undefined;
-    if (filter.traitId !== undefined) {
-      const traitHash = traitHashById.get(filter.traitId);
-      const animalHashes =
-        traitHash === undefined
-          ? []
-          : traitRelation.animalHashesWithTrait(traitHash);
-      matchingAnimalHashes = new Set(animalHashes);
-    }
+    const tables = await this.readAnimalTables();
+    const speciesByHash = byHash(tables.species.rows);
+    const breedersByHash = byHash(tables.breeders.rows);
+    const matchingAnimalHashes =
+      filter.traitId === undefined
+        ? undefined
+        : PetShopStore.animalHashesWithTraitId(tables, filter.traitId);
 
     const matchesFilter = (animal: HashedAnimalRow): boolean => {
       if (filter.speciesId !== undefined) {
@@ -995,7 +1012,7 @@ export class PetShopStore {
       return true;
     };
 
-    const entries = animalsTable._data.filter(matchesFilter).map((animal) => {
+    return tables.animals.current.filter(matchesFilter).map((animal) => {
       const species = speciesByHash.get(animal.speciesRef);
       const breeder = breedersByHash.get(animal.breederRef);
 
@@ -1011,61 +1028,31 @@ export class PetShopStore {
         priceCents: animal.priceCents,
       };
     });
-
-    return entries.sort((left, right) => left.id.localeCompare(right.id));
   }
 
   /**
-   * The current version of one animal with its species and breeder joined,
-   * its traits resolved and its full `backgroundStory`, or `undefined` when
-   * no animal has this id.
-   *
-   * Filtering `db.get(animalsRoute, { id })` directly looks like the obvious
-   * approach (`docs/findings/db-basics.md`, "Get") and works for columns
-   * such as `bornOn`, but not for `id`: `ComponentController._referenceColumns`
-   * resolves to the *referenced* table's columns instead of the referencing
-   * table's own ref columns, so a `where` key that happens to also be a
-   * column of a referenced table (`id`, `name`, `_hash`) is wrongly treated
-   * as a foreign-key lookup and matches nothing (see "Filtering by id" in
-   * `docs/findings/db-basics.md`). This method therefore reuses
-   * `listAnimals`'s explicit fallback instead: read every table in full and
-   * join them with local `Map`s, then find the animal by `id` in
-   * JavaScript. An animal whose `speciesRef` does not resolve gets
-   * `speciesId` and `speciesName` of `null`, the same tolerance
-   * `listAnimals` has; a trait the configured `TraitRelation` cannot resolve
-   * to a stored trait is simply left out of `traits`; a `breederRef` that
-   * does not resolve gives `breeder: null` (see `resolveAnimalBreeder`).
+   * One animal version with its species and breeder joined, its traits
+   * resolved and its full `backgroundStory`, the shape `getAnimal` and
+   * `updateAnimal` return. An animal whose `speciesRef` does not resolve
+   * gets `speciesId` and `speciesName` of `null`, the same tolerance
+   * `listAnimals` has; a trait the configured `TraitRelation` cannot
+   * resolve to a stored trait is simply left out of `traits`; a
+   * `breederRef` that does not resolve gives `breeder: null` (see
+   * `resolveAnimalBreeder`).
    */
-  async getAnimal(id: string): Promise<AnimalDetail | undefined> {
-    const {
-      animalsTable,
-      speciesTable,
-      breedersTable,
-      personsTable,
-      traitsTable,
-      traitRelation,
-    } = await this.readAnimalTables();
-
-    const animal = animalsTable._data.find((row) => row.id === id);
-    if (animal === undefined) {
-      return undefined;
-    }
-
-    const speciesByHash = new Map(
-      speciesTable._data.map((species) => [species._hash, species]),
-    );
-    const breedersByHash = new Map(
-      breedersTable._data.map((breeder) => [breeder._hash, breeder]),
-    );
-    const personsByHash = new Map(
-      personsTable._data.map((person) => [person._hash, person]),
-    );
+  private static animalDetail(
+    animal: HashedAnimalRow,
+    tables: AnimalTables,
+  ): AnimalDetail {
+    const speciesByHash = byHash(tables.species.rows);
+    const breedersByHash = byHash(tables.breeders.rows);
+    const personsByHash = byHash(tables.persons);
     const traitsById = new Map(
-      traitsTable._data.map((trait) => [trait.id, trait]),
+      tables.traits.rows.map((trait) => [trait.id, trait]),
     );
     const species = speciesByHash.get(animal.speciesRef);
     const breeder = breedersByHash.get(animal.breederRef);
-    const traits: TraitSummary[] = traitRelation
+    const traits: TraitSummary[] = tables.traitRelation
       .traitIdsOfAnimal(animal._hash)
       .map((traitId) => traitsById.get(traitId))
       .filter((trait): trait is HashedTraitRow => trait !== undefined)
@@ -1092,18 +1079,221 @@ export class PetShopStore {
   }
 
   /**
-   * Every row of one components table. `Db.get` with an empty `where` is
-   * the one read that is reliable for a table with reference columns
-   * (`docs/findings/db-basics.md`, "Filtering by id"), so every method
-   * below reads whole tables and joins or filters in JavaScript.
+   * The current version of one animal with its species and breeder joined,
+   * its traits resolved and its full `backgroundStory`, or, with `version`,
+   * the version of that animal with exactly that `_hash`; `undefined` when
+   * no animal has this id or the animal has no version with that hash.
+   *
+   * Filtering `db.get(animalsRoute, { id })` directly looks like the obvious
+   * approach (`docs/findings/db-basics.md`, "Get") and works for columns
+   * such as `bornOn`, but not for `id`: `ComponentController._referenceColumns`
+   * resolves to the *referenced* table's columns instead of the referencing
+   * table's own ref columns, so a `where` key that happens to also be a
+   * column of a referenced table (`id`, `name`, `_hash`) is wrongly treated
+   * as a foreign-key lookup and matches nothing (see "Filtering by id" in
+   * `docs/findings/db-basics.md`). This method therefore reuses
+   * `listAnimals`'s explicit fallback instead: read every table in full and
+   * join them with local `Map`s, then find the animal by `id` in
+   * JavaScript.
    */
-  private async readTable<Row extends { _hash: string }>(
-    route: Route,
-    tableCfg: TableCfg,
-  ): Promise<Row[]> {
-    const { rljson } = await this.db.get(route, {});
-    const table = rljson[tableCfg.key] as ComponentsTable<Row>;
-    return table._data;
+  async getAnimal(
+    id: string,
+    options: { version?: string } = {},
+  ): Promise<AnimalDetail | undefined> {
+    const tables = await this.readAnimalTables();
+    const animal =
+      options.version === undefined
+        ? tables.animals.current.find((row) => row.id === id)
+        : versionsOf(
+            tables.animals.rows,
+            tables.animals.history,
+            animalsTableCfg.key,
+            id,
+          ).find((version) => version.row._hash === options.version)?.row;
+
+    return animal === undefined
+      ? undefined
+      : PetShopStore.animalDetail(animal, tables);
+  }
+
+  /**
+   * Every version of one animal, newest first, in the shape
+   * `GET /api/animals/:id/history` serves, or `undefined` when no animal
+   * has this id. A version is an InsertHistory row (`versionsOf`), so an
+   * edit that restores earlier content shows up as a version of its own.
+   */
+  async getAnimalHistory(id: string): Promise<AnimalVersion[] | undefined> {
+    const tables = await this.readAnimalTables();
+    const versions = versionsOf(
+      tables.animals.rows,
+      tables.animals.history,
+      animalsTableCfg.key,
+      id,
+    );
+    if (versions.length === 0) {
+      return undefined;
+    }
+
+    const speciesByHash = byHash(tables.species.rows);
+    const breedersByHash = byHash(tables.breeders.rows);
+
+    return versions.map((version) => ({
+      hash: version.row._hash,
+      timeId: version.timeId,
+      previous: version.previous,
+      current: version.current,
+      name: version.row.name,
+      priceCents: version.row.priceCents,
+      bornOn: version.row.bornOn,
+      speciesId: speciesByHash.get(version.row.speciesRef)?.id ?? null,
+      breederId: breedersByHash.get(version.row.breederRef)?.id ?? null,
+      traitIds: tables.traitRelation.traitIdsOfAnimal(version.row._hash),
+      storyLength: version.row.backgroundStory.length,
+    }));
+  }
+
+  /**
+   * Writes a new version of one animal: the current version with the
+   * given changes applied, as a new `animals` row whose InsertHistory row
+   * names the current version's `timeId` in `previous`, so that the new
+   * row becomes the animal's only tip (`docs/findings/entity-versions.md`).
+   * `speciesId`, `breederId` and `traitIds` are resolved to the current
+   * version of the named species, breeder and traits; fields the changes
+   * do not name keep the current version's values, references included.
+   * The `animalTraits` junction rows are re-created for the new animal
+   * hash, each as a new version of its pairing (`docs/findings/n-to-m.md`,
+   * "Versioning consequences"), and one change set names every row this
+   * wrote, InsertHistory rows included, the same discipline
+   * `issueInvoice` follows. Returns the new version as
+   * `GET /api/animals/:id` serves it, or `undefined` when no animal has
+   * this id. Throws `AnimalValidationError` for changes that cannot be
+   * applied and writes nothing in that case. Concurrent writes are
+   * serialised so that two edits of one animal chain instead of branching.
+   */
+  async updateAnimal(
+    id: string,
+    changes: AnimalChanges,
+  ): Promise<AnimalDetail | undefined> {
+    const write = this.pendingWrite.then(
+      () => this.updateAnimalNow(id, changes),
+      () => this.updateAnimalNow(id, changes),
+    );
+    this.pendingWrite = write;
+    return write;
+  }
+
+  private async updateAnimalNow(
+    id: string,
+    changes: AnimalChanges,
+  ): Promise<AnimalDetail | undefined> {
+    const problems = animalChangeProblems(changes);
+    if (problems.length > 0) {
+      throw new AnimalValidationError(problems.join(' '));
+    }
+    const tables = await this.readAnimalTables();
+    const current = versionsOf(
+      tables.animals.rows,
+      tables.animals.history,
+      animalsTableCfg.key,
+      id,
+    ).find((version) => version.current);
+    if (current === undefined) {
+      return undefined;
+    }
+
+    const traitIds =
+      changes.traitIds ??
+      tables.traitRelation.traitIdsOfAnimal(current.row._hash);
+    const traitsById = new Map(
+      tables.traits.current.map((trait) => [trait.id, trait]),
+    );
+    const traits = traitIds.map((traitId) => {
+      const trait = traitsById.get(traitId);
+      if (trait === undefined) {
+        throw new AnimalValidationError(`No trait with id "${traitId}".`);
+      }
+      return trait;
+    });
+    const animal = hashed({
+      id,
+      name: changes.name?.trim() ?? current.row.name,
+      speciesRef: this.resolveReference(
+        'species',
+        tables.species.current,
+        changes.speciesId,
+        current.row.speciesRef,
+      ),
+      breederRef: this.resolveReference(
+        'breeder',
+        tables.breeders.current,
+        changes.breederId,
+        current.row.breederRef,
+      ),
+      bornOn: changes.bornOn ?? current.row.bornOn,
+      priceCents: changes.priceCents ?? current.row.priceCents,
+      backgroundStory: changes.backgroundStory ?? current.row.backgroundStory,
+      traitsRefs: traits.map((trait) => trait._hash),
+    });
+
+    const written = await this.writeRow(
+      animalsTableCfg,
+      animal,
+      current.timeId,
+    );
+    const changeSetItems = [...written.changeSetItems];
+    const animalTraits =
+      await this.readVersioned<HashedAnimalTraitRow>(animalTraitsTableCfg);
+    for (const trait of traits) {
+      const pairingId = animalTraitId(id, trait.id);
+      const pairing = hashed({
+        id: pairingId,
+        animalRef: animal._hash,
+        traitRef: trait._hash,
+      });
+      const currentPairing = versionsOf(
+        animalTraits.rows,
+        animalTraits.history,
+        animalTraitsTableCfg.key,
+        pairingId,
+      ).find((version) => version.current);
+      const writtenPairing = await this.writeRow(
+        animalTraitsTableCfg,
+        pairing,
+        currentPairing?.timeId,
+      );
+      changeSetItems.push(...writtenPairing.changeSetItems);
+    }
+    await this.writeChangeSet(
+      updateAnimalChangeSetId(id, written.timeId),
+      changeSetItems,
+    );
+
+    return PetShopStore.animalDetail(animal, await this.readAnimalTables());
+  }
+
+  /**
+   * The `_hash` a reference column of the new animal version gets: the
+   * current version of the entity `changedId` names, or `currentRef`, the
+   * hash the current animal version already holds, when the changes do
+   * not name one. Throws `AnimalValidationError` when no current row has
+   * the named id.
+   */
+  private resolveReference(
+    entityName: string,
+    current: readonly { id: string; _hash: string }[],
+    changedId: string | undefined,
+    currentRef: string,
+  ): string {
+    if (changedId === undefined) {
+      return currentRef;
+    }
+    const row = current.find((candidate) => candidate.id === changedId);
+    if (row === undefined) {
+      throw new AnimalValidationError(
+        `No ${entityName} with id "${changedId}".`,
+      );
+    }
+    return row._hash;
   }
 
   /**
@@ -1125,15 +1315,12 @@ export class PetShopStore {
   private async readInvoiceTables(): Promise<InvoiceTables> {
     const [invoices, invoiceItems, customers, persons, animals, species] =
       await Promise.all([
-        this.readTable<HashedInvoiceRow>(invoicesRoute, invoicesTableCfg),
-        this.readTable<HashedInvoiceItemRow>(
-          invoiceItemsRoute,
-          invoiceItemsTableCfg,
-        ),
-        this.readTable<HashedCustomerRow>(customersRoute, customersTableCfg),
-        this.readTable<HashedPersonRow>(personsRoute, personsTableCfg),
-        this.readTable<HashedAnimalRow>(animalsRoute, animalsTableCfg),
-        this.readTable<HashedSpeciesRow>(speciesRoute, speciesTableCfg),
+        this.readVersioned<HashedInvoiceRow>(invoicesTableCfg),
+        this.readRows<HashedInvoiceItemRow>(invoiceItemsTableCfg),
+        this.readVersioned<HashedCustomerRow>(customersTableCfg),
+        this.readRows<HashedPersonRow>(personsTableCfg),
+        this.readVersioned<HashedAnimalRow>(animalsTableCfg),
+        this.readRows<HashedSpeciesRow>(speciesTableCfg),
       ]);
     const changeSets = await this.readChangeSets();
 
@@ -1149,18 +1336,19 @@ export class PetShopStore {
   }
 
   /**
-   * Every customer version in the store with its person joined, ordered by
-   * `customerNumber`, in the shape `GET /api/customers` serves (roadmap
-   * section 2.5). Same explicit two-table join `listBreeders` uses.
+   * Every current customer version in the store with its person joined,
+   * ordered by `customerNumber`, in the shape `GET /api/customers` serves
+   * (roadmap section 2.5). Same explicit two-table join `listBreeders`
+   * uses.
    */
   async listCustomers(): Promise<Customer[]> {
     const [customers, persons] = await Promise.all([
-      this.readTable<HashedCustomerRow>(customersRoute, customersTableCfg),
-      this.readTable<HashedPersonRow>(personsRoute, personsTableCfg),
+      this.readVersioned<HashedCustomerRow>(customersTableCfg),
+      this.readRows<HashedPersonRow>(personsTableCfg),
     ]);
     const personsByHash = byHash(persons);
 
-    return [...customers]
+    return [...customers.current]
       .sort((left, right) =>
         left.customerNumber.localeCompare(right.customerNumber),
       )
@@ -1173,16 +1361,16 @@ export class PetShopStore {
   }
 
   /**
-   * Every invoice in the store with its customer joined and its total
-   * summed, newest invoice number first, in the shape `GET /api/invoices`
-   * serves (roadmap section 2.5). Newest first because an invoice list is
-   * read for what happened last; `invoiceNumber` sorts in issue order
-   * (`invoiceNumbering.ts`).
+   * Every current invoice version in the store with its customer joined
+   * and its total summed, newest invoice number first, in the shape
+   * `GET /api/invoices` serves (roadmap section 2.5). Newest first because
+   * an invoice list is read for what happened last; `invoiceNumber` sorts
+   * in issue order (`invoiceNumbering.ts`).
    */
   async listInvoices(): Promise<InvoiceSummary[]> {
     const tables = await this.readInvoiceTables();
 
-    return [...tables.invoices]
+    return [...tables.invoices.current]
       .sort((left, right) =>
         right.invoiceNumber.localeCompare(left.invoiceNumber),
       )
@@ -1196,7 +1384,7 @@ export class PetShopStore {
    */
   async getInvoice(id: string): Promise<InvoiceDetail | undefined> {
     const tables = await this.readInvoiceTables();
-    const invoice = tables.invoices.find((row) => row.id === id);
+    const invoice = tables.invoices.current.find((row) => row.id === id);
 
     return invoice === undefined ? undefined : invoiceDetail(invoice, tables);
   }
@@ -1237,7 +1425,7 @@ export class PetShopStore {
   ): Promise<InvoiceDetail> {
     throwOnInvalidCommandShape(command);
     const tables = await this.readInvoiceTables();
-    const customer = tables.customers.find(
+    const customer = tables.customers.current.find(
       (row) => row.id === command.customerId,
     );
     if (customer === undefined) {
@@ -1246,7 +1434,9 @@ export class PetShopStore {
       );
     }
     const lines = command.items.map((item) => {
-      const animal = tables.animals.find((row) => row.id === item.animalId);
+      const animal = tables.animals.current.find(
+        (row) => row.id === item.animalId,
+      );
       if (animal === undefined) {
         throw new InvoiceValidationError(
           `No animal with id "${item.animalId}".`,
@@ -1255,7 +1445,13 @@ export class PetShopStore {
       return { animal, quantity: item.quantity };
     });
 
-    const number = invoiceNumber(issuedOn, tables.invoices.length + 1);
+    const number = invoiceNumber(
+      issuedOn,
+      nextInvoiceSequence(
+        issuedOn,
+        tables.invoices.rows.map((row) => row.invoiceNumber),
+      ),
+    );
     const invoice = hashed({
       id: invoiceId(number),
       invoiceNumber: number,
@@ -1263,11 +1459,8 @@ export class PetShopStore {
       issuedOn,
       status,
     });
-    const changeSetItems = await this.writeRow(
-      invoicesRoute,
-      invoicesTableCfg,
-      invoice,
-    );
+    const written = await this.writeRow(invoicesTableCfg, invoice);
+    const changeSetItems = [...written.changeSetItems];
     const items: HashedInvoiceItemRow[] = [];
     for (const [index, line] of lines.entries()) {
       const item = hashed({
@@ -1277,9 +1470,8 @@ export class PetShopStore {
         quantity: line.quantity,
         unitPriceCents: line.animal.priceCents,
       });
-      changeSetItems.push(
-        ...(await this.writeRow(invoiceItemsRoute, invoiceItemsTableCfg, item)),
-      );
+      const writtenItem = await this.writeRow(invoiceItemsTableCfg, item);
+      changeSetItems.push(...writtenItem.changeSetItems);
       items.push(item);
     }
     const changeSet = await this.writeChangeSet(
@@ -1289,7 +1481,6 @@ export class PetShopStore {
 
     return invoiceDetail(invoice, {
       ...tables,
-      invoices: [...tables.invoices, invoice],
       invoiceItems: [...tables.invoiceItems, ...items],
       changeSets: [...tables.changeSets, changeSet],
     });
@@ -1297,27 +1488,43 @@ export class PetShopStore {
 
   /**
    * Writes one row through `Db.insert`, which also writes its InsertHistory
-   * row, and returns the two change set items that name them: the row by
+   * row, and reports the two change set items that name them (the row by
    * its own hash and the history row by the hash `IoMem` stored it under,
-   * which equals the hash of the row `Db.insert` returns
-   * (`docs/findings/change-sets.md`).
+   * which equals the hash of the row `Db.insert` returns,
+   * `docs/findings/change-sets.md`) plus the history row's `timeId`. With
+   * `previousTimeId`, the row is inserted through the route
+   * `<table>@<previousTimeId>`, which is how `Db.insert` is told that the
+   * new row supersedes that version: it then writes the history row with
+   * `previous: [previousTimeId]` (`docs/findings/entity-versions.md`).
    */
   private async writeRow(
-    route: Route,
     tableCfg: TableCfg,
-    row: HashedInvoiceRow | HashedInvoiceItemRow,
-  ): Promise<ChangeSetItem[]> {
+    row:
+      | HashedAnimalRow
+      | HashedAnimalTraitRow
+      | HashedInvoiceRow
+      | HashedInvoiceItemRow,
+    previousTimeId?: string,
+  ): Promise<WrittenRow> {
+    const route = Route.fromFlat(
+      previousTimeId === undefined
+        ? tableCfg.key
+        : `${tableCfg.key}@${previousTimeId}`,
+    );
     const [historyRow] = await this.db.insert(route, {
       [tableCfg.key]: { _type: 'components', _data: [row] },
     });
 
-    return [
-      { table: tableCfg.key, ref: row._hash },
-      {
-        table: `${tableCfg.key}InsertHistory`,
-        ref: hashed({ ...historyRow })._hash,
-      },
-    ];
+    return {
+      changeSetItems: [
+        { table: tableCfg.key, ref: row._hash },
+        {
+          table: `${tableCfg.key}InsertHistory`,
+          ref: hashed({ ...historyRow })._hash,
+        },
+      ],
+      timeId: historyRow.timeId,
+    };
   }
 
   /**

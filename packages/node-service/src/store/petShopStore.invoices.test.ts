@@ -357,15 +357,17 @@ describe('PetShopStore customers and invoices', () => {
       });
     });
 
-    it('dates the invoice with the injected clock and numbers it by that year', async () => {
+    it('dates the invoice with the injected clock and starts the sequence of a new year at one, not at the row count', async () => {
       const laterStore = new PetShopStore({ today: () => '2031-01-02' });
       await laterStore.initialize();
       await laterStore.seedIfEmpty();
 
       const issued = await laterStore.issueInvoice(command);
+      const next = await laterStore.issueInvoice(command);
 
       expect(issued.issuedOn).toBe('2031-01-02');
-      expect(issued.invoiceNumber).toBe('2031-0007');
+      expect(issued.invoiceNumber).toBe('2031-0001');
+      expect(next.invoiceNumber).toBe('2031-0002');
       await laterStore.close();
     });
 
