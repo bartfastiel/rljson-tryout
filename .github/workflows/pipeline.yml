@@ -270,6 +270,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+      # Reading the repository variable through the API.
+      actions: read
     # Applies on main queue up in one group; pull request plans are read-only
     # and get a group of their own so they never displace an apply.
     concurrency:
@@ -281,10 +283,21 @@ jobs:
     env:
       # The image job pushed this tag for the current commit.
       TF_VAR_image_tag: ${{ github.sha }}
-      TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      # The runner prints every value of a step's env block into the public
+      # log and masks only secrets, so the address is fetched through the
+      # API, masked, and handed over through the environment file instead of
+      # the vars context.
+      - name: Read the Let's Encrypt email
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          letsencrypt_email="$(gh variable get LETSENCRYPT_EMAIL --repo "${GITHUB_REPOSITORY}")"
+          echo "::add-mask::${letsencrypt_email}"
+          echo "TF_VAR_letsencrypt_email=${letsencrypt_email}" >> "${GITHUB_ENV}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
