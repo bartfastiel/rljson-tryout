@@ -5,6 +5,12 @@ import {
   animalsInsertHistoryTableCfg,
   animalsSeed,
   animalsTableCfg,
+  breedersInsertHistoryTableCfg,
+  breedersSeed,
+  breedersTableCfg,
+  personsInsertHistoryTableCfg,
+  personsSeed,
+  personsTableCfg,
   speciesInsertHistoryTableCfg,
   speciesSeed,
   speciesTableCfg,
@@ -12,6 +18,8 @@ import {
   traitsSeed,
   traitsTableCfg,
   type HashedAnimalRow,
+  type HashedBreederRow,
+  type HashedPersonRow,
   type HashedSpeciesRow,
   type HashedTraitRow,
 } from '@rljson-tryout/domain';
@@ -19,6 +27,8 @@ import {
 const speciesRoute = Route.fromFlat(speciesTableCfg.key);
 const animalsRoute = Route.fromFlat(animalsTableCfg.key);
 const traitsRoute = Route.fromFlat(traitsTableCfg.key);
+const personsRoute = Route.fromFlat(personsTableCfg.key);
+const breedersRoute = Route.fromFlat(breedersTableCfg.key);
 
 /**
  * One trait as an animal carries it, resolved from a `traitsRefs` hash to
@@ -43,15 +53,59 @@ export type Trait = {
 };
 
 /**
+ * The person behind a breeder, as `PetShopStore.listBreeders` joins it in:
+ * just the fields roadmap section 2.5's `GET /api/breeders` documents,
+ * never the street or email a breeder card has no use for. `null` for the
+ * store-integrity case of a breeder whose `personRef` does not resolve to a
+ * person in the store, the same tolerance `AnimalWithSpecies.speciesName`
+ * already has for a dangling `speciesRef`.
+ */
+export type BreederPerson = {
+  id: string;
+  name: string;
+  city: string;
+};
+
+/**
+ * One breeder version as `PetShopStore.listBreeders` returns it, in the
+ * shape `GET /api/breeders` serves (roadmap section 2.5): the full
+ * `breeders` row plus its `_hash` and the person it belongs to, already
+ * joined.
+ */
+export type Breeder = {
+  id: string;
+  hash: string;
+  farmName: string;
+  suppliesSince: string;
+  person: BreederPerson | null;
+};
+
+/**
+ * The breeder behind an animal, as `PetShopStore.getAnimal` joins it in for
+ * the detail view's facts block: the breeder's own `id` and `farmName` plus
+ * the supplying person's `name` (as `personName`) and `city`. `personName`
+ * and `city` are `null` when the breeder's own `personRef` does not resolve,
+ * the same tolerance `BreederPerson` already has.
+ */
+export type AnimalBreeder = {
+  id: string;
+  farmName: string;
+  personName: string | null;
+  city: string | null;
+};
+
+/**
  * One animal as `PetShopStore.listAnimals` returns it: the fields a caller
- * needs to show a card, with the referenced species already resolved to its
- * `id` and `name` so the caller never has to look `speciesRef` up itself.
- * `speciesId` and `speciesName` are `null` for the store-integrity case of
- * an animal whose `speciesRef` does not resolve to a species in the store,
- * rather than the method failing the whole list for one broken row. Traits
- * are used to filter this list (`AnimalFilter.traitId`) but never appear in
- * it themselves, so the list stays as light as `backgroundStory` already
- * keeps it; only `AnimalDetail` carries them.
+ * needs to show a card, with the referenced species and breeder already
+ * resolved so the caller never has to look `speciesRef` or `breederRef` up
+ * itself. `speciesId`, `speciesName`, `breederId` and `breederFarmName` are
+ * `null` for the store-integrity case of an animal whose reference does not
+ * resolve to a row in the store, rather than the method failing the whole
+ * list for one broken row. Traits are used to filter this list
+ * (`AnimalFilter.traitId`) but never appear in it themselves, so the list
+ * stays as light as `backgroundStory` already keeps it; only `AnimalDetail`
+ * carries them, and only `AnimalDetail` carries the full breeder (person
+ * name and city included), per roadmap section 2.5.
  */
 export type AnimalWithSpecies = {
   id: string;
@@ -59,32 +113,40 @@ export type AnimalWithSpecies = {
   name: string;
   speciesId: string | null;
   speciesName: string | null;
+  breederId: string | null;
+  breederFarmName: string | null;
   bornOn: string;
   priceCents: number;
 };
 
 /**
- * Narrows a filter for `listAnimals` to the animals of one species and, or,
- * one trait. Both narrow the same list and combine with a logical AND.
+ * Narrows a filter for `listAnimals` to the animals of one species, one
+ * breeder and, or, one trait. All three narrow the same list and combine
+ * with a logical AND.
  */
 export type AnimalFilter = {
   speciesId?: string;
+  breederId?: string;
   traitId?: string;
 };
 
 /**
  * One animal as `PetShopStore.getAnimal` returns it: everything
- * `AnimalWithSpecies` has, plus the full `backgroundStory` and the traits
- * this animal carries, resolved to their `id` and `name`. `GET
- * /api/animals` never includes these fields so that the list stays light;
- * only the detail endpoint does (roadmap section 2.5). A `traitsRefs` entry
- * that does not resolve to a stored trait is left out of `traits` rather
- * than failing the whole request, the same tolerance `speciesId` and
- * `speciesName` already have for a dangling `speciesRef`.
+ * `AnimalWithSpecies` has, plus the full `backgroundStory`, the traits this
+ * animal carries (resolved to their `id` and `name`) and its breeder
+ * (resolved to `id`, `farmName`, the supplying person's name and city).
+ * `GET /api/animals` never includes these fields so that the list stays
+ * light; only the detail endpoint does (roadmap section 2.5). A
+ * `traitsRefs` entry that does not resolve to a stored trait is left out of
+ * `traits` rather than failing the whole request, the same tolerance
+ * `speciesId` and `speciesName` already have for a dangling `speciesRef`;
+ * `breeder` is `null` for the same reason when `breederRef` does not
+ * resolve to a breeder in the store.
  */
 export type AnimalDetail = AnimalWithSpecies & {
   backgroundStory: string;
   traits: TraitSummary[];
+  breeder: AnimalBreeder | null;
 };
 
 /**
@@ -103,6 +165,49 @@ const resolveTraits = (
     .map((traitRef) => traitsByHash.get(traitRef))
     .filter((trait): trait is HashedTraitRow => trait !== undefined)
     .map((trait) => ({ id: trait.id, name: trait.name }));
+
+/**
+ * Resolves a breeder row's `personRef` hash to the person it currently
+ * points at, the shape `PetShopStore.listBreeders` joins into
+ * `Breeder.person`. `null` when the reference does not resolve, the same
+ * tolerance a dangling `speciesRef` already gets.
+ */
+const resolveBreederPerson = (
+  breeder: HashedBreederRow,
+  personsByHash: Map<string, HashedPersonRow>,
+): BreederPerson | null => {
+  const person = personsByHash.get(breeder.personRef);
+  return person === undefined
+    ? null
+    : { id: person.id, name: person.name, city: person.city };
+};
+
+/**
+ * Resolves an animal row's `breederRef` hash to the breeder it currently
+ * points at, with that breeder's own `personRef` resolved one step further
+ * for the detail view's facts block (`AnimalDetail.breeder`). `null` when
+ * `breederRef` itself does not resolve, the same tolerance a dangling
+ * `speciesRef` already gets; `personName` and `city` are `null` when the
+ * breeder resolves but its own `personRef` does not.
+ */
+const resolveAnimalBreeder = (
+  breederRef: string,
+  breedersByHash: Map<string, HashedBreederRow>,
+  personsByHash: Map<string, HashedPersonRow>,
+): AnimalBreeder | null => {
+  const breeder = breedersByHash.get(breederRef);
+  if (breeder === undefined) {
+    return null;
+  }
+
+  const person = resolveBreederPerson(breeder, personsByHash);
+  return {
+    id: breeder.id,
+    farmName: breeder.farmName,
+    personName: person?.name ?? null,
+    city: person?.city ?? null,
+  };
+};
 
 /**
  * The node's data: an rljson `Db` over an in-memory `IoMem`. Later slices
@@ -124,6 +229,10 @@ export class PetShopStore {
       speciesInsertHistoryTableCfg,
       traitsTableCfg,
       traitsInsertHistoryTableCfg,
+      personsTableCfg,
+      personsInsertHistoryTableCfg,
+      breedersTableCfg,
+      breedersInsertHistoryTableCfg,
       animalsTableCfg,
       animalsInsertHistoryTableCfg,
     ]) {
@@ -132,15 +241,19 @@ export class PetShopStore {
   }
 
   /**
-   * Inserts the seed species, the seed traits and, once both are in place,
-   * the seed animals, skipping a step when its table already holds rows.
-   * Animals reference species and traits by hash, so both are always seeded
-   * first. Every row is inserted on its own because `Db.insert` records
-   * only the first row of a multi-row insert in the InsertHistory.
+   * Inserts the seed species, the seed traits, the seed persons, the seed
+   * breeders and, once all four are in place, the seed animals, skipping a
+   * step when its table already holds rows. Animals reference species,
+   * breeders and traits by hash, and breeders reference persons by hash, so
+   * every table an animal or a breeder points at is always seeded first.
+   * Every row is inserted on its own because `Db.insert` records only the
+   * first row of a multi-row insert in the InsertHistory.
    */
   async seedIfEmpty(): Promise<{
     speciesSeeded: number;
     traitsSeeded: number;
+    personsSeeded: number;
+    breedersSeeded: number;
     animalsSeeded: number;
   }> {
     const speciesSeeded = await this.seedTableIfEmpty(
@@ -153,19 +266,41 @@ export class PetShopStore {
       traitsRoute,
       traitsSeed,
     );
+    const personsSeeded = await this.seedTableIfEmpty(
+      personsTableCfg.key,
+      personsRoute,
+      personsSeed,
+    );
+    const breedersSeeded = await this.seedTableIfEmpty(
+      breedersTableCfg.key,
+      breedersRoute,
+      breedersSeed,
+    );
     const animalsSeeded = await this.seedTableIfEmpty(
       animalsTableCfg.key,
       animalsRoute,
       animalsSeed,
     );
 
-    return { speciesSeeded, traitsSeeded, animalsSeeded };
+    return {
+      speciesSeeded,
+      traitsSeeded,
+      personsSeeded,
+      breedersSeeded,
+      animalsSeeded,
+    };
   }
 
   private async seedTableIfEmpty(
     tableKey: string,
     route: Route,
-    rows: readonly (HashedSpeciesRow | HashedTraitRow | HashedAnimalRow)[],
+    rows: readonly (
+      | HashedSpeciesRow
+      | HashedTraitRow
+      | HashedPersonRow
+      | HashedBreederRow
+      | HashedAnimalRow
+    )[],
   ): Promise<number> {
     if ((await this.io.rowCount(tableKey)) > 0) {
       return 0;
@@ -214,36 +349,75 @@ export class PetShopStore {
   }
 
   /**
-   * Every animal version in the store with its species joined, optionally
-   * narrowed to one species, one trait, or both, ordered by `id`. Fetches
-   * `animals`, `species` and `traits` separately and joins them with local
-   * `Map`s, the explicit fallback of roadmap section 3.2: the rljson route
-   * join `animals/species` was tried first, but it silently drops an animal
-   * row whose `speciesRef` does not resolve instead of including it with a
+   * Every breeder version in the store with its person joined, ordered by
+   * `id`, in the shape `GET /api/breeders` serves (roadmap section 2.5).
+   * Fetches `breeders` and `persons` separately and joins them with a local
+   * `Map`, the same explicit fallback `listAnimals` uses for `species`
+   * (`docs/findings/db-basics.md`, "Joining a reference"). A breeder whose
+   * `personRef` does not resolve gets `person: null` instead of failing the
+   * whole list.
+   */
+  async listBreeders(): Promise<Breeder[]> {
+    const [{ rljson: breedersContainer }, { rljson: personsContainer }] =
+      await Promise.all([
+        this.db.get(breedersRoute, {}),
+        this.db.get(personsRoute, {}),
+      ]);
+    const breedersTable = breedersContainer[
+      breedersTableCfg.key
+    ] as ComponentsTable<HashedBreederRow>;
+    const personsTable = personsContainer[
+      personsTableCfg.key
+    ] as ComponentsTable<HashedPersonRow>;
+    const personsByHash = new Map(
+      personsTable._data.map((person) => [person._hash, person]),
+    );
+
+    return [...breedersTable._data]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((breeder) => ({
+        id: breeder.id,
+        hash: breeder._hash,
+        farmName: breeder.farmName,
+        suppliesSince: breeder.suppliesSince,
+        person: resolveBreederPerson(breeder, personsByHash),
+      }));
+  }
+
+  /**
+   * Every animal version in the store with its species and breeder joined,
+   * optionally narrowed to one species, one breeder, one trait, or any
+   * combination, ordered by `id`. Fetches `animals`, `species`, `breeders`,
+   * `persons` and `traits` separately and joins them with local `Map`s, the
+   * explicit fallback of roadmap section 3.2: the rljson route join
+   * `animals/species` was tried first, but it silently drops an animal row
+   * whose `speciesRef` does not resolve instead of including it with a
    * missing species, which defeats listing every animal
    * (`docs/findings/db-basics.md`, "Joining a reference"). Filtering happens
    * here, in plain JavaScript, after this full read, for the same reason
    * `getAnimal` cannot filter `db.get` by `where`: `id` collides with a
-   * column of the *referenced* `species` table and is silently mismatched
-   * by `ComponentController`'s reference resolution
+   * column of a *referenced* table and is silently mismatched by
+   * `ComponentController`'s reference resolution
    * (`docs/findings/db-basics.md`, "Filtering by id"), and `traitId` would
    * have to be resolved against `traitsRefs` element by element besides, a
-   * shape `where` cannot express at all. An unknown `speciesId` or `traitId`
-   * filter yields an empty list rather than an error. An animal whose
-   * `speciesRef` does not resolve (nothing writes one today; `Db.insert`
-   * and `IoMem` do not check references, only `Validate` does, see the
-   * finding above) gets `speciesId` and `speciesName` of `null` instead of
-   * failing the whole list; an animal whose `traitsRefs` holds a dangling
-   * hash simply does not match a `traitId` filter for that hash.
+   * shape `where` cannot express at all. An unknown `speciesId`, `breederId`
+   * or `traitId` filter yields an empty list rather than an error. An
+   * animal whose `speciesRef` or `breederRef` does not resolve (nothing
+   * writes one today; `Db.insert` and `IoMem` do not check references, only
+   * `Validate` does, see the finding above) gets the matching fields `null`
+   * instead of failing the whole list; an animal whose `traitsRefs` holds a
+   * dangling hash simply does not match a `traitId` filter for that hash.
    */
   async listAnimals(filter: AnimalFilter = {}): Promise<AnimalWithSpecies[]> {
     const [
       { rljson: animalsContainer },
       { rljson: speciesContainer },
+      { rljson: breedersContainer },
       { rljson: traitsContainer },
     ] = await Promise.all([
       this.db.get(animalsRoute, {}),
       this.db.get(speciesRoute, {}),
+      this.db.get(breedersRoute, {}),
       this.db.get(traitsRoute, {}),
     ]);
     const animalsTable = animalsContainer[
@@ -252,11 +426,17 @@ export class PetShopStore {
     const speciesTable = speciesContainer[
       speciesTableCfg.key
     ] as ComponentsTable<HashedSpeciesRow>;
+    const breedersTable = breedersContainer[
+      breedersTableCfg.key
+    ] as ComponentsTable<HashedBreederRow>;
     const traitsTable = traitsContainer[
       traitsTableCfg.key
     ] as ComponentsTable<HashedTraitRow>;
     const speciesByHash = new Map(
       speciesTable._data.map((species) => [species._hash, species]),
+    );
+    const breedersByHash = new Map(
+      breedersTable._data.map((breeder) => [breeder._hash, breeder]),
     );
     const traitsByHash = new Map(
       traitsTable._data.map((trait) => [trait._hash, trait]),
@@ -266,6 +446,12 @@ export class PetShopStore {
       if (filter.speciesId !== undefined) {
         const species = speciesByHash.get(animal.speciesRef);
         if (species?.id !== filter.speciesId) {
+          return false;
+        }
+      }
+      if (filter.breederId !== undefined) {
+        const breeder = breedersByHash.get(animal.breederRef);
+        if (breeder?.id !== filter.breederId) {
           return false;
         }
       }
@@ -282,6 +468,7 @@ export class PetShopStore {
 
     const entries = animalsTable._data.filter(matchesFilter).map((animal) => {
       const species = speciesByHash.get(animal.speciesRef);
+      const breeder = breedersByHash.get(animal.breederRef);
 
       return {
         id: animal.id,
@@ -289,6 +476,8 @@ export class PetShopStore {
         name: animal.name,
         speciesId: species?.id ?? null,
         speciesName: species?.name ?? null,
+        breederId: breeder?.id ?? null,
+        breederFarmName: breeder?.farmName ?? null,
         bornOn: animal.bornOn,
         priceCents: animal.priceCents,
       };
@@ -298,33 +487,38 @@ export class PetShopStore {
   }
 
   /**
-   * The current version of one animal with its species joined, its traits
-   * resolved and its full `backgroundStory`, or `undefined` when no animal
-   * has this id.
+   * The current version of one animal with its species and breeder joined,
+   * its traits resolved and its full `backgroundStory`, or `undefined` when
+   * no animal has this id.
    *
    * Filtering `db.get(animalsRoute, { id })` directly looks like the obvious
    * approach (`docs/findings/db-basics.md`, "Get") and works for columns
    * such as `bornOn`, but not for `id`: `ComponentController._referenceColumns`
    * resolves to the *referenced* table's columns instead of the referencing
    * table's own ref columns, so a `where` key that happens to also be a
-   * column of the `species` table (`id`, `name`, `_hash`) is wrongly treated
-   * as a foreign-key lookup into `species` and matches nothing (see
-   * "Filtering by id" in `docs/findings/db-basics.md`). This method
-   * therefore reuses `listAnimals`'s explicit fallback instead: read every
-   * table in full and join them with local `Map`s, then find the animal by
-   * `id` in JavaScript. An animal whose `speciesRef` does not resolve gets
+   * column of a referenced table (`id`, `name`, `_hash`) is wrongly treated
+   * as a foreign-key lookup and matches nothing (see "Filtering by id" in
+   * `docs/findings/db-basics.md`). This method therefore reuses
+   * `listAnimals`'s explicit fallback instead: read every table in full and
+   * join them with local `Map`s, then find the animal by `id` in
+   * JavaScript. An animal whose `speciesRef` does not resolve gets
    * `speciesId` and `speciesName` of `null`, the same tolerance
    * `listAnimals` has; a `traitsRefs` entry that does not resolve is simply
-   * left out of `traits` (see `resolveTraits`).
+   * left out of `traits` (see `resolveTraits`); a `breederRef` that does not
+   * resolve gives `breeder: null` (see `resolveAnimalBreeder`).
    */
   async getAnimal(id: string): Promise<AnimalDetail | undefined> {
     const [
       { rljson: animalsContainer },
       { rljson: speciesContainer },
+      { rljson: breedersContainer },
+      { rljson: personsContainer },
       { rljson: traitsContainer },
     ] = await Promise.all([
       this.db.get(animalsRoute, {}),
       this.db.get(speciesRoute, {}),
+      this.db.get(breedersRoute, {}),
+      this.db.get(personsRoute, {}),
       this.db.get(traitsRoute, {}),
     ]);
     const animalsTable = animalsContainer[
@@ -333,6 +527,12 @@ export class PetShopStore {
     const speciesTable = speciesContainer[
       speciesTableCfg.key
     ] as ComponentsTable<HashedSpeciesRow>;
+    const breedersTable = breedersContainer[
+      breedersTableCfg.key
+    ] as ComponentsTable<HashedBreederRow>;
+    const personsTable = personsContainer[
+      personsTableCfg.key
+    ] as ComponentsTable<HashedPersonRow>;
     const traitsTable = traitsContainer[
       traitsTableCfg.key
     ] as ComponentsTable<HashedTraitRow>;
@@ -345,10 +545,17 @@ export class PetShopStore {
     const speciesByHash = new Map(
       speciesTable._data.map((species) => [species._hash, species]),
     );
+    const breedersByHash = new Map(
+      breedersTable._data.map((breeder) => [breeder._hash, breeder]),
+    );
+    const personsByHash = new Map(
+      personsTable._data.map((person) => [person._hash, person]),
+    );
     const traitsByHash = new Map(
       traitsTable._data.map((trait) => [trait._hash, trait]),
     );
     const species = speciesByHash.get(animal.speciesRef);
+    const breeder = breedersByHash.get(animal.breederRef);
 
     return {
       id: animal.id,
@@ -356,10 +563,17 @@ export class PetShopStore {
       name: animal.name,
       speciesId: species?.id ?? null,
       speciesName: species?.name ?? null,
+      breederId: breeder?.id ?? null,
+      breederFarmName: breeder?.farmName ?? null,
       bornOn: animal.bornOn,
       priceCents: animal.priceCents,
       backgroundStory: animal.backgroundStory,
       traits: resolveTraits(animal.traitsRefs, traitsByHash),
+      breeder: resolveAnimalBreeder(
+        animal.breederRef,
+        breedersByHash,
+        personsByHash,
+      ),
     };
   }
 

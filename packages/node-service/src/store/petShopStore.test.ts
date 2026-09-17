@@ -2,7 +2,10 @@ import { Route } from '@rljson/rljson';
 import {
   animalsSeed,
   animalsTableCfg,
+  breedersSeed,
+  breedersTableCfg,
   hashed,
+  personsSeed,
   speciesSeed,
   traitsSeed,
 } from '@rljson-tryout/domain';
@@ -14,12 +17,12 @@ import { PetShopStore } from './petShopStore.ts';
  * `PetShopStore.db` is a TypeScript-private field with no runtime
  * enforcement; this narrow view reaches it to write a row `listAnimals`
  * should never see from the seed, so the test can prove the method
- * tolerates a dangling `speciesRef` or a dangling `traitsRefs` entry instead
- * of only asserting it never happens. Neither `Db.insert` nor `IoMem` check
- * references on write (only `Validate` does, see
- * `docs/findings/db-basics.md`, "Joining a reference"), so this is how a
- * dangling reference actually reaches the store outside of a hand-crafted
- * test.
+ * tolerates a dangling `speciesRef`, a dangling `breederRef` or a dangling
+ * `traitsRefs` entry instead of only asserting it never happens. Neither
+ * `Db.insert` nor `IoMem` check references on write (only `Validate` does,
+ * see `docs/findings/db-basics.md`, "Joining a reference"), so this is how
+ * a dangling reference actually reaches the store outside of a
+ * hand-crafted test.
  */
 type StoreInternals = {
   db: { insert: (route: Route, tree: unknown) => Promise<unknown> };
@@ -37,22 +40,26 @@ describe('PetShopStore', () => {
     await store.close();
   });
 
-  it('lists no species, no traits and no animals before it is seeded', async () => {
+  it('lists no species, no traits, no breeders and no animals before it is seeded', async () => {
     expect(await store.listSpecies()).toStrictEqual([]);
     expect(await store.listTraits()).toStrictEqual([]);
+    expect(await store.listBreeders()).toStrictEqual([]);
     expect(await store.listAnimals()).toStrictEqual([]);
   });
 
-  it('seeds the domain species, traits and animals into an empty store', async () => {
+  it('seeds the domain species, traits, persons, breeders and animals into an empty store', async () => {
     const seeded = await store.seedIfEmpty();
 
     expect(seeded).toStrictEqual({
       speciesSeeded: 3,
       traitsSeeded: 8,
+      personsSeeded: 6,
+      breedersSeeded: 4,
       animalsSeeded: 10,
     });
     expect(await store.listSpecies()).toHaveLength(3);
     expect(await store.listTraits()).toHaveLength(8);
+    expect(await store.listBreeders()).toHaveLength(4);
     expect(await store.listAnimals()).toHaveLength(10);
   });
 
@@ -64,10 +71,13 @@ describe('PetShopStore', () => {
     expect(seeded).toStrictEqual({
       speciesSeeded: 0,
       traitsSeeded: 0,
+      personsSeeded: 0,
+      breedersSeeded: 0,
       animalsSeeded: 0,
     });
     expect(await store.listSpecies()).toHaveLength(3);
     expect(await store.listTraits()).toHaveLength(8);
+    expect(await store.listBreeders()).toHaveLength(4);
     expect(await store.listAnimals()).toHaveLength(10);
   });
 
@@ -93,12 +103,16 @@ describe('PetShopStore', () => {
   it('leaves the domain seeds untouched while seeding', async () => {
     const speciesBefore = structuredClone(speciesSeed);
     const traitsBefore = structuredClone(traitsSeed);
+    const personsBefore = structuredClone(personsSeed);
+    const breedersBefore = structuredClone(breedersSeed);
     const animalsBefore = structuredClone(animalsSeed);
 
     await store.seedIfEmpty();
 
     expect(speciesSeed).toStrictEqual(speciesBefore);
     expect(traitsSeed).toStrictEqual(traitsBefore);
+    expect(personsSeed).toStrictEqual(personsBefore);
+    expect(breedersSeed).toStrictEqual(breedersBefore);
     expect(animalsSeed).toStrictEqual(animalsBefore);
   });
 
@@ -126,6 +140,68 @@ describe('PetShopStore', () => {
     });
   });
 
+  describe('listBreeders', () => {
+    beforeEach(async () => {
+      await store.seedIfEmpty();
+    });
+
+    it('lists the breeders ordered by id, with their person joined, in the documented shape', async () => {
+      const byPersonHash = new Map(
+        personsSeed.map((person) => [person._hash, person]),
+      );
+      const breeders = await store.listBreeders();
+
+      const ids = breeders.map((breeder) => breeder.id);
+      expect(ids).toStrictEqual([...ids].sort());
+      expect(ids).toHaveLength(4);
+
+      const byId = (id: string) =>
+        breeders.find((breeder) => breeder.id === id);
+      for (const seedRow of breedersSeed) {
+        const expectedPerson = byPersonHash.get(seedRow.personRef);
+        expect(expectedPerson).toBeDefined();
+
+        expect(byId(seedRow.id)).toStrictEqual({
+          id: seedRow.id,
+          hash: seedRow._hash,
+          farmName: seedRow.farmName,
+          suppliesSince: seedRow.suppliesSince,
+          person: {
+            id: expectedPerson!.id,
+            name: expectedPerson!.name,
+            city: expectedPerson!.city,
+          },
+        });
+      }
+    });
+
+    it('reports a dangling personRef as a null person instead of failing', async () => {
+      const ghost = hashed({
+        id: 'ghost-farm',
+        personRef: 'no-such-person-hash',
+        farmName: 'Ghost Farm',
+        suppliesSince: '2020-01-01',
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(breedersTableCfg.key),
+        { [breedersTableCfg.key]: { _type: 'components', _data: [ghost] } },
+      );
+
+      const breeders = await store.listBreeders();
+
+      expect(breeders).toHaveLength(5);
+      expect(
+        breeders.find((breeder) => breeder.id === 'ghost-farm'),
+      ).toStrictEqual({
+        id: 'ghost-farm',
+        hash: ghost._hash,
+        farmName: 'Ghost Farm',
+        suppliesSince: '2020-01-01',
+        person: null,
+      });
+    });
+  });
+
   describe('listAnimals', () => {
     beforeEach(async () => {
       await store.seedIfEmpty();
@@ -138,15 +214,20 @@ describe('PetShopStore', () => {
       expect(ids).toHaveLength(10);
     });
 
-    it('joins the species name and id onto every animal against the seed', async () => {
+    it('joins the species and breeder name and id onto every animal against the seed', async () => {
       const bySpeciesId = new Map(
         speciesSeed.map((species) => [species._hash, species]),
+      );
+      const byBreederId = new Map(
+        breedersSeed.map((breeder) => [breeder._hash, breeder]),
       );
       const animals = await store.listAnimals();
 
       for (const seedRow of animalsSeed) {
         const expectedSpecies = bySpeciesId.get(seedRow.speciesRef);
         expect(expectedSpecies).toBeDefined();
+        const expectedBreeder = byBreederId.get(seedRow.breederRef);
+        expect(expectedBreeder).toBeDefined();
 
         const stored = animals.find((animal) => animal.id === seedRow.id);
         expect(stored).toStrictEqual({
@@ -155,6 +236,8 @@ describe('PetShopStore', () => {
           name: seedRow.name,
           speciesId: expectedSpecies!.id,
           speciesName: expectedSpecies!.name,
+          breederId: expectedBreeder!.id,
+          breederFarmName: expectedBreeder!.farmName,
           bornOn: seedRow.bornOn,
           priceCents: seedRow.priceCents,
         });
@@ -175,6 +258,29 @@ describe('PetShopStore', () => {
       expect(await store.listAnimals({ speciesId: 'dragon' })).toStrictEqual(
         [],
       );
+    });
+
+    it('narrows the list to the given breeder id', async () => {
+      const breederId = breedersSeed[0]!.id;
+      const expectedIds = animalsSeed
+        .filter((animal) => animal.breederRef === breedersSeed[0]!._hash)
+        .map((animal) => animal.id)
+        .sort();
+      expect(expectedIds.length).toBeGreaterThan(0);
+      expect(expectedIds.length).toBeLessThan(10);
+
+      const filtered = await store.listAnimals({ breederId });
+
+      expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
+      for (const animal of filtered) {
+        expect(animal.breederId).toBe(breederId);
+      }
+    });
+
+    it('returns an empty list for an unknown breeder id', async () => {
+      expect(
+        await store.listAnimals({ breederId: 'no-such-breeder' }),
+      ).toStrictEqual([]);
     });
 
     it('narrows the list to the animals carrying the given trait id', async () => {
@@ -217,6 +323,32 @@ describe('PetShopStore', () => {
       }
     });
 
+    it('combines a species, a breeder and a trait filter', async () => {
+      const grandmasFarm = breedersSeed[0]!;
+      const traitId = 'competitive-streak';
+      const expectedIds = animalsSeed
+        .filter((animal) => {
+          const trait = traitsSeed.find((row) => row.id === traitId);
+          return (
+            animal.speciesRef === speciesSeed[2]!._hash &&
+            animal.breederRef === grandmasFarm._hash &&
+            trait !== undefined &&
+            animal.traitsRefs.includes(trait._hash)
+          );
+        })
+        .map((animal) => animal.id)
+        .sort();
+      expect(expectedIds.length).toBeGreaterThan(0);
+
+      const filtered = await store.listAnimals({
+        speciesId: speciesSeed[2]!.id,
+        breederId: grandmasFarm.id,
+        traitId,
+      });
+
+      expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
+    });
+
     it('returns an empty list for an unknown trait id', async () => {
       expect(await store.listAnimals({ traitId: 'telekinesis' })).toStrictEqual(
         [],
@@ -228,6 +360,7 @@ describe('PetShopStore', () => {
         id: 'ghost',
         name: 'Ghost Animal',
         speciesRef: 'no-such-species-hash',
+        breederRef: breedersSeed[0]!._hash,
         bornOn: '2020-01-01',
         priceCents: 100,
         backgroundStory: 'A short story for a ghost.',
@@ -247,6 +380,41 @@ describe('PetShopStore', () => {
         name: 'Ghost Animal',
         speciesId: null,
         speciesName: null,
+        breederId: breedersSeed[0]!.id,
+        breederFarmName: breedersSeed[0]!.farmName,
+        bornOn: '2020-01-01',
+        priceCents: 100,
+      });
+    });
+
+    it('reports a dangling breederRef as null fields instead of failing', async () => {
+      const ghost = hashed({
+        id: 'ghost-breeder',
+        name: 'Ghost Breeder Animal',
+        speciesRef: speciesSeed[0]!._hash,
+        breederRef: 'no-such-breeder-hash',
+        bornOn: '2020-01-01',
+        priceCents: 100,
+        backgroundStory: 'A short story for a ghost with no breeder.',
+        traitsRefs: [],
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(animalsTableCfg.key),
+        { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
+      );
+
+      const animals = await store.listAnimals();
+
+      expect(
+        animals.find((animal) => animal.id === 'ghost-breeder'),
+      ).toStrictEqual({
+        id: 'ghost-breeder',
+        hash: ghost._hash,
+        name: 'Ghost Breeder Animal',
+        speciesId: speciesSeed[0]!.id,
+        speciesName: speciesSeed[0]!.name,
+        breederId: null,
+        breederFarmName: null,
         bornOn: '2020-01-01',
         priceCents: 100,
       });
@@ -262,9 +430,15 @@ describe('PetShopStore', () => {
       expect(await store.getAnimal('no-such-animal')).toBeUndefined();
     });
 
-    it('returns the animal with its species joined, its traits resolved and its full story', async () => {
+    it('returns the animal with its species and breeder joined, its traits resolved and its full story', async () => {
       const bySpeciesId = new Map(
         speciesSeed.map((species) => [species._hash, species]),
+      );
+      const byBreederHash = new Map(
+        breedersSeed.map((breeder) => [breeder._hash, breeder]),
+      );
+      const byPersonHash = new Map(
+        personsSeed.map((person) => [person._hash, person]),
       );
       const byTraitHash = new Map(
         traitsSeed.map((trait) => [trait._hash, trait]),
@@ -273,6 +447,10 @@ describe('PetShopStore', () => {
       for (const seedRow of animalsSeed) {
         const expectedSpecies = bySpeciesId.get(seedRow.speciesRef);
         expect(expectedSpecies).toBeDefined();
+        const expectedBreeder = byBreederHash.get(seedRow.breederRef);
+        expect(expectedBreeder).toBeDefined();
+        const expectedPerson = byPersonHash.get(expectedBreeder!.personRef);
+        expect(expectedPerson).toBeDefined();
         const expectedTraits = seedRow.traitsRefs.map((traitRef) => {
           const trait = byTraitHash.get(traitRef);
           expect(trait).toBeDefined();
@@ -285,10 +463,18 @@ describe('PetShopStore', () => {
           name: seedRow.name,
           speciesId: expectedSpecies!.id,
           speciesName: expectedSpecies!.name,
+          breederId: expectedBreeder!.id,
+          breederFarmName: expectedBreeder!.farmName,
           bornOn: seedRow.bornOn,
           priceCents: seedRow.priceCents,
           backgroundStory: seedRow.backgroundStory,
           traits: expectedTraits,
+          breeder: {
+            id: expectedBreeder!.id,
+            farmName: expectedBreeder!.farmName,
+            personName: expectedPerson!.name,
+            city: expectedPerson!.city,
+          },
         });
       }
     });
@@ -313,6 +499,7 @@ describe('PetShopStore', () => {
         id: 'ghost',
         name: 'Ghost Animal',
         speciesRef: 'no-such-species-hash',
+        breederRef: breedersSeed[0]!._hash,
         bornOn: '2020-01-01',
         priceCents: 100,
         backgroundStory: 'A short story for a ghost.',
@@ -322,6 +509,11 @@ describe('PetShopStore', () => {
         Route.fromFlat(animalsTableCfg.key),
         { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
       );
+      const expectedBreeder = breedersSeed[0]!;
+      const expectedPerson = personsSeed.find(
+        (person) => person._hash === expectedBreeder.personRef,
+      );
+      expect(expectedPerson).toBeDefined();
 
       expect(await store.getAnimal('ghost')).toStrictEqual({
         id: 'ghost',
@@ -329,10 +521,96 @@ describe('PetShopStore', () => {
         name: 'Ghost Animal',
         speciesId: null,
         speciesName: null,
+        breederId: expectedBreeder.id,
+        breederFarmName: expectedBreeder.farmName,
         bornOn: '2020-01-01',
         priceCents: 100,
         backgroundStory: 'A short story for a ghost.',
         traits: [],
+        breeder: {
+          id: expectedBreeder.id,
+          farmName: expectedBreeder.farmName,
+          personName: expectedPerson!.name,
+          city: expectedPerson!.city,
+        },
+      });
+    });
+
+    it('reports a dangling breederRef as null fields and a null breeder instead of failing', async () => {
+      const ghost = hashed({
+        id: 'ghost-breeder',
+        name: 'Ghost Breeder Animal',
+        speciesRef: speciesSeed[0]!._hash,
+        breederRef: 'no-such-breeder-hash',
+        bornOn: '2020-01-01',
+        priceCents: 100,
+        backgroundStory: 'A short story for a ghost with no breeder.',
+        traitsRefs: [],
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(animalsTableCfg.key),
+        { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
+      );
+
+      expect(await store.getAnimal('ghost-breeder')).toStrictEqual({
+        id: 'ghost-breeder',
+        hash: ghost._hash,
+        name: 'Ghost Breeder Animal',
+        speciesId: speciesSeed[0]!.id,
+        speciesName: speciesSeed[0]!.name,
+        breederId: null,
+        breederFarmName: null,
+        bornOn: '2020-01-01',
+        priceCents: 100,
+        backgroundStory: 'A short story for a ghost with no breeder.',
+        traits: [],
+        breeder: null,
+      });
+    });
+
+    it('reports a breeder whose own personRef is dangling as a breeder with null personName and city', async () => {
+      const ghostBreeder = hashed({
+        id: 'ghost-farm',
+        personRef: 'no-such-person-hash',
+        farmName: 'Ghost Farm',
+        suppliesSince: '2020-01-01',
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(breedersTableCfg.key),
+        {
+          [breedersTableCfg.key]: {
+            _type: 'components',
+            _data: [ghostBreeder],
+          },
+        },
+      );
+      const ghostAnimal = hashed({
+        id: 'ghost-animal-with-ghost-breeder',
+        name: 'Ghost Animal With Ghost Breeder',
+        speciesRef: speciesSeed[0]!._hash,
+        breederRef: ghostBreeder._hash,
+        bornOn: '2020-01-01',
+        priceCents: 100,
+        backgroundStory: 'A short story.',
+        traitsRefs: [],
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(animalsTableCfg.key),
+        {
+          [animalsTableCfg.key]: {
+            _type: 'components',
+            _data: [ghostAnimal],
+          },
+        },
+      );
+
+      const stored = await store.getAnimal('ghost-animal-with-ghost-breeder');
+
+      expect(stored?.breeder).toStrictEqual({
+        id: 'ghost-farm',
+        farmName: 'Ghost Farm',
+        personName: null,
+        city: null,
       });
     });
 
@@ -342,6 +620,7 @@ describe('PetShopStore', () => {
         id: 'ghost-with-traits',
         name: 'Ghost Animal With Traits',
         speciesRef: speciesSeed[0]!._hash,
+        breederRef: breedersSeed[0]!._hash,
         bornOn: '2020-01-01',
         priceCents: 100,
         backgroundStory: 'A short story for a ghost with a dangling trait.',

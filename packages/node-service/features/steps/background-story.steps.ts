@@ -5,6 +5,7 @@ import { Route } from '@rljson/rljson';
 import {
   animalsSeed,
   animalsTableCfg,
+  breedersSeed,
   hashed,
   type AnimalRow,
   type HashedAnimalRow,
@@ -77,6 +78,7 @@ describeFeature(feature, ({ Scenario, AfterEachScenario }) => {
           id: 'generated-story-animal',
           name: 'Generated Story Animal',
           speciesRef: animalsSeed[0]!.speciesRef,
+          breederRef: breedersSeed[0]!._hash,
           bornOn: '2024-01-01',
           priceCents: 1000,
           backgroundStory: generatedStory(4000),
