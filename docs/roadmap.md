@@ -731,7 +731,11 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
 - [ ] **B9 Versions of an entity.** Depends on: B8. `PUT /api/animals/:id`,
       `GET /api/animals/:id/history`, version list in the detail view, the
       "current version" rule from 2.6 implemented once in `domain` and used by
-      every list endpoint, Gherkin feature for a price change. Done when the
+      every list endpoint, Gherkin feature for a price change. The version
+      mechanism ships with an edit form for animals in the app: every
+      editable field, inline validation, saving creates a new version, and
+      the detail view offers an "Edit" action alongside the version list;
+      this is the first piece of CRUD the owner asked for. Done when the
       list shows the new price and the history shows both versions.
 - [ ] **B10 Seed generator.** Depends on: B9. Deterministic generator with
       a seed and sizes `small` (10 species, 100 animals), `medium`, `large`
@@ -756,6 +760,35 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       server-sent events, the app refreshes lists on `insert`, a status line
       shows the connection. Done when an invoice issued in one tab appears in a
       second tab without reload, also through Traefik in production.
+- [ ] **B14 Navigation and CRUD for the catalogue.** Depends on: B9 (and B8).
+      The owner finds the current top-level `Breeders` entry out of place for
+      a pet shop: navigation becomes `Animals`, `Invoices`, `Network` (once D1
+      lands) and `More` (a menu view listing Species, Traits, Breeders,
+      Customers); breeders get a detail page (`#/breeders/<id>`) with their
+      person data and their animals; the breeder filter becomes selectable
+      directly in the animals view (a picker sheet on the phone, a select on
+      desktop) instead of only via the breeders list. Create, edit and delete
+      for species, traits, breeders (with person), customers (with person)
+      and animals through consistent forms (phone first, 44 px controls,
+      inline validation, optimistic feedback); delete writes a tombstone
+      version (`deleted: true` column on every entity table, lists and
+      detail hide tombstones, the version history shows the deletion); API:
+      `POST /api/<table>`, `PUT /api/<table>/:id`, `DELETE /api/<table>/:id`
+      (tombstone) for the five entity types, with 400/404 semantics; Gherkin
+      for create, edit, delete of one entity type and Playwright for every
+      form at both viewports. Done when every catalogue entity can be
+      created, edited and deleted from the phone and the navigation reads
+      naturally to a shop user. Note that D13 then only covers the
+      multi-node edit-versus-delete conflict.
+- [ ] **B15 Internationalisation.** Depends on: B14. German and English,
+      language detected from `navigator.language` (fallback English), a
+      switch in the header persisted in `localStorage`, all UI strings in one
+      dictionary module per language (plain JavaScript objects, no library),
+      dates and currency formatted for the active locale, `lang` attribute on
+      `html`, Playwright runs the key scenarios in both languages (`locale`
+      option); seed content (names, stories) stays English. Done when the app
+      opens in German on a German phone and every string of every view is
+      translated.
 
 ### Phase C: persistent stores, one node per engine
 
@@ -860,9 +893,9 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       wins, tie broken by client id), merge version with `previous` on both
       tips, automatic on the node that detects it, `POST /api/conflicts/…
 /resolve` for a manual trigger. Gherkin edit versus edit.
-- [ ] **D13 Deletions.** Depends on: D12. Tombstone versions (`deleted:
-true`), lists hide them, edit versus delete resolves to the edit. Gherkin
-      feature.
+- [ ] **D13 Deletions.** Depends on: D12, B14. Tombstone versions (`deleted:
+true`) already exist from B14; this slice covers only the multi-node
+      case, edit versus delete resolves to the edit. Gherkin feature.
 - [ ] **D14 Chaos node, unknown references.** Depends on: D3. Package
       `chaos-node`: joins as a client and announces change set hashes that do
       not exist. Observe and document how long honest nodes block; add bounded
@@ -905,8 +938,9 @@ true`), lists hide them, edit versus delete resolves to the edit. Gherkin
 
 ### Phase F: finishing
 
-- [ ] **F1 Pixel-perfect pet shop styling.** Depends on: B13 (and ideally
-      D3b). The app looks like a real pet shop for its customer audience:
+- [ ] **F1 Pixel-perfect pet shop styling.** Depends on: B13, B15 (and
+      ideally D3b), so styling happens once on the final, translated
+      strings. The app looks like a real pet shop for its customer audience:
       colour system, typography, shapes, illustrations of every species and
       decorative elements generated as SVG by the agent (own work, no
       external assets, no licence questions), consistent icons, empty
