@@ -320,7 +320,7 @@ export class RoleOrchestrator {
         { previous: event.previous, current: event.current },
         'role changed',
       );
-      this.followRole(manager.getTopology());
+      this.followRole(manager.getTopology(), manager.getIdentity().nodeId);
     });
     manager.on('hub-changed', (event) => {
       const topology = manager.getTopology();
@@ -337,7 +337,7 @@ export class RoleOrchestrator {
       // When the role changed as well, the role change (emitted right
       // after this event) moves it.
       if (topology.myRole === 'client' && this.followedRole === 'client') {
-        this.followRole(topology);
+        this.followRole(topology, manager.getIdentity().nodeId);
       }
     });
     manager.on('log', (entry: NetworkLogEntry) => {
@@ -352,20 +352,22 @@ export class RoleOrchestrator {
   }
 
   /**
-   * Points the transport at the role the topology gives this node. The
-   * transport queues its transitions and logs their failures, so a role
-   * flapping faster than a transition completes still ends in the state
-   * of the last change. A client role without a hub address (the hub was
-   * elected but its address is not resolvable) leaves the transport as it
-   * is until the next topology change names one.
+   * Points the transport at the role the topology gives this node, with
+   * this node's id and the hub's id for the announcements of slice D3.
+   * The transport queues its transitions and logs their failures, so a
+   * role flapping faster than a transition completes still ends in the
+   * state of the last change. A client role without a hub address (the
+   * hub was elected but its address is not resolvable) leaves the
+   * transport as it is until the next topology change names one.
    */
-  private followRole(topology: NetworkTopology): void {
+  private followRole(topology: NetworkTopology, selfNodeId: string): void {
     this.followedRole = topology.myRole;
+    const context = { selfNodeId, hubNodeId: topology.hubNodeId };
     if (topology.myRole === 'hub') {
-      void this.transport.becomeHub(topology.hubAddress);
+      void this.transport.becomeHub(topology.hubAddress, context);
     } else if (topology.myRole === 'client') {
       if (topology.hubAddress !== null) {
-        void this.transport.becomeClient(topology.hubAddress);
+        void this.transport.becomeClient(topology.hubAddress, context);
       }
     } else {
       void this.transport.becomeStandalone();

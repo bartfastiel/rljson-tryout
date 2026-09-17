@@ -8,6 +8,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import type { Configuration } from './configuration.ts';
 import type { NodeDirectory } from './network/nodeDirectory.ts';
 import type { RoleOrchestrator } from './network/roleOrchestrator.ts';
+import type { SyncAgent } from './network/syncAgent.ts';
 import { registerAnimalsRoutes } from './routes/animals.ts';
 import { registerBreedersRoutes } from './routes/breeders.ts';
 import { registerCustomersRoutes } from './routes/customers.ts';
@@ -39,6 +40,7 @@ export type ServerDependencies = Readonly<{
   store: PetShopStore;
   orchestrator: RoleOrchestrator;
   directory: NodeDirectory;
+  syncAgent: SyncAgent;
   logger: FastifyBaseLogger;
 }>;
 
@@ -54,6 +56,7 @@ export const buildServer = ({
   store,
   orchestrator,
   directory,
+  syncAgent,
   logger,
 }: ServerDependencies): FastifyInstance => {
   // Fastify's default validator coerces body values to the schema's type
@@ -85,6 +88,7 @@ export const buildServer = ({
     store,
     orchestrator,
     directory,
+    syncAgent,
   });
   registerStatsRoute(server, { configuration, store, startedAt });
   registerSpeciesRoutes(server, store);

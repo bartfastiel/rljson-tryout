@@ -62,6 +62,23 @@ export class ComposeProject {
     ]);
   }
 
+  /**
+   * Restarts one service (`node1` to `node3`) and waits for its health
+   * check: what a restart of a pod looks like to the other nodes.
+   */
+  async restart(service: string): Promise<void> {
+    await this.compose(['restart', service]);
+    await this.compose([
+      'up',
+      '--detach',
+      '--wait',
+      '--wait-timeout',
+      '120',
+      '--no-build',
+      service,
+    ]);
+  }
+
   async saveLogs(): Promise<string> {
     const { stdout, stderr } = await this.compose(['logs', '--no-color']);
     mkdirSync(dirname(composeLogFile), { recursive: true });

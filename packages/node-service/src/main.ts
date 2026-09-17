@@ -5,6 +5,7 @@ import { readConfiguration } from './configuration.ts';
 import { HubTransport } from './network/hubTransport.ts';
 import { NodeDirectory } from './network/nodeDirectory.ts';
 import { RoleOrchestrator } from './network/roleOrchestrator.ts';
+import { SyncAgent } from './network/syncAgent.ts';
 import { buildServer } from './server.ts';
 import { createIo } from './store/createIo.ts';
 import { PetShopStore } from './store/petShopStore.ts';
@@ -42,11 +43,17 @@ try {
     configuration,
     logger.child({ component: 'directory' }),
   );
+  const syncAgent = new SyncAgent(
+    store,
+    transport,
+    logger.child({ component: 'sync' }),
+  );
   const server = buildServer({
     configuration,
     store,
     orchestrator,
     directory,
+    syncAgent,
     logger,
   });
 
@@ -56,6 +63,7 @@ try {
     try {
       directory.stop();
       await server.close();
+      await syncAgent.stop();
       await orchestrator.stop();
       await store.close();
       process.exit(0);
@@ -69,6 +77,9 @@ try {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
   await store.initialize();
+  // The agent listens before the seed runs, so that the seed's change
+  // sets queue up and are announced once the node has joined the network.
+  syncAgent.start();
   const seedingStarted = performance.now();
   const seeded = await store.seedIfEmpty(configuration.seedSize);
   server.log.info(

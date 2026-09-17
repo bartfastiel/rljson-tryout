@@ -1,8 +1,12 @@
-import type { Transport, TransportSnapshot } from '../network/hubTransport.ts';
+import type {
+  RoleContext,
+  Transport,
+  TransportSnapshot,
+} from '../network/hubTransport.ts';
 
 export type TransportCall =
-  | { kind: 'hub'; hubAddress: string | null }
-  | { kind: 'client'; hubAddress: string }
+  | { kind: 'hub'; hubAddress: string | null; context?: RoleContext }
+  | { kind: 'client'; hubAddress: string; context?: RoleContext }
   | { kind: 'standalone' };
 
 /**
@@ -20,8 +24,11 @@ export class FakeTransport implements Transport {
     lastError: null,
   };
 
-  async becomeHub(hubAddress: string | null): Promise<void> {
-    this.calls.push({ kind: 'hub', hubAddress });
+  async becomeHub(
+    hubAddress: string | null,
+    context?: RoleContext,
+  ): Promise<void> {
+    this.calls.push({ kind: 'hub', hubAddress, context });
     this.current = {
       role: 'hub',
       hubAddress,
@@ -30,8 +37,8 @@ export class FakeTransport implements Transport {
     };
   }
 
-  async becomeClient(hubAddress: string): Promise<void> {
-    this.calls.push({ kind: 'client', hubAddress });
+  async becomeClient(hubAddress: string, context?: RoleContext): Promise<void> {
+    this.calls.push({ kind: 'client', hubAddress, context });
     this.current = {
       role: 'client',
       hubAddress,
