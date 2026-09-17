@@ -5,7 +5,9 @@
 - Terraform 1.16.2 with provider `hashicorp/kubernetes` 3.2.1 (constraint
   `~> 3.0`) in `infra/terraform/workloads`, state in the same S3 bucket as
   the cluster stage under `env:/production/workloads/terraform.tfstate`
-  (slice A9).
+  (slice A9, pull request #14). The cluster runs k3s v1.36.4+k3s1 with the
+  IngressClass `traefik` marked as default and Traefik's `LoadBalancer`
+  service bound to ports 80 and 443 of the primary IP by k3s's ServiceLB.
 - The provider is configured from the cluster stage's sensitive output
   `kubeconfig`, read through `data "terraform_remote_state"` and split with
   `yamldecode` into `server`, `certificate-authority-data`,
