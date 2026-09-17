@@ -109,18 +109,6 @@ describe('GET /api/animals', () => {
     }
   });
 
-  it('answers with an empty list for an unknown species id', async () => {
-    await store.seedIfEmpty();
-
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?species=dragon',
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual([]);
-  });
-
   it('narrows the list with ?breeder=<id>', async () => {
     await store.seedIfEmpty();
     const breederId = breedersSeed[0]!.id;
@@ -135,18 +123,6 @@ describe('GET /api/animals', () => {
     for (const animal of animals) {
       expect(animal.breederId).toBe(breederId);
     }
-  });
-
-  it('answers with an empty list for an unknown breeder id', async () => {
-    await store.seedIfEmpty();
-
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?breeder=no-such-breeder',
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual([]);
   });
 
   it('joins the breeder farm name of every animal against the seed', async () => {
@@ -198,17 +174,24 @@ describe('GET /api/animals', () => {
     ]);
   });
 
-  it('answers with an empty list for an unknown trait id', async () => {
-    await store.seedIfEmpty();
+  it.each([
+    ['species', 'dragon'],
+    ['breeder', 'no-such-breeder'],
+    ['trait', 'telekinesis'],
+  ])(
+    'answers with an empty list for an unknown %s id',
+    async (queryParam, value) => {
+      await store.seedIfEmpty();
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?trait=telekinesis',
-    });
+      const response = await server.inject({
+        method: 'GET',
+        url: `/api/animals?${queryParam}=${value}`,
+      });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual([]);
-  });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toStrictEqual([]);
+    },
+  );
 
   it('never includes the background story in the list', async () => {
     await store.seedIfEmpty();

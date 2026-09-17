@@ -254,12 +254,6 @@ describe('PetShopStore', () => {
       }
     });
 
-    it('returns an empty list for an unknown species id', async () => {
-      expect(await store.listAnimals({ speciesId: 'dragon' })).toStrictEqual(
-        [],
-      );
-    });
-
     it('narrows the list to the given breeder id', async () => {
       const breederId = breedersSeed[0]!.id;
       const expectedIds = animalsSeed
@@ -275,12 +269,6 @@ describe('PetShopStore', () => {
       for (const animal of filtered) {
         expect(animal.breederId).toBe(breederId);
       }
-    });
-
-    it('returns an empty list for an unknown breeder id', async () => {
-      expect(
-        await store.listAnimals({ breederId: 'no-such-breeder' }),
-      ).toStrictEqual([]);
     });
 
     it('narrows the list to the animals carrying the given trait id', async () => {
@@ -349,11 +337,18 @@ describe('PetShopStore', () => {
       expect(filtered.map((animal) => animal.id)).toStrictEqual(expectedIds);
     });
 
-    it('returns an empty list for an unknown trait id', async () => {
-      expect(await store.listAnimals({ traitId: 'telekinesis' })).toStrictEqual(
-        [],
-      );
-    });
+    it.each([
+      ['speciesId', 'dragon'],
+      ['breederId', 'no-such-breeder'],
+      ['traitId', 'telekinesis'],
+    ] as const)(
+      'returns an empty list for an unknown %s',
+      async (filterKey, value) => {
+        expect(await store.listAnimals({ [filterKey]: value })).toStrictEqual(
+          [],
+        );
+      },
+    );
 
     it('reports a dangling speciesRef as null fields instead of failing', async () => {
       const ghost = hashed({
