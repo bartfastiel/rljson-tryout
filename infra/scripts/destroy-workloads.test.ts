@@ -1,7 +1,4 @@
-import { spawnSync } from 'node:child_process';
 import {
-  chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -9,76 +6,43 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-const scriptPath = fileURLToPath(
-  new URL('./destroy-workloads.sh', import.meta.url),
-);
-const testDoublesDirectory = fileURLToPath(
-  new URL('./test-doubles/destroy-workloads/', import.meta.url),
-);
-
-// On Windows the first bash on PATH may be the one of the Windows Subsystem
-// for Linux, which cannot see the temporary directory; Git Bash can.
-const gitBashOnWindows = join(
-  process.env['ProgramFiles'] ?? 'C:\\Program Files',
-  'Git',
-  'usr',
-  'bin',
-  'bash.exe',
-);
-const bash =
-  process.platform === 'win32' && existsSync(gitBashOnWindows)
-    ? gitBashOnWindows
-    : 'bash';
+import {
+  posixPath,
+  runShellScript,
+  type ShellOutcome,
+} from './test-support/shell.ts';
 
 type Scenario = {
   workspaces: string[];
+  arguments?: string[];
   kubeconfigPresent?: boolean;
   apiServerAnswers?: boolean;
   failDestroyIn?: string;
   failWorkspaceList?: boolean;
 };
 
-type Outcome = {
-  status: number | null;
-  output: string;
-  calls: string[];
-  summary: string;
-};
+type Outcome = ShellOutcome & { summary: string };
 
 let temporaryDirectory: string;
 
-// Git Bash accepts forward slashes in Windows paths, so the fake binaries
-// and the script agree on every file they exchange.
-function posixPath(path: string): string {
-  return path.replaceAll('\\', '/');
-}
-
 function runScript(scenario: Scenario): Outcome {
-  const binDirectory = join(temporaryDirectory, 'bin');
   const stateDirectory = join(temporaryDirectory, 'state');
   const workloadsDirectory = join(temporaryDirectory, 'workloads');
-  const logFile = join(temporaryDirectory, 'calls.log');
   const summaryFile = join(temporaryDirectory, 'summary.md');
-  for (const directory of [binDirectory, stateDirectory, workloadsDirectory]) {
+  for (const directory of [stateDirectory, workloadsDirectory]) {
     mkdirSync(directory, { recursive: true });
   }
-  for (const name of ['terraform', 'curl', 'sleep']) {
-    const target = join(binDirectory, name);
-    copyFileSync(join(testDoublesDirectory, `${name}.sh`), target);
-    chmodSync(target, 0o755);
-  }
 
-  const result = spawnSync(bash, [posixPath(scriptPath)], {
+  const outcome = runShellScript({
+    scriptName: 'destroy-workloads.sh',
+    arguments: scenario.arguments,
     cwd: workloadsDirectory,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `${binDirectory}${delimiter}${process.env['PATH'] ?? ''}`,
-      FAKE_LOG: posixPath(logFile),
+    doubles: { 'destroy-workloads': ['terraform', 'curl', 'sleep'] },
+    binDirectory: join(temporaryDirectory, 'bin'),
+    logFile: join(temporaryDirectory, 'calls.log'),
+    environment: {
       FAKE_STATE_DIRECTORY: posixPath(stateDirectory),
       FAKE_WORKSPACES: scenario.workspaces.join(' '),
       FAKE_KUBECONFIG_PRESENT:
@@ -89,19 +53,10 @@ function runScript(scenario: Scenario): Outcome {
       GITHUB_STEP_SUMMARY: posixPath(summaryFile),
     },
   });
-
-  const calls = existsSync(logFile)
-    ? readFileSync(logFile, 'utf8').trimEnd().split('\n')
-    : [];
   const summary = existsSync(summaryFile)
     ? readFileSync(summaryFile, 'utf8')
     : '';
-  return {
-    status: result.status,
-    output: `${result.stdout}${result.stderr}`,
-    calls,
-    summary,
-  };
+  return { ...outcome, summary };
 }
 
 function terraformCalls(outcome: Outcome): string[] {
@@ -251,5 +206,89 @@ describe('destroy-workloads.sh', () => {
     expect(outcome.status, outcome.output).toBe(0);
     expect(terraformCalls(outcome)).toEqual([]);
     expect(outcome.summary).toContain('No workspace besides default existed.');
+  });
+
+  describe('with workspace names as arguments', () => {
+    it('destroys only the named workspaces and reports the ones that do not exist', () => {
+      const outcome = runScript({
+        workspaces: ['default', 'pr-3', 'pr-5', 'production'],
+        arguments: ['pr-5', 'pr-9', 'pr-5'],
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(terraformCalls(outcome)).toEqual([
+        'output kubeconfig',
+        'output server_ipv4',
+        'select pr-5',
+        'destroy in pr-5',
+        'select default',
+        'delete pr-5',
+      ]);
+      expect(outcome.output).toContain(
+        'Workspace pr-9 does not exist; nothing to destroy.',
+      );
+      expect(outcome.summary).toContain(
+        '| pr-9 | does not exist, nothing to destroy |',
+      );
+      expect(outcome.summary).toContain(
+        '| pr-5 | 5 resources destroyed, workspace deleted |',
+      );
+      expect(outcome.summary).not.toContain('pr-3');
+      expect(outcome.summary).not.toContain('production');
+    });
+
+    it('orders named previews before production and keeps production', () => {
+      const outcome = runScript({
+        workspaces: ['default', 'pr-1', 'production'],
+        arguments: ['production', 'pr-1'],
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(terraformCalls(outcome)).toEqual([
+        'output kubeconfig',
+        'output server_ipv4',
+        'select pr-1',
+        'destroy in pr-1',
+        'select default',
+        'delete pr-1',
+        'select production',
+        'destroy in production',
+        'select default',
+      ]);
+      expect(outcome.summary).toContain(
+        '| production | 5 resources destroyed, workspace kept |',
+      );
+    });
+
+    it('succeeds without touching Terraform when none of the named workspaces exists', () => {
+      const outcome = runScript({
+        workspaces: ['default', 'production'],
+        arguments: ['pr-9'],
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(terraformCalls(outcome)).toEqual([]);
+      expect(outcome.summary).toContain('| Workspace | Result |');
+      expect(outcome.summary).toContain(
+        '| pr-9 | does not exist, nothing to destroy |',
+      );
+      expect(outcome.summary).not.toContain('No workspace besides default');
+    });
+
+    it.each([['default'], ['Pr-1'], ['pr 1'], ['-pr-1']])(
+      'refuses the workspace name %s before touching anything',
+      (name) => {
+        const outcome = runScript({
+          workspaces: ['default', 'production'],
+          arguments: [name],
+        });
+
+        expect(outcome.status).toBe(2);
+        expect(outcome.calls).toEqual([]);
+        expect(outcome.output).toContain(
+          `::error::"${name}" is not a workspace this script destroys`,
+        );
+      },
+    );
   });
 });
