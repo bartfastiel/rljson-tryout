@@ -165,4 +165,77 @@ describe('PetShopStore', () => {
       });
     });
   });
+
+  describe('getAnimal', () => {
+    beforeEach(async () => {
+      await store.seedIfEmpty();
+    });
+
+    it('returns undefined for an unknown id', async () => {
+      expect(await store.getAnimal('no-such-animal')).toBeUndefined();
+    });
+
+    it('returns the animal with its species joined and its full story', async () => {
+      const bySpeciesId = new Map(
+        speciesSeed.map((species) => [species._hash, species]),
+      );
+
+      for (const seedRow of animalsSeed) {
+        const expectedSpecies = bySpeciesId.get(seedRow.speciesRef);
+        expect(expectedSpecies).toBeDefined();
+
+        expect(await store.getAnimal(seedRow.id)).toStrictEqual({
+          id: seedRow.id,
+          hash: seedRow._hash,
+          name: seedRow.name,
+          speciesId: expectedSpecies!.id,
+          speciesName: expectedSpecies!.name,
+          bornOn: seedRow.bornOn,
+          priceCents: seedRow.priceCents,
+          backgroundStory: seedRow.backgroundStory,
+        });
+      }
+    });
+
+    it('round-trips the long seeded story unchanged, character for character', async () => {
+      const longSeedRow = animalsSeed.find(
+        (row) => row.backgroundStory.length >= 4000,
+      );
+      expect(longSeedRow).toBeDefined();
+      expect(longSeedRow!.backgroundStory.length).toBeGreaterThanOrEqual(4000);
+
+      const stored = await store.getAnimal(longSeedRow!.id);
+
+      expect(stored?.backgroundStory).toBe(longSeedRow!.backgroundStory);
+      expect(stored?.backgroundStory.length).toBe(
+        longSeedRow!.backgroundStory.length,
+      );
+    });
+
+    it('reports a dangling speciesRef as null fields instead of failing', async () => {
+      const ghost = hashed({
+        id: 'ghost',
+        name: 'Ghost Animal',
+        speciesRef: 'no-such-species-hash',
+        bornOn: '2020-01-01',
+        priceCents: 100,
+        backgroundStory: 'A short story for a ghost.',
+      });
+      await (store as unknown as StoreInternals).db.insert(
+        Route.fromFlat(animalsTableCfg.key),
+        { [animalsTableCfg.key]: { _type: 'components', _data: [ghost] } },
+      );
+
+      expect(await store.getAnimal('ghost')).toStrictEqual({
+        id: 'ghost',
+        hash: ghost._hash,
+        name: 'Ghost Animal',
+        speciesId: null,
+        speciesName: null,
+        bornOn: '2020-01-01',
+        priceCents: 100,
+        backgroundStory: 'A short story for a ghost.',
+      });
+    });
+  });
 });
