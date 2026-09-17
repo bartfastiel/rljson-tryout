@@ -42,10 +42,3 @@ module "environment" {
 
   depends_on = [kubectl_manifest.cluster_issuer]
 }
-
-# The module was called `production` while it served only that workspace;
-# the existing production resources keep their identity under the new name.
-moved {
-  from = module.production
-  to   = module.environment
-}
