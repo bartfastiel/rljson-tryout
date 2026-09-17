@@ -121,6 +121,13 @@ answers on port 6443. Any later change to `cloud-init.yaml` replaces the
 server on the next apply: the primary IP and the DNS records stay, everything
 stored on the server's local volumes is lost.
 
+The server type is the Terraform variable `server_type` (default `cpx32`, a
+regular-performance 4 vCPU, 8 GB machine). The plan resolves the type and
+the `ubuntu-24.04` image through data sources and fails on the pull request
+when the type does not exist or is sold out in the primary IP's location, so
+a cheaper cost-optimized type such as `cx33` can be tried safely: if the
+plan passes, it is available.
+
 ## License
 
 [MIT](LICENSE)

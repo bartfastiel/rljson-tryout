@@ -11,8 +11,19 @@ data "hcloud_primary_ip" "main" {
   name = local.project_name
 }
 
+# Resolving the type and the image at plan time turns a retired name or a
+# sold out type into a failed plan on the pull request instead of a failed
+# apply on main. Availability is per location in the server type's
+# `locations` list; Hetzner is retiring the older datacenter granularity.
 data "hcloud_server_type" "main" {
-  name = "cx33"
+  name = var.server_type
+}
+
+# The server references the image by name, not by id, so that a
+# re-published image with a new id does not replace the server.
+data "hcloud_image" "main" {
+  name              = "ubuntu-24.04"
+  with_architecture = data.hcloud_server_type.main.architecture
 }
 
 locals {
@@ -63,7 +74,7 @@ resource "hcloud_firewall" "main" {
 resource "hcloud_server" "main" {
   name         = local.project_name
   server_type  = data.hcloud_server_type.main.name
-  image        = "ubuntu-24.04"
+  image        = data.hcloud_image.main.name
   location     = data.hcloud_primary_ip.main.location
   ssh_keys     = [hcloud_ssh_key.main.id]
   firewall_ids = [hcloud_firewall.main.id]
@@ -86,7 +97,7 @@ resource "hcloud_server" "main" {
     }
     precondition {
       condition     = try(local.server_type_in_location.available, false)
-      error_message = "Server type ${data.hcloud_server_type.main.name} is not available in location ${data.hcloud_primary_ip.main.location}; pick another type in main.tf."
+      error_message = "Server type ${data.hcloud_server_type.main.name} is not available in location ${data.hcloud_primary_ip.main.location}; choose another one through the variable server_type."
     }
   }
 }
