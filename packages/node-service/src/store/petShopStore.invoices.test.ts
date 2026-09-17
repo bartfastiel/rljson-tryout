@@ -1,12 +1,14 @@
 import { Route, type InsertHistoryRow, type Rljson } from '@rljson/rljson';
 import {
   animalsSeed,
+  breedersSeed,
   customersSeed,
   customersTableCfg,
   hashed,
   invoicesSeed,
   personsSeed,
   speciesSeed,
+  traitsSeed,
   type InvoiceSeedEntry,
 } from '@rljson-tryout/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -42,6 +44,19 @@ type StoreInternals = {
 
 const internals = (store: PetShopStore): StoreInternals =>
   store as unknown as StoreInternals;
+
+/**
+ * One change set per seeded entity: the junction rows belong to their
+ * animal's change set and the items to their invoice's.
+ */
+const handWrittenChangeSetCount =
+  speciesSeed.length +
+  traitsSeed.length +
+  personsSeed.length +
+  breedersSeed.length +
+  customersSeed.length +
+  animalsSeed.length +
+  invoicesSeed.length;
 
 const priceOf = (animalId: string): number => {
   const animal = animalsSeed.find((row) => row.id === animalId);
@@ -257,20 +272,22 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         }
       });
 
-      it('records one InsertHistory row per change set', async () => {
+      it('records one InsertHistory row per change set, stamped by the seed clock', async () => {
         const { changeSetsInsertHistory } = await internals(store).io.readRows({
           table: 'changeSetsInsertHistory',
           where: {},
         });
 
-        expect(changeSetsInsertHistory._data).toHaveLength(invoicesSeed.length);
+        expect(changeSetsInsertHistory._data).toHaveLength(
+          handWrittenChangeSetCount,
+        );
         for (const row of changeSetsInsertHistory._data as InsertHistoryRow<string>[]) {
           expect(row).toMatchObject({
             route: '/changeSets',
-            origin: 'core.import',
+            origin: 'seed',
             previous: [],
           });
-          expect(row.timeId).toMatch(/^\d+:.{4}$/);
+          expect(row.timeId).toMatch(/^\d+:seed$/);
         }
       });
     });

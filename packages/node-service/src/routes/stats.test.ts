@@ -52,7 +52,7 @@ describe('GET /api/stats', () => {
         species: 3,
         animals: 10,
         invoices: 6,
-        changeSets: 6,
+        changeSets: 44,
       }) as Record<string, number>,
     });
     expect(stats.uptimeSeconds).toBeGreaterThanOrEqual(0);
