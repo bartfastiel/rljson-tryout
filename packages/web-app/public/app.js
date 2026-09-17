@@ -21,7 +21,9 @@ const views = {
 };
 
 const main = requiredElement('main');
-const navigationLinks = document.querySelectorAll('nav a[data-view]');
+const navigationLinks = /** @type {NodeListOf<HTMLAnchorElement>} */ (
+  document.querySelectorAll('nav a[data-view]')
+);
 
 /**
  * @param {string} viewName
@@ -52,7 +54,7 @@ const render = () => {
   const view = views[viewName];
   document.title = `${view?.title ?? 'Page not found'} · ${applicationName}`;
   for (const link of navigationLinks) {
-    if (link.getAttribute('data-view') === viewName) {
+    if (link.dataset.view === viewName) {
       link.setAttribute('aria-current', 'page');
     } else {
       link.removeAttribute('aria-current');
@@ -73,4 +75,4 @@ const showNodeName = async () => {
 
 window.addEventListener('hashchange', render);
 render();
-void showNodeName();
+await showNodeName();

@@ -35,6 +35,16 @@ this file only repeats what a contributor needs to remember day to day.
   decoration (a separate check and inline comments from the SonarCloud
   GitHub app) needs that app bound to the repository, a one-time step for a
   human; until then the gate result only shows in the `checks` job log.
+- Zero open Sonar issues on new code is a standing rule, not just the
+  quality gate's coverage and duplication conditions: right after the
+  quality gate, the `Sonar issues on new code` step in `checks` queries the
+  SonarCloud issue search for the pull request and fails the build, listing
+  every issue as a `file,line` annotation, when it finds a single one still
+  open. Fix what it reports on the same branch; to see the issues yourself,
+  open the project on SonarCloud
+  (`https://sonarcloud.io/project/issues?id=bartfastiel_rljson-tryout`) and
+  filter by pull request, or by `branch=main` for the standing state of
+  `main`.
 
 ## English and naming
 
