@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Configuration } from './configuration.ts';
 import { buildServer } from './server.ts';
+import { PetShopStore } from './store/petShopStore.ts';
 
 const packageDirectory = dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(
@@ -21,7 +22,7 @@ const testConfiguration: Configuration = Object.freeze({
 
 describe('buildServer', () => {
   it('answers /health with status 200 and the documented shape', async () => {
-    const server = buildServer(testConfiguration);
+    const server = buildServer(testConfiguration, new PetShopStore());
 
     const response = await server.inject({ method: 'GET', url: '/health' });
 
@@ -43,6 +44,7 @@ describe('buildServer', () => {
         nodeName: 'node2',
         gitCommit: 'abc1234',
       }),
+      new PetShopStore(),
     );
 
     const response = await server.inject({ method: 'GET', url: '/health' });

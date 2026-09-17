@@ -272,9 +272,11 @@ makes "what arrived from whom" observable.
 
 ### 3.5 Known pitfalls
 
-- `io-sqlite-node` and `io-mssql` pin older `io` and `rljson` versions. Add
-  `pnpm.overrides` for `@rljson/rljson`, `@rljson/io`, `@rljson/hash`,
-  `@rljson/json` in the root `package.json` and confirm with `pnpm why
+- `io-sqlite-node` and `io-mssql` pin older `io` and `rljson` versions, and
+  `@rljson/validate` (pulled in by `db` and `io`) pins older `rljson`,
+  `hash` and `json`. Keep the `overrides` for `@rljson/rljson`, `@rljson/io`,
+  `@rljson/hash`, `@rljson/json` in `pnpm-workspace.yaml` (pnpm 12 ignores
+  `pnpm.overrides` in `package.json`) and confirm with `pnpm why -r
 @rljson/rljson` that exactly one version is installed. Record the outcome
   in `docs/findings/versions.md`.
 - `IoSqliteNode` stores a relative `dbFileName` under `./data/`; pass an
@@ -505,12 +507,22 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
 
 ### Phase B: the domain on one node (in-memory store)
 
-- [ ] **B1 Species table.** Depends on: A11. `domain`: `TableCfg` for
+- [x] **B1 Species table.** Depends on: A11. `domain`: `TableCfg` for
       `species` and its InsertHistory, three hand-written Duckburg species,
       hashing, validation tests (missing reference, wrong hash, wrong type).
       `node-service`: `PetShopStore` holding `Db` over `IoMem`, tables created
       at start, seed of the three species, `GET /api/species`. Done when the
-      endpoint on `node1` lists three species.
+      endpoint on `node1` lists three species. Deviation: started before the
+      deployment chain A7 to A11 was merged, so acceptance was tests and CI
+      green plus the endpoint verified locally on `HTTP_PORT=8121`; the
+      check on `node1` follows automatically once A9 deploys `main`. The
+      "missing reference" validation test moves to B3, where the first
+      `speciesRef` column exists; the species table has no reference column
+      to break. The version check found every pinned `@rljson/*` package at
+      its latest version (`docs/findings/versions.md`); the overrides from
+      3.5 were needed right away because `@rljson/validate` pulls older
+      copies in, and they live in `pnpm-workspace.yaml` because pnpm 12
+      ignores `pnpm.overrides` in `package.json`.
 - [ ] **B2 Web app skeleton, mobile first.** Depends on: B1. `web-app`
       package with `index.html`, `app.js`, `styles.css`, hash routing, a shell
       with bottom navigation on narrow screens and a sidebar from 768 px, view
