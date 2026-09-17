@@ -148,8 +148,9 @@ plan passes, it is available.
 ### Workloads
 
 `infra/terraform/workloads` is the second stage. It reads the kubeconfig
-from the state of the cluster stage, configures the Kubernetes provider from
-it and calls the module `modules/petshop-environment` once for production:
+from the state of the cluster stage, configures the `kubernetes`, `helm`
+and `kubectl` providers from it and calls the module
+`modules/petshop-environment` once for production:
 namespace `petshop`, one `Deployment` of the node service per node (so far
 only `node1` with the in-memory store), a `ClusterIP` service and a Traefik
 `Ingress` per node, plus an ingress for the apex host that routes to
@@ -172,12 +173,13 @@ workspace also installs cert-manager (Helm chart from
 class, account email from the repository secret `LETSENCRYPT_EMAIL`, passed
 as `TF_VAR_letsencrypt_email`). Every ingress carries a
 `cert-manager.io/cluster-issuer` annotation and a `tls` block, so
-cert-manager keeps one certificate per host. The root module names the
-issuer; it starts with `letsencrypt-staging`, whose certificates no browser
-trusts (`curl -k`), and switches to `letsencrypt-production` once a staging
-certificate has been issued on the live cluster. To reproduce under another
-domain, set the Terraform variable `base_domain` (and `image_repository`
-for another registry) and the repository secret `LETSENCRYPT_EMAIL`;
+cert-manager keeps one certificate per host. The root module names
+`letsencrypt-production`; when trying a new setup, point it at
+`letsencrypt-staging` first (certificates no browser trusts, `curl -k`),
+because Let's Encrypt production issues at most five identical
+certificates per week. To reproduce under another domain, set the
+Terraform variable `base_domain` (and `image_repository` for another
+registry) and the repository secret `LETSENCRYPT_EMAIL`;
 nothing else in the stage knows the domain.
 
 ## License

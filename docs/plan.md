@@ -303,7 +303,7 @@ See [roadmap.md](roadmap.md), section 5.
   `rljson-tryout A <primary ip>` and `*.rljson-tryout A <primary ip>`.
 - SonarQube Cloud organization `bartfastiel-github` with project
   `bartfastiel_rljson-tryout`, token as secret `SONAR_TOKEN`.
-- Repository variable `LETSENCRYPT_EMAIL`.
+- Repository secret `LETSENCRYPT_EMAIL` with the contact address of the ACME account.
 - AWS credentials on the machine that runs the one-time state backend
   bootstrap script (slice A5), which sets the variable `AWS_ROLE_ARN`.
 - Optional: `ANTHROPIC_API_KEY` for the assistant slice.

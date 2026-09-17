@@ -505,11 +505,21 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       because the service does not read `RLJSON_DOMAIN`; the variable joins
       with the slice that introduces it, together with `STORAGE` and
       `SEED_SIZE`.
-- [ ] **A10 TLS.** Depends on: A9. cert-manager, both issuers, ingress with
+- [x] **A10 TLS.** Depends on: A9. cert-manager, both issuers, ingress with
       TLS, HTTP redirect. Verify with the staging issuer first, then switch to
       production in the same pull request once the staging certificate was
       issued. Done when `https://node1…/health` has a valid Let's Encrypt
-      certificate and `http://` redirects.
+      certificate and `http://` redirects. Deviation: two pull requests
+      instead of one, because apply runs only on `main`: #16 installed
+      cert-manager with both issuers and pointed the ingresses at
+      `letsencrypt-staging`, its `main` run proved the staging certificates,
+      and the second pull request flipped the module input to
+      `letsencrypt-production` and dropped `-k` from the verification. The
+      ClusterIssuers are `kubectl_manifest` resources of `alekc/kubectl`,
+      because `kubernetes_manifest` cannot plan a kind whose custom resource
+      definition does not exist yet, and the account email is the repository
+      secret `LETSENCRYPT_EMAIL` rather than a variable, because the runner
+      prints variables used in a job's environment into the public log.
 - [ ] **A11 Smoke test and deploy chain.** Depends on: A10. `smoke` job,
       concurrency groups, image tag flows from `image` to `terraform-workloads`.
       Done when a change to the health payload lands on the internet through
