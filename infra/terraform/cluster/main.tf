@@ -67,4 +67,11 @@ resource "hcloud_server" "main" {
   user_data = templatefile("${path.module}/cloud-init.yaml", {
     public_ipv4 = data.hcloud_primary_ip.main.ip_address
   })
+
+  lifecycle {
+    precondition {
+      condition     = !data.hcloud_primary_ip.main.auto_delete
+      error_message = "The primary IP ${local.project_name} must have auto delete switched off, otherwise the address and the DNS records pointing at it are lost when the server is replaced."
+    }
+  }
 }

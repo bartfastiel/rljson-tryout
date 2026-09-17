@@ -117,7 +117,9 @@ without changing DNS:
 
 The first push to `main` then plans and applies the cluster stage: pull
 requests only plan, `main` applies and waits until the Kubernetes API server
-answers on port 6443.
+answers on port 6443. Any later change to `cloud-init.yaml` replaces the
+server on the next apply: the primary IP and the DNS records stay, everything
+stored on the server's local volumes is lost.
 
 ## License
 

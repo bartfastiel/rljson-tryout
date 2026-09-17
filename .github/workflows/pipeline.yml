@@ -74,11 +74,11 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    # Applies on main queue up in one group; pull request plans are read-only
+    # and get a group of their own so they never displace an apply.
     concurrency:
-      group: cluster
+      group: ${{ github.event_name == 'push' && 'cluster' || format('cluster-plan-{0}', github.event.pull_request.number) }}
       cancel-in-progress: false
-    env:
-      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
     defaults:
       run:
         working-directory: infra/terraform/cluster
@@ -109,26 +109,34 @@ jobs:
 
       - name: Plan
         if: github.event_name == 'pull_request'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
         run: terraform plan -input=false -lock=false -no-color
 
       - name: Plan for apply
         if: github.event_name == 'push'
-        run: terraform plan -input=false -out=tfplan
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform plan -input=false -no-color -out=tfplan
 
       - name: Apply
         if: github.event_name == 'push'
-        run: terraform apply -input=false tfplan
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform apply -input=false -no-color tfplan
 
+      # k3s runs the API server with anonymous authentication off, so the
+      # expected answer is a 401 Status body; a version body is accepted too.
       - name: Wait for the Kubernetes API server
         if: github.event_name == 'push'
         run: |
           server_ipv4="$(terraform output -raw server_ipv4)"
           version_url="https://${server_ipv4}:6443/version"
-          deadline=$((SECONDS + 360))
+          deadline=$((SECONDS + 720))
           body=""
           until printf '%s' "${body}" | grep -Eq '"gitVersion"|"code": ?40[13]'; do
             if ((SECONDS >= deadline)); then
-              echo "::error::${version_url} did not answer within six minutes. Last body: ${body}"
+              echo "::error::${version_url} did not answer within twelve minutes. Last body: ${body}"
               exit 1
             fi
             sleep 10

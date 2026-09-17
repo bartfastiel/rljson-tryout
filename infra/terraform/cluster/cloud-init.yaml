@@ -1,6 +1,5 @@
 #cloud-config
 package_update: true
-package_upgrade: true
 
 write_files:
   # k3s applies every manifest in this directory at start-up; a

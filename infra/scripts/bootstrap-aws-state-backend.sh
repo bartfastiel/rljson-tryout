@@ -90,9 +90,11 @@ fi
 # GitHub issues the subject claim in the form the repository is configured
 # for: repo:<owner>/<name>:... for older repositories, or the immutable
 # repo:<owner>@<owner id>/<name>@<repository id>:... that is the default for
-# repositories created after July 2026. The API reports the prefix in effect.
+# repositories created after July 2026. The API reports the prefix in effect;
+# when it cannot be read (older GitHub, token without administration
+# permission) the script falls back to the classic form.
 SUBJECT_PREFIX="$(gh api "repos/${GITHUB_REPOSITORY}/actions/oidc/customization/sub" \
-  --jq '.sub_claim_prefix // empty')"
+  --jq '.sub_claim_prefix // empty' 2>/dev/null || true)"
 if [[ -z "${SUBJECT_PREFIX}" ]]; then
   SUBJECT_PREFIX="repo:${GITHUB_REPOSITORY}"
 fi
