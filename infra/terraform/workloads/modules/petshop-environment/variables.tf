@@ -72,12 +72,12 @@ variable "nodes" {
 }
 
 variable "seed_size" {
-  description = "Seed every node imports at its first start while its store is empty (SEED_SIZE): small is the hand-written pet shop, none leaves the store empty. Every node of the environment seeds the same size."
+  description = "Seed every node of this environment loads into its empty store at its first start (SEED_SIZE): none leaves the store empty, small is the hand-written Duckburg seed, medium and large add generated rows on top of it. Every node of the environment seeds the same size."
   type        = string
 
   validation {
-    condition     = contains(["none", "small"], var.seed_size)
-    error_message = "The seed size must be none or small."
+    condition     = contains(["none", "small", "medium", "large"], var.seed_size)
+    error_message = "The seed size must be one of none, small, medium, large."
   }
 }
 
