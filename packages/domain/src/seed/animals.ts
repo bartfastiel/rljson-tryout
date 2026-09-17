@@ -1,5 +1,6 @@
 import { hashed } from '../hashing.ts';
 import type { AnimalRow, HashedAnimalRow } from '../tables/animals.ts';
+import { breedersSeed } from './breeders.ts';
 import { speciesSeed } from './species.ts';
 import { traitsSeed } from './traits.ts';
 
@@ -14,6 +15,19 @@ const speciesRefFor = (speciesId: string): string => {
     throw new Error(`No seeded species with id "${speciesId}".`);
   }
   return species._hash;
+};
+
+/**
+ * Looks up a seeded breeder by its `id` and returns its `_hash`, the value
+ * an `animals` row needs in `breederRef`. Throws when the id is unknown so a
+ * typo in this file fails loudly instead of writing a dangling reference.
+ */
+const breederRefFor = (breederId: string): string => {
+  const breeder = breedersSeed.find((row) => row.id === breederId);
+  if (breeder === undefined) {
+    throw new Error(`No seeded breeder with id "${breederId}".`);
+  }
+  return breeder._hash;
 };
 
 /**
@@ -62,6 +76,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'quackmore-junior',
     name: 'Quackmore Junior',
     speciesRef: speciesRefFor('duck'),
+    breederRef: breederRefFor('daisys-duckling-nursery'),
     bornOn: '2022-03-14',
     priceCents: 45000,
     backgroundStory:
@@ -72,6 +87,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'donald-the-third',
     name: 'Donald the Third',
     speciesRef: speciesRefFor('duck'),
+    breederRef: breederRefFor('daisys-duckling-nursery'),
     bornOn: '2023-06-01',
     priceCents: 52000,
     backgroundStory:
@@ -82,6 +98,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'daphne-duck',
     name: 'Daphne Duck',
     speciesRef: speciesRefFor('duck'),
+    breederRef: breederRefFor('daisys-duckling-nursery'),
     bornOn: '2021-11-09',
     priceCents: 38000,
     backgroundStory:
@@ -92,6 +109,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'sir-quackington',
     name: 'Sir Quackington',
     speciesRef: speciesRefFor('duck'),
+    breederRef: breederRefFor('daisys-duckling-nursery'),
     bornOn: '2019-08-08',
     priceCents: 68000,
     backgroundStory: sirQuackingtonStory,
@@ -106,6 +124,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'bowser-the-guard-dog',
     name: 'Bowser the Guard Dog',
     speciesRef: speciesRefFor('dog'),
+    breederRef: breederRefFor('rockerduck-kennels'),
     bornOn: '2020-07-22',
     priceCents: 61000,
     backgroundStory:
@@ -116,6 +135,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'nosey-the-bloodhound',
     name: 'Nosey the Bloodhound',
     speciesRef: speciesRefFor('dog'),
+    breederRef: breederRefFor('rockerduck-kennels'),
     bornOn: '2022-01-30',
     priceCents: 47000,
     backgroundStory:
@@ -126,6 +146,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'pepper-the-poodle',
     name: 'Pepper the Poodle',
     speciesRef: speciesRefFor('dog'),
+    breederRef: breederRefFor('grandma-ducks-farm'),
     bornOn: '2023-09-05',
     priceCents: 55000,
     backgroundStory:
@@ -136,6 +157,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'clara-cluck-junior',
     name: 'Clara Cluck Junior',
     speciesRef: speciesRefFor('chicken'),
+    breederRef: breederRefFor('gearloose-workshop-hatchery'),
     bornOn: '2021-04-18',
     priceCents: 21000,
     backgroundStory:
@@ -146,6 +168,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'gadget-the-inventor',
     name: 'Gadget the Inventor',
     speciesRef: speciesRefFor('chicken'),
+    breederRef: breederRefFor('gearloose-workshop-hatchery'),
     bornOn: '2022-12-02',
     priceCents: 27500,
     backgroundStory:
@@ -156,6 +179,7 @@ const animalRows: readonly AnimalRow[] = [
     id: 'henrietta-the-egg-champion',
     name: 'Henrietta the Egg Champion',
     speciesRef: speciesRefFor('chicken'),
+    breederRef: breederRefFor('grandma-ducks-farm'),
     bornOn: '2020-05-14',
     priceCents: 19500,
     backgroundStory:
@@ -166,13 +190,15 @@ const animalRows: readonly AnimalRow[] = [
 
 /**
  * Ten Duckburg pets every node starts with, each referencing one of the
- * three seeded species by its `_hash` and one to four of the eight seeded
- * traits by their `_hash`es, chosen to be consistent with the animal's own
- * `backgroundStory` (Quackmore Junior's jam-jar savings and swimming rivalry
- * give him "hoards shiny objects" and "has a competitive streak"; Sir
- * Quackington's mentoring, keepsake and vigilance give him all four of
- * "surprisingly well-mannered", "quietly sentimental", "fiercely loyal" and
- * "keen senses"; and so on for the rest). Every animal's `backgroundStory`
+ * three seeded species by its `_hash`, one of the four seeded breeders by
+ * its `_hash` (chosen to fit the animal's own `backgroundStory`, see
+ * `breedersSeed`) and one to four of the eight seeded traits by their
+ * `_hash`es, chosen to be consistent with the animal's own `backgroundStory`
+ * (Quackmore Junior's jam-jar savings and swimming rivalry give him "hoards
+ * shiny objects" and "has a competitive streak"; Sir Quackington's
+ * mentoring, keepsake and vigilance give him all four of "surprisingly
+ * well-mannered", "quietly sentimental", "fiercely loyal" and "keen senses";
+ * and so on for the rest). Every animal's `backgroundStory`
  * cross-references at least one Duckburg regular
  * (Scrooge McDuck, Donald Duck, Gyro Gearloose, the Beagle Boys, Magica De
  * Spell or Grandma Duck) and at least one other seeded animal; Sir

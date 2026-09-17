@@ -35,6 +35,13 @@ export const traitFilterChips = (page: Page): Locator =>
   page.getByRole('navigation', { name: 'Filter by traits' }).getByRole('link');
 
 /**
+ * The two-chip breeder filter summary on the animals view (the active
+ * breeder plus an "All" reset), present only while a breeder is selected.
+ */
+export const breederFilterChips = (page: Page): Locator =>
+  page.getByRole('navigation', { name: 'Filter by breeder' }).getByRole('link');
+
+/**
  * The trait chips on an animal's detail view (`.animal-traits`), as opposed
  * to the trait filter chips on the animals view `traitFilterChips` reads.
  */

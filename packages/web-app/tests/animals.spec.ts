@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  breederFilterChips,
   cardListItems,
   speciesFilterChips,
   traitFilterChips,
@@ -168,6 +169,53 @@ test('the All trait chip resets only the trait filter', async ({ page }) => {
   await expect(page).toHaveURL(/#\/animals\?species=chicken$/);
   await expect(
     speciesFilterChips(page).filter({ hasText: 'Chicken' }),
+  ).toHaveAttribute('aria-current', 'page');
+});
+
+test('a breeder deep link filters immediately and shows the breeder summary', async ({
+  page,
+}) => {
+  await page.goto('/#/animals?breeder=grandma-ducks-farm');
+
+  const cards = cardListItems(page);
+  await expect(cards).not.toHaveCount(0);
+  await expect(cards).not.toHaveCount(10);
+
+  const chips = breederFilterChips(page);
+  await expect(chips).toHaveCount(2);
+  await expect(
+    chips.filter({ hasText: "Grandma Duck's Farm" }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(chips.filter({ hasText: /^All$/ })).not.toHaveAttribute(
+    'aria-current',
+  );
+});
+
+test('the breeder summary is absent when no breeder is selected', async ({
+  page,
+}) => {
+  await page.goto('/#/animals');
+
+  await expect(breederFilterChips(page)).toHaveCount(0);
+});
+
+test('the All chip in the breeder summary resets only the breeder filter', async ({
+  page,
+}) => {
+  await page.goto(
+    '/#/animals?species=dog&breeder=grandma-ducks-farm&trait=fiercely-loyal',
+  );
+  await expect(breederFilterChips(page).first()).toBeVisible();
+
+  await breederFilterChips(page).filter({ hasText: /^All$/ }).click();
+
+  await expect(page).toHaveURL(/#\/animals\?species=dog&trait=fiercely-loyal$/);
+  await expect(breederFilterChips(page)).toHaveCount(0);
+  await expect(
+    speciesFilterChips(page).filter({ hasText: 'Dog' }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(
+    traitFilterChips(page).filter({ hasText: 'Fiercely loyal' }),
   ).toHaveAttribute('aria-current', 'page');
 });
 

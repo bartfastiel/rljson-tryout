@@ -1,6 +1,7 @@
 // @ts-check
 import './components/animal-detail.js';
 import './components/animals-list.js';
+import './components/breeders-list.js';
 import './components/species-list.js';
 import { fetchJson } from './api.js';
 import { requiredElement } from './dom.js';
@@ -19,6 +20,10 @@ const views = {
   species: {
     title: 'Species',
     render: () => document.createElement('species-list'),
+  },
+  breeders: {
+    title: 'Breeders',
+    render: () => document.createElement('breeders-list'),
   },
 };
 

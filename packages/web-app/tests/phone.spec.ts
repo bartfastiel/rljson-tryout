@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   boundingBoxOf,
+  breederFilterChips,
   cardListItems,
   expectNoHorizontalScroll,
   mainNavigation,
@@ -68,6 +69,30 @@ test('keeps every filter chip at least 44 pixels tall on the animals view', asyn
   await expect(cardListItems(page)).toHaveCount(10);
 
   for (const chips of [speciesFilterChips(page), traitFilterChips(page)]) {
+    for (const chip of await chips.all()) {
+      const box = await boundingBoxOf(chip);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+  }
+});
+
+test('keeps all three filter groups usable at 360 pixels when a breeder is active', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 780 });
+  await page.goto('/#/animals?breeder=grandma-ducks-farm');
+  await expect(cardListItems(page)).not.toHaveCount(0);
+
+  await expect(speciesFilterChips(page).first()).toBeVisible();
+  await expect(traitFilterChips(page).first()).toBeVisible();
+  await expect(breederFilterChips(page)).toHaveCount(2);
+  await expectNoHorizontalScroll(page);
+
+  for (const chips of [
+    speciesFilterChips(page),
+    traitFilterChips(page),
+    breederFilterChips(page),
+  ]) {
     for (const chip of await chips.all()) {
       const box = await boundingBoxOf(chip);
       expect(box.height).toBeGreaterThanOrEqual(44);

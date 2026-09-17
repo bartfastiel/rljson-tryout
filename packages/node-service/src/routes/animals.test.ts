@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { animalsSeed, speciesSeed } from '@rljson-tryout/domain';
+import { animalsSeed, breedersSeed, speciesSeed } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -63,6 +63,8 @@ describe('GET /api/animals', () => {
     for (const entry of animals) {
       expect(Object.keys(entry).sort()).toStrictEqual([
         'bornOn',
+        'breederFarmName',
+        'breederId',
         'hash',
         'id',
         'name',
@@ -107,16 +109,39 @@ describe('GET /api/animals', () => {
     }
   });
 
-  it('answers with an empty list for an unknown species id', async () => {
+  it('narrows the list with ?breeder=<id>', async () => {
     await store.seedIfEmpty();
+    const breederId = breedersSeed[0]!.id;
 
     const response = await server.inject({
       method: 'GET',
-      url: '/api/animals?species=dragon',
+      url: `/api/animals?breeder=${breederId}`,
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual([]);
+    const animals = response.json<{ breederId: string }[]>();
+    expect(animals.length).toBeGreaterThan(0);
+    for (const animal of animals) {
+      expect(animal.breederId).toBe(breederId);
+    }
+  });
+
+  it('joins the breeder farm name of every animal against the seed', async () => {
+    await store.seedIfEmpty();
+    const breederByHash = new Map(
+      breedersSeed.map((breeder) => [breeder._hash, breeder]),
+    );
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/animals',
+    });
+
+    const animals = response.json<{ id: string; breederFarmName: string }[]>();
+    for (const seedRow of animalsSeed) {
+      const expectedBreeder = breederByHash.get(seedRow.breederRef);
+      const listed = animals.find((animal) => animal.id === seedRow.id);
+      expect(listed?.breederFarmName).toBe(expectedBreeder?.farmName);
+    }
   });
 
   it('narrows the list with ?trait=<id>', async () => {
@@ -149,17 +174,24 @@ describe('GET /api/animals', () => {
     ]);
   });
 
-  it('answers with an empty list for an unknown trait id', async () => {
-    await store.seedIfEmpty();
+  it.each([
+    ['species', 'dragon'],
+    ['breeder', 'no-such-breeder'],
+    ['trait', 'telekinesis'],
+  ])(
+    'answers with an empty list for an unknown %s id',
+    async (queryParam, value) => {
+      await store.seedIfEmpty();
 
-    const response = await server.inject({
-      method: 'GET',
-      url: '/api/animals?trait=telekinesis',
-    });
+      const response = await server.inject({
+        method: 'GET',
+        url: `/api/animals?${queryParam}=${value}`,
+      });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toStrictEqual([]);
-  });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toStrictEqual([]);
+    },
+  );
 
   it('never includes the background story in the list', async () => {
     await store.seedIfEmpty();
@@ -223,6 +255,9 @@ describe('GET /api/animals/:id', () => {
     expect(Object.keys(animal).sort()).toStrictEqual([
       'backgroundStory',
       'bornOn',
+      'breeder',
+      'breederFarmName',
+      'breederId',
       'hash',
       'id',
       'name',
@@ -243,6 +278,10 @@ describe('GET /api/animals/:id', () => {
         expect.objectContaining({ id: 'fiercely-loyal' }),
       ]),
     );
+    expect(animal.breeder).toMatchObject({
+      id: (animal as { breederId: string }).breederId,
+      farmName: (animal as { breederFarmName: string }).breederFarmName,
+    });
   });
 
   it('answers with a story at least 4000 characters long for the long seeded animal', async () => {
