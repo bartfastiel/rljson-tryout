@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  averageCharactersPerLine,
   boundingBoxOf,
   cardListItems,
   mainNavigation,
@@ -34,4 +35,17 @@ test('lays the animal cards out in more than one column', async ({ page }) => {
   const second = await boundingBoxOf(cards.nth(1));
   expect(second.y).toBe(first.y);
   expect(second.x).toBeGreaterThan(first.x + first.width);
+});
+
+test("keeps a story paragraph's line length within a comfortable measure", async ({
+  page,
+}) => {
+  await page.goto('/#/animals/sir-quackington');
+
+  const firstParagraph = page.locator('.animal-story p').first();
+  await expect(firstParagraph).toBeVisible();
+
+  expect(await averageCharactersPerLine(firstParagraph)).toBeLessThanOrEqual(
+    80,
+  );
 });

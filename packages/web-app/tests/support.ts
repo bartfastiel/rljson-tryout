@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 export type Box = { x: number; y: number; width: number; height: number };
 
@@ -51,3 +51,27 @@ export const bodyBackgroundLuminance = async (page: Page): Promise<number> =>
   relativeLuminance(
     await page.evaluate(() => getComputedStyle(document.body).backgroundColor),
   );
+
+export const expectNoHorizontalScroll = async (page: Page): Promise<void> => {
+  const widths = await page.evaluate(() => ({
+    document: document.documentElement.scrollWidth,
+    viewport: window.innerWidth,
+  }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+};
+
+/**
+ * The average number of characters per wrapped line of a text element, from
+ * the number of line boxes a `Range` over its content reports through
+ * `getClientRects()`: one rect per wrapped line for plain inline text, so
+ * dividing the character count by the rect count approximates how long a
+ * line reads on screen.
+ */
+export const averageCharactersPerLine = (locator: Locator): Promise<number> =>
+  locator.evaluate((element) => {
+    const text = element.textContent ?? '';
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const lineCount = range.getClientRects().length;
+    return lineCount === 0 ? 0 : text.length / lineCount;
+  });

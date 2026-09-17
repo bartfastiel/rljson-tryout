@@ -99,6 +99,20 @@ const speciesFilter = (species) => {
 };
 
 /**
+ * The href of an animal's detail page, carrying the currently selected
+ * species filter along so that `animal-detail.js` can send a "back" link
+ * to the filtered list the card was clicked from, not the full list.
+ *
+ * @param {string} animalId
+ */
+const animalDetailHref = (animalId) => {
+  const speciesId = selectedSpeciesId();
+  const query =
+    speciesId === null ? '' : `?species=${encodeURIComponent(speciesId)}`;
+  return `#/animals/${encodeURIComponent(animalId)}${query}`;
+};
+
+/**
  * @param {Animal} animal
  */
 const animalCard = (animal) => {
@@ -112,7 +126,10 @@ const animalCard = (animal) => {
     ),
   );
 
-  const card = element('article', 'card animal-card');
+  // The whole card is one link to the animal's detail page, so a tap
+  // anywhere on it reaches the detail view with a single, large target.
+  const card = element('a', 'card animal-card');
+  card.href = animalDetailHref(animal.id);
   card.append(
     element('h2', 'animal-name', animal.name),
     meta,
