@@ -31,6 +31,16 @@ export const cardListItems = (page: Page): Locator =>
 export const speciesFilterChips = (page: Page): Locator =>
   page.getByRole('navigation', { name: 'Filter by species' }).getByRole('link');
 
+export const traitFilterChips = (page: Page): Locator =>
+  page.getByRole('navigation', { name: 'Filter by traits' }).getByRole('link');
+
+/**
+ * The trait chips on an animal's detail view (`.animal-traits`), as opposed
+ * to the trait filter chips on the animals view `traitFilterChips` reads.
+ */
+export const animalDetailTraitChips = (page: Page): Locator =>
+  page.locator('.animal-traits').getByRole('link');
+
 /**
  * Relative luminance per WCAG 2 of a computed `rgb(r, g, b)` colour, from 0
  * for black to 1 for white.

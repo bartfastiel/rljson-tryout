@@ -29,6 +29,7 @@ describe('animalsTableCfg', () => {
       ['bornOn', 'string'],
       ['priceCents', 'number'],
       ['backgroundStory', 'string'],
+      ['traitsRefs', 'jsonArray'],
     ]);
   });
 
@@ -39,6 +40,18 @@ describe('animalsTableCfg', () => {
 
     expect(speciesRef?.ref).toStrictEqual({
       tableKey: 'species',
+      type: 'components',
+    });
+  });
+
+  it('declares traitsRefs as a jsonArray multi-reference into the traits table', () => {
+    const traitsRefs = animalsTableCfg.columns.find(
+      (column) => column.key === 'traitsRefs',
+    );
+
+    expect(traitsRefs?.type).toBe('jsonArray');
+    expect(traitsRefs?.ref).toStrictEqual({
+      tableKey: 'traits',
       type: 'components',
     });
   });

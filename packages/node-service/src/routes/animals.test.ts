@@ -119,6 +119,48 @@ describe('GET /api/animals', () => {
     expect(response.json()).toStrictEqual([]);
   });
 
+  it('narrows the list with ?trait=<id>', async () => {
+    await store.seedIfEmpty();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/animals?trait=competitive-streak',
+    });
+
+    const animals = response.json<{ id: string }[]>();
+    expect(animals.length).toBeGreaterThan(0);
+    expect(animals.length).toBeLessThan(10);
+  });
+
+  it('combines ?species=<id> and ?trait=<id>', async () => {
+    await store.seedIfEmpty();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/animals?species=chicken&trait=competitive-streak',
+    });
+
+    const animals = response.json<{ id: string; speciesId: string }[]>();
+    expect(animals).toStrictEqual([
+      expect.objectContaining({
+        id: 'henrietta-the-egg-champion',
+        speciesId: 'chicken',
+      }),
+    ]);
+  });
+
+  it('answers with an empty list for an unknown trait id', async () => {
+    await store.seedIfEmpty();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/animals?trait=telekinesis',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toStrictEqual([]);
+  });
+
   it('never includes the background story in the list', async () => {
     await store.seedIfEmpty();
 
@@ -187,6 +229,7 @@ describe('GET /api/animals/:id', () => {
       'priceCents',
       'speciesId',
       'speciesName',
+      'traits',
     ]);
     expect(animal).toMatchObject({
       id: seedRow!.id,
@@ -195,6 +238,11 @@ describe('GET /api/animals/:id', () => {
       speciesName: 'Duck',
       backgroundStory: seedRow!.backgroundStory,
     });
+    expect(animal.traits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'fiercely-loyal' }),
+      ]),
+    );
   });
 
   it('answers with a story at least 4000 characters long for the long seeded animal', async () => {
