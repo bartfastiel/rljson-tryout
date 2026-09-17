@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 import { speciesSeed } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,6 +13,14 @@ const testConfiguration: Configuration = Object.freeze({
   httpPort: 0,
   logLevel: 'error',
   gitCommit: 'test-commit',
+  webAppDirectory: resolve(
+    import.meta.dirname,
+    '..',
+    '..',
+    '..',
+    'web-app',
+    'public',
+  ),
 });
 
 describe('GET /api/species', () => {
