@@ -550,7 +550,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       preview workspace (never against production during this slice).
       Deviation: the manual `up` and `down` workflows replaced
       `destroy-all.yml` and were built early as slice A13a (pull request
-      #PULL_REQUEST_NUMBER); `preview-sweep.yml` follows with A12/A13.
+      #17); `preview-sweep.yml` follows with A12/A13.
 
 ### Phase B: the domain on one node (in-memory store)
 
