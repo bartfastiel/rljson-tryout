@@ -20,6 +20,7 @@ import {
   referencesOf,
   type HistoryReference,
   type RowReference,
+  type RowReferences,
 } from './rowReferences.ts';
 
 /**
@@ -118,6 +119,49 @@ type PendingChangeSet = {
   fromNodeId: string | null;
   attempts: number;
 };
+
+type WrittenRow = { table: string; row: SyncRow };
+
+/** What a pull knows about itself, for the transfer it ends in. */
+type PullOutcome = {
+  changeSetHash: string;
+  fromNodeId: string | null;
+  changeSetId: string | null;
+  tables: Record<string, number>;
+  started: number;
+};
+
+/**
+ * The references still to check while the dependencies of a change set
+ * are pulled: rows first, then history rows, each key once.
+ */
+class DependencyWalk {
+  readonly seen = new Set<string>();
+  private readonly rows: RowReference[] = [];
+  private readonly history: HistoryReference[] = [];
+
+  add(references: RowReferences): void {
+    this.rows.push(...references.rows);
+    this.history.push(...references.history);
+  }
+
+  next(): RowReference | HistoryReference | undefined {
+    for (;;) {
+      const reference = this.rows.shift() ?? this.history.shift();
+      if (reference === undefined) {
+        return undefined;
+      }
+      const key =
+        'hash' in reference
+          ? `${reference.table}@${reference.hash}`
+          : `${reference.table}InsertHistory@${reference.timeId}`;
+      if (!this.seen.has(key)) {
+        this.seen.add(key);
+        return reference;
+      }
+    }
+  }
+}
 
 /**
  * A pull that could not finish because a peer could not answer or has
@@ -487,94 +531,112 @@ export class SyncAgent {
     if (pending === undefined) {
       return;
     }
-    const started = this.now();
-    const deadline = started + this.pullTimeoutMs;
-    let changeSetId: string | null = null;
-    let tables: Record<string, number> = {};
-    const finish = (status: SyncStatus, error?: string): void => {
-      this.record({
-        direction: 'incoming',
-        peerNodeId: pending.fromNodeId,
-        changeSetHash,
-        changeSetId,
-        tables,
-        durationMs: Math.max(0, this.now() - started),
-        at: new Date(this.now()).toISOString(),
-        status,
-        ...(error === undefined ? {} : { error }),
-      });
-    };
+    if (await this.store.holdsChangeSet(changeSetHash)) {
+      this.pending.delete(changeSetHash);
+      this.counters.skipped += 1;
+      this.logger.debug(
+        { changeSetHash, fromNodeId: pending.fromNodeId },
+        'change set already held, skipped',
+      );
+      return;
+    }
 
+    pending.attempts += 1;
+    const started = this.now();
+    const outcome: PullOutcome = {
+      changeSetHash,
+      fromNodeId: pending.fromNodeId,
+      changeSetId: null,
+      tables: {},
+      started,
+    };
     try {
-      if (await this.store.holdsChangeSet(changeSetHash)) {
-        this.pending.delete(changeSetHash);
-        this.counters.skipped += 1;
-        this.logger.debug(
-          { changeSetHash, fromNodeId: pending.fromNodeId },
-          'change set already held, skipped',
-        );
-        return;
-      }
-      pending.attempts += 1;
-      const changeSet = await this.pullChangeSetRow(changeSetHash, deadline);
-      changeSetId = changeSet.id;
-      const items = changeSet.items;
-      const written: { table: string; row: SyncRow }[] = [];
-      for (const item of items) {
-        const row = await this.pullVerified(item.table, item.ref, deadline);
-        await this.store.writeReceivedRow(item.table, row);
-        written.push({ table: item.table, row });
-      }
-      tables = countByTable(items);
-      await this.pullDependencies(written, deadline);
-      await this.store.recordReceivedChangeSet(changeSet);
+      await this.pullChangeSet(
+        changeSetHash,
+        started + this.pullTimeoutMs,
+        outcome,
+      );
       this.pending.delete(changeSetHash);
       this.counters.received += 1;
-      finish('completed');
+      this.finish(outcome, 'completed');
       this.logger.info(
-        {
-          changeSetHash,
-          changeSetId,
-          fromNodeId: pending.fromNodeId,
-          tables,
-          durationMs: this.now() - started,
-        },
+        { ...outcome, durationMs: this.now() - started },
         'change set received',
       );
     } catch (error) {
-      const message = errorMessage(error);
-      this.lastError = message;
-      const givenUp =
-        error instanceof HashMismatch ||
-        isRejectedByCascade(error) ||
-        pending.attempts >= this.maxAttempts;
-      if (givenUp) {
-        this.pending.delete(changeSetHash);
-        this.counters.failed += 1;
-        finish('failed', message);
-        this.logger.error(
-          {
-            changeSetHash,
-            changeSetId,
-            fromNodeId: pending.fromNodeId,
-            err: error,
-          },
-          'change set failed',
-        );
-      } else {
-        finish('pending', message);
-        this.logger.warn(
-          {
-            changeSetHash,
-            changeSetId,
-            fromNodeId: pending.fromNodeId,
-            attempt: pending.attempts,
-            err: error,
-          },
-          'change set pending, will be pulled again',
-        );
-      }
+      this.settleFailedPull(pending, outcome, error);
     }
+  }
+
+  /**
+   * Pulls the change set row, then every item, writes them, pulls what
+   * they depend on and records the change set. Fills the outcome as it
+   * goes, so that a failure reports what was known by then.
+   */
+  private async pullChangeSet(
+    changeSetHash: string,
+    deadline: number,
+    outcome: PullOutcome,
+  ): Promise<void> {
+    const changeSet = await this.pullChangeSetRow(changeSetHash, deadline);
+    outcome.changeSetId = changeSet.id;
+    const written: WrittenRow[] = [];
+    for (const item of changeSet.items) {
+      const row = await this.pullVerified(item.table, item.ref, deadline);
+      await this.store.writeReceivedRow(item.table, row);
+      written.push({ table: item.table, row });
+    }
+    outcome.tables = countByTable(changeSet.items);
+    await this.pullDependencies(written, deadline);
+    await this.store.recordReceivedChangeSet(changeSet);
+  }
+
+  /**
+   * A pull that threw: given up (failed) for a row that does not hash to
+   * its content, a read the cascade rejected for its hash, or the last
+   * allowed attempt; kept pending otherwise.
+   */
+  private settleFailedPull(
+    pending: PendingChangeSet,
+    outcome: PullOutcome,
+    error: unknown,
+  ): void {
+    const message = errorMessage(error);
+    this.lastError = message;
+    const givenUp =
+      error instanceof HashMismatch ||
+      isRejectedByCascade(error) ||
+      pending.attempts >= this.maxAttempts;
+    const fields = {
+      changeSetHash: outcome.changeSetHash,
+      changeSetId: outcome.changeSetId,
+      fromNodeId: outcome.fromNodeId,
+      attempt: pending.attempts,
+      err: error,
+    };
+    if (givenUp) {
+      this.pending.delete(outcome.changeSetHash);
+      this.counters.failed += 1;
+      this.finish(outcome, 'failed', message);
+      this.logger.error(fields, 'change set failed');
+    } else {
+      this.finish(outcome, 'pending', message);
+      this.logger.warn(fields, 'change set pending, will be pulled again');
+    }
+  }
+
+  private finish(outcome: PullOutcome, status: SyncStatus, error?: string) {
+    this.record({
+      direction: 'incoming',
+      peerNodeId: outcome.fromNodeId,
+      changeSetHash: outcome.changeSetHash,
+      changeSetId: outcome.changeSetId,
+      tables: outcome.tables,
+      durationMs: Math.max(0, this.now() - outcome.started),
+      at: new Date(this.now()).toISOString(),
+      status,
+      ...(error === undefined ? {} : { error }),
+    });
   }
 
   private async pullChangeSetRow(
@@ -638,24 +700,17 @@ export class SyncAgent {
    * without it.
    */
   private async pullDependencies(
-    written: readonly { table: string; row: SyncRow }[],
+    written: readonly WrittenRow[],
     deadline: number,
   ): Promise<void> {
-    const rowsToCheck: RowReference[] = [];
-    const historyToCheck: HistoryReference[] = [];
-    const seen = new Set<string>();
-    const consider = (table: string, row: SyncRow): void => {
-      const references = referencesOf(this.tableCfgs, table, row);
-      rowsToCheck.push(...references.rows);
-      historyToCheck.push(...references.history);
-    };
+    const walk = new DependencyWalk();
     for (const entry of written) {
-      seen.add(`${entry.table}@${entry.row._hash}`);
-      consider(entry.table, entry.row);
+      walk.seen.add(`${entry.table}@${entry.row._hash}`);
+      walk.add(referencesOf(this.tableCfgs, entry.table, entry.row));
     }
 
     let pulled = 0;
-    while (rowsToCheck.length > 0 || historyToCheck.length > 0) {
+    for (let next = walk.next(); next !== undefined; next = walk.next()) {
       if (pulled >= this.dependencyBound) {
         this.logger.warn(
           { bound: this.dependencyBound },
@@ -663,47 +718,14 @@ export class SyncAgent {
         );
         return;
       }
-      const reference = rowsToCheck.shift();
-      let table: string;
-      let row: SyncRow | undefined;
       try {
-        if (reference !== undefined) {
-          table = reference.table;
-          const key = `${table}@${reference.hash}`;
-          if (seen.has(key)) {
-            continue;
-          }
-          seen.add(key);
-          if (await this.store.hasLocalRow(table, reference.hash)) {
-            continue;
-          }
-          row = await this.pullVerified(table, reference.hash, deadline);
-        } else {
-          const history = historyToCheck.shift()!;
-          table = `${history.table}InsertHistory`;
-          const key = `${table}@${history.timeId}`;
-          if (seen.has(key)) {
-            continue;
-          }
-          seen.add(key);
-          if (
-            await this.store.hasLocalHistoryRow(history.table, history.timeId)
-          ) {
-            continue;
-          }
-          const candidate = await this.within(deadline, key, () =>
-            this.store.pullHistoryRow(history.table, history.timeId),
-          );
-          if (candidate === undefined) {
-            throw new PullIncomplete(
-              `history row ${key} is not held by any node`,
-            );
-          }
-          row = this.verified(table, candidate._hash, candidate);
+        const missing = await this.pullMissing(next, deadline);
+        if (missing === undefined) {
+          continue;
         }
-        await this.store.writeReceivedRow(table, row);
+        await this.store.writeReceivedRow(missing.table, missing.row);
         pulled += 1;
-        consider(table, row);
+        walk.add(referencesOf(this.tableCfgs, missing.table, missing.row));
       } catch (error) {
         this.logger.warn(
           { err: error },
@@ -711,6 +733,41 @@ export class SyncAgent {
         );
       }
     }
+  }
+
+  /**
+   * One referenced row or history row, pulled and verified when the
+   * local store lacks it; `undefined` when it is there already.
+   */
+  private async pullMissing(
+    reference: RowReference | HistoryReference,
+    deadline: number,
+  ): Promise<WrittenRow | undefined> {
+    if ('hash' in reference) {
+      if (await this.store.hasLocalRow(reference.table, reference.hash)) {
+        return undefined;
+      }
+      const row = await this.pullVerified(
+        reference.table,
+        reference.hash,
+        deadline,
+      );
+      return { table: reference.table, row };
+    }
+    if (
+      await this.store.hasLocalHistoryRow(reference.table, reference.timeId)
+    ) {
+      return undefined;
+    }
+    const table = `${reference.table}InsertHistory`;
+    const key = `${table}@${reference.timeId}`;
+    const candidate = await this.within(deadline, key, () =>
+      this.store.pullHistoryRow(reference.table, reference.timeId),
+    );
+    if (candidate === undefined) {
+      throw new PullIncomplete(`history row ${key} is not held by any node`);
+    }
+    return { table, row: this.verified(table, candidate._hash, candidate) };
   }
 
   /**

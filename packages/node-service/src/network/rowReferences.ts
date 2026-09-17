@@ -22,6 +22,55 @@ const historyTableSuffix = 'InsertHistory';
 const isString = (value: unknown): value is string => typeof value === 'string';
 
 /**
+ * The references of an InsertHistory row: the row it was written for and
+ * the versions it supersedes.
+ */
+const historyReferencesOf = (
+  entityTable: string,
+  row: SyncRow,
+): RowReferences => {
+  const rows: RowReference[] = [];
+  const history: HistoryReference[] = [];
+  const hash = row[`${entityTable}Ref`];
+  if (isString(hash)) {
+    rows.push({ table: entityTable, hash });
+  }
+  const previous = row.previous;
+  const timeIds = Array.isArray(previous) ? previous : [];
+  for (const timeId of timeIds) {
+    if (isString(timeId)) {
+      history.push({ table: entityTable, timeId });
+    }
+  }
+  return { rows, history };
+};
+
+/**
+ * The references of a domain row: the values of its reference columns.
+ */
+const columnReferencesOf = (
+  tableCfg: TableCfg,
+  row: SyncRow,
+): RowReferences => {
+  const rows: RowReference[] = [];
+  for (const column of tableCfg.columns) {
+    if (column.ref === undefined) {
+      continue;
+    }
+    const value = row[column.key];
+    const hashes = Array.isArray(value) ? value : [value];
+    for (const hash of hashes) {
+      if (isString(hash)) {
+        rows.push({ table: column.ref.tableKey, hash });
+      }
+    }
+  }
+  return { rows, history: [] };
+};
+
+const noReferences: RowReferences = { rows: [], history: [] };
+
+/**
  * Every row and history row the given row depends on, read off the table
  * configurations: for a domain row the values of its reference columns
  * (`ref: { tableKey }` in the `TableCfg`, a single hash in a `string`
@@ -38,43 +87,14 @@ export const referencesOf = (
   table: string,
   row: SyncRow,
 ): RowReferences => {
-  const rows: RowReference[] = [];
-  const history: HistoryReference[] = [];
-
   if (table.endsWith(historyTableSuffix)) {
     const entityTable = table.slice(0, -historyTableSuffix.length);
-    if (tableCfgs.has(entityTable) && entityTable !== changeSetsTableCfg.key) {
-      const hash = row[`${entityTable}Ref`];
-      if (isString(hash)) {
-        rows.push({ table: entityTable, hash });
-      }
-      const previous = row.previous;
-      if (Array.isArray(previous)) {
-        for (const timeId of previous) {
-          if (isString(timeId)) {
-            history.push({ table: entityTable, timeId });
-          }
-        }
-      }
-    }
-    return { rows, history };
+    return tableCfgs.has(entityTable) && entityTable !== changeSetsTableCfg.key
+      ? historyReferencesOf(entityTable, row)
+      : noReferences;
   }
-
   const tableCfg = tableCfgs.get(table);
-  if (tableCfg === undefined || tableCfg.key === changeSetsTableCfg.key) {
-    return { rows, history };
-  }
-  for (const column of tableCfg.columns) {
-    if (column.ref === undefined) {
-      continue;
-    }
-    const value = row[column.key];
-    const hashes = Array.isArray(value) ? value : [value];
-    for (const hash of hashes) {
-      if (isString(hash)) {
-        rows.push({ table: column.ref.tableKey, hash });
-      }
-    }
-  }
-  return { rows, history };
+  return tableCfg === undefined || tableCfg.key === changeSetsTableCfg.key
+    ? noReferences
+    : columnReferencesOf(tableCfg, row);
 };

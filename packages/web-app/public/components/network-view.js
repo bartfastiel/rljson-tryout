@@ -279,15 +279,15 @@ const transferItem = (status, transfer, at) => {
     element('code', 'transfer-hash', transfer.changeSetHash.slice(0, 8)),
   );
   changeSet.title = transfer.changeSetHash;
+  const duration =
+    transfer.direction === 'incoming' ? `, ${transfer.durationMs} ms` : '';
   const meta = element('p', 'transfer-meta');
   meta.append(
     transferRows(transfer.tables),
     element(
       'span',
       'transfer-time',
-      `${formatRelativeTime(transfer.at, at)}${
-        transfer.direction === 'incoming' ? `, ${transfer.durationMs} ms` : ''
-      }`,
+      `${formatRelativeTime(transfer.at, at)}${duration}`,
     ),
   );
   item.append(heading, changeSet, meta);

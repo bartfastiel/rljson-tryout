@@ -105,7 +105,9 @@ class LinkedChannel implements AnnouncementChannel {
     this.listener = listener;
   }
 
-  onPeerJoined(): void {}
+  onPeerJoined(): void {
+    // Nobody joins a linked pair; the agent registers, nothing fires.
+  }
 
   deliver(announcement: Announcement): void {
     this.listener?.(announcement);
