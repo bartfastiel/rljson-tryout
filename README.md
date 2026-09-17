@@ -34,6 +34,7 @@ The system is live with a production Let's Encrypt certificate on three nodes: [
 Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress, slice C1 gives node1 and node2 in production a SQLite store on a persistent volume each, so their invoices survive a redeploy, and slice C3 puts the three nodes on the internet, each still with its own data.
 Slice D1 (discovery and roles) was pulled forward: every node discovers the other nodes of its rljson domain by UDP broadcast, takes part in the hub election and reports the outcome at `/status`; since C3 the three production nodes agree on one hub, which the header of the web app and the `Network` view show live.
 Slice D2 (hub transport) makes the nodes talk: the hub serves its store over socket.io on the hub port, every client connects to it, and a row written on one node is readable by its hash on every other node through the read cascade of `@rljson/server`.
+Slice D3 (change set synchronisation) makes them agree: every change a node writes is announced as one change set, every other node pulls it within tens of milliseconds, an animal renamed on one node shows the new name on all of them, and the seed is deterministic, so a node seeded `medium` fills the `small` ones with its generated rows.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
@@ -141,7 +142,7 @@ probe listener on `HUB_PORT` (3000) and the UDP broadcast socket on
 every node it hears, and takes part in the hub election of
 `@rljson/network` (earliest start wins, an incumbent hub is kept while it
 answers). `GET /status` reports the outcome:
-`{ nodeName, nodeId, publicUrl, domain, role, hubNodeId, hubAddress, peers, nodes, transport, storage, tables }`
+`{ nodeName, nodeId, publicUrl, domain, role, hubNodeId, hubAddress, peers, nodes, transport, sync, storage, tables }`
 with `role` one of `starting`, `standalone` (no other node of the domain
 is known, or discovery is disabled), `hub` and `client`; `peers` lists
 every node discovery knows (`nodeId`, `name` when known, `hostname`,
@@ -180,11 +181,38 @@ the hub, and through the hub every other client, and what comes back is
 cached locally. Writes stay local and whole-table reads never leave the
 node, so `GET /api/animals/:id?version=<hash>` on a client serves a
 version written on the hub by its hash and `GET /api/invoices/:id` serves
-an invoice issued on the hub by its id, while the lists of a client show
-only what the client holds itself until slice D3 synchronises change sets.
-What the cascade does on a read miss, what the requests look like on the
-wire and what happens when the hub goes away are in
+an invoice issued on the hub by its id the moment they exist. What the
+cascade does on a read miss, what the requests look like on the wire and
+what happens when the hub goes away are in
 [docs/findings/hub-transport.md](docs/findings/hub-transport.md).
+
+Every change a node writes is one change set (the rows it wrote and their
+InsertHistory rows, named by hash), and the node's `SyncAgent` announces
+its hash on the `changeSets` route: a client announces to the hub, the
+hub relays to every other client and takes part itself through a
+loopback connection. Every other node pulls the change set and its rows
+by hash through the read cascade, checks each row's hash against its
+content, writes the rows exactly as they came and records the change set,
+so an invoice issued on one node is listed on every node and an animal
+renamed on one node is the current version on every node, its history
+chained to the seed version, within tens of milliseconds. A change set a
+node already holds is skipped by hash; one whose rows a peer cannot serve
+stays pending and is pulled again on the next announcement and every
+thirty seconds. Everything a node wrote is announced again on every
+connection it gets, and the hub repeats its announcements for every
+client that joins, so a node that seeded before it joined still tells
+the others what it holds. `/status` reports it under `sync`:
+`{ announced, received, skipped, pending, failed, lastError, transfers }`
+with the last ten transfers, each with its direction, the node it came
+from or went to, the change set, the rows per table, how long the pull
+took and how it ended; the `Network` view shows the same. The seed is
+deterministic down to its history rows and change sets (the same fixed
+`timeId`s on every node, one change set per seeded entity, 44 for
+`small`), so every node seeds itself, seed announcements are no-ops, and
+a node seeded `medium` fills `small` nodes with its 400 generated change
+sets in about a second. The wire format, the timings and what the
+library does and does not do are in
+[docs/findings/change-set-sync.md](docs/findings/change-set-sync.md).
 
 `STORAGE` selects what backs the store. `memory` (the default) keeps
 everything in the process, so a restart starts from the seed again.
@@ -258,11 +286,15 @@ docker compose -f deploy/compose/three-nodes.yml down
 Within about five seconds (one broadcast interval) exactly one node
 reports `hub` and the other two `client` with the same `hubAddress`, and
 a moment later the hub's `transport` counts two connected clients and
-each client's reports `connectedToHub: true`. An invoice issued on the
-hub (`POST /api/invoices`) is then readable by its id on either client
-(`GET /api/invoices/<id>`), and a version written on the hub
-(`PUT /api/animals/<id>`) by its hash
-(`GET /api/animals/<id>?version=<hash>`). Like in Kubernetes, the nodes
+each client's reports `connectedToHub: true`, every node's `sync` shows
+its 44 seed change sets announced and the other nodes' skipped. An animal
+renamed on any node (`PUT /api/animals/bowser-the-guard-dog` with
+`{ "name": "Bowser the Retired Guard Dog" }`) then shows the new name on
+the other two (`GET /api/animals/bowser-the-guard-dog`) within tens of
+milliseconds, an invoice issued on any node (`POST /api/invoices`) is
+listed on the other two (`GET /api/invoices`), and `/status.sync` of the
+receivers lists the transfer with the node it came from. Like in
+Kubernetes, the nodes
 carry two address lists: `NODE_URLS` names the host-side URLs
 (`http://localhost:8301` and so on), so the links in the header open from
 a browser on the host and its probe marker turns green, and
@@ -273,9 +305,13 @@ with `NODE_SERVICE_PULL_POLICY=missing` unless the image was pulled before
 (the compose file never pulls by default, so a local build is never
 overwritten by a registry image of the same name). The Gherkin features
 `packages/node-service/features/network.feature` ("three nodes start,
-exactly one becomes hub") and `features/hub-transport.feature` ("a row
-written on the hub is readable by hash on a client", also run in-process
-by `pnpm test`) drive exactly this setup:
+exactly one becomes hub"), `features/hub-transport.feature` ("a row
+written on the hub is readable by hash on a client") and
+`features/change-set-sync.feature` ("an invoice issued on node3 appears
+on node1 and node2 within five seconds", "an animal renamed on node2
+shows the new name on node1 and node3", "a change set announced again is
+written once", the latter two also run in-process by `pnpm test`) drive
+exactly this setup:
 
 ```sh
 pnpm --filter @rljson-tryout/node-service test:integration
@@ -285,7 +321,10 @@ It needs Docker, builds the image from the working tree (or uses
 `NODE_SERVICE_IMAGE`), waits for the three `/status` endpoints to settle,
 checks the roles, the hub address, the node lists and the transport, edits
 an animal and issues an invoice on the hub and reads both back on a
-client, saves the compose logs to
+client, issues an invoice on node3 and renames an animal on node2 and
+waits for them on the other nodes, restarts a client container and checks
+that it holds the hub's invoice again while the other client holds it
+once, saves the compose logs to
 `packages/node-service/test-results/compose/three-nodes.log` and tears the
 project down again. `pnpm test` leaves it out; the `integration` job of
 the pipeline runs it against the image the `image` job pushed. What the

@@ -170,12 +170,14 @@ What `IoPeer` requests look like on the wire:
   `write: false`; the protection is by convention, not by the transport
   (slices D14 to D16). The Kubernetes `Service` maps only port 80 to
   8080, so the hub port is reachable from the pod network alone.
-- The sync protocol of slice D3 uses the route as event name:
-  `changeSets` for a reference, `changeSets:ack`, `changeSets:ack:client`,
-  `changeSets:gapfill:req`, `changeSets:gapfill:res` and
-  `changeSets:bootstrap` (`syncEvents(route.flat)` in `@rljson/rljson`).
-  The hub already emits the bootstrap to every new client; with no
-  reference seeded yet it carries nothing.
+- The sync protocol of slice D3 uses the flat route as event name, with
+  its leading slash: `/changeSets` for a reference, `/changeSets:ack`,
+  `/changeSets:ack:client`, `/changeSets:gapfill:req`,
+  `/changeSets:gapfill:res` and `/changeSets:bootstrap`
+  (`syncEvents(route.flat)` in `@rljson/rljson`). The hub already emits
+  the bootstrap to every new client; with no reference seeded yet it
+  carries nothing. What the payloads look like is in
+  `docs/findings/change-set-sync.md`.
 - socket.io itself runs on a WebSocket only (`transports: ['websocket']`
   on both ends; long polling would have cost an HTTP handshake per
   connection and gains nothing inside a pod network), with its default
