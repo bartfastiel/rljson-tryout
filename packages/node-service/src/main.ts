@@ -3,7 +3,9 @@ import { buildServer } from './server.ts';
 import { PetShopStore } from './store/petShopStore.ts';
 
 const configuration = readConfiguration();
-const store = new PetShopStore();
+const store = new PetShopStore({
+  traitRelationMode: configuration.traitRelationMode,
+});
 const server = buildServer(configuration, store);
 
 const shutdown = async (signal: NodeJS.Signals): Promise<void> => {

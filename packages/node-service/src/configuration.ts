@@ -1,6 +1,8 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import type { TraitRelationMode } from './store/traitRelation.ts';
+
 /**
  * A pino log level, restricted to the values the configured logger accepts.
  */
@@ -15,6 +17,11 @@ const logLevels: readonly LogLevel[] = [
   'trace',
 ];
 
+const traitRelationModes: readonly TraitRelationMode[] = [
+  'multi-reference',
+  'junction',
+];
+
 /**
  * The subset of the node configuration (see roadmap section 2.4) that this
  * package uses so far.
@@ -25,6 +32,7 @@ export type Configuration = Readonly<{
   logLevel: LogLevel;
   gitCommit: string;
   webAppDirectory: string;
+  traitRelationMode: TraitRelationMode;
 }>;
 
 /**
@@ -81,6 +89,28 @@ const readLogLevel = (value: string | undefined): LogLevel => {
 };
 
 /**
+ * Reads which implementation `PetShopStore` uses for the animal-trait n-to-m
+ * relation (`docs/findings/n-to-m.md`): the `jsonArray` multi-reference
+ * `animals.traitsRefs` (slice B5, the default) or the `animalTraits`
+ * junction table (slice B6).
+ */
+const readTraitRelationMode = (
+  value: string | undefined,
+): TraitRelationMode => {
+  if (value === undefined) {
+    return 'multi-reference';
+  }
+
+  if (!traitRelationModes.includes(value as TraitRelationMode)) {
+    throw new Error(
+      `TRAIT_RELATION must be one of ${traitRelationModes.join(', ')}, got "${value}"`,
+    );
+  }
+
+  return value as TraitRelationMode;
+};
+
+/**
  * Reads and validates the environment variables this package understands
  * and returns them as a typed, frozen configuration object. Throws a
  * descriptive error when a value is present but invalid.
@@ -94,4 +124,5 @@ export const readConfiguration = (
     logLevel: readLogLevel(environment.LOG_LEVEL),
     gitCommit: environment.GIT_COMMIT ?? 'unknown',
     webAppDirectory: readWebAppDirectory(environment.WEB_APP_DIRECTORY),
+    traitRelationMode: readTraitRelationMode(environment.TRAIT_RELATION),
   });
