@@ -27,3 +27,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  - package-ecosystem: docker
+    directory: /packages/node-service
+    schedule:
+      interval: weekly

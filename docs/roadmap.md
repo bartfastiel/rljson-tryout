@@ -438,7 +438,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       answers `/health` and the image is under 200 MB uncompressed. Note the
       measured size in `docs/findings/image-size.md`. If the GHCR package is
       private after the first push, say so in the pull request; a human sets it
-      to public once. Deviation: `.github/dependabot.yml` still does not exist on `main` (A2 is not merged), so the Docker ecosystem entry from the conductor decision was left for A2 to add; the `docker image inspect --format '{{.Size}}'` command reports a compressed-looking size on this Docker installation's containerd image store (58.8 MB) rather than the true uncompressed footprint, so the uncompressed size was cross-checked with `du -sx /` inside the running container (about 178 MB, still under the 200 MB budget) and both numbers are recorded in `docs/findings/image-size.md`.
+      to public once. Deviation: the `docker image inspect --format '{{.Size}}'` command reports a compressed-looking size on this Docker installation's containerd image store (58.8 MB) rather than the true uncompressed footprint, so the uncompressed size was cross-checked with `du -sx /` inside the running container (about 178 MB, still under the 200 MB budget) and both numbers are recorded in `docs/findings/image-size.md`.
 - [x] **A5 State backend bootstrap.** Depends on: nothing.
       `infra/scripts/bootstrap-aws-state-backend.sh`: idempotently creates the
       S3 bucket (versioning, encryption, public access blocked), an IAM role
