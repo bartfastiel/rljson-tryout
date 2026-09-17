@@ -33,7 +33,29 @@ describe('buildServer', () => {
       name: 'node1',
       version: packageJson.version,
       commit: 'test-commit',
+      startedAt: expect.stringMatching(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      ) as string,
     });
+
+    await server.close();
+  });
+
+  it('reports the same startedAt for the lifetime of the server', async () => {
+    const before = Date.now();
+    const server = buildServer(testConfiguration, new PetShopStore());
+
+    const first = await server.inject({ method: 'GET', url: '/health' });
+    const second = await server.inject({ method: 'GET', url: '/health' });
+
+    const startedAt = Date.parse(
+      (first.json() as { startedAt: string }).startedAt,
+    );
+    expect(startedAt).toBeGreaterThanOrEqual(before);
+    expect(startedAt).toBeLessThanOrEqual(Date.now());
+    expect((second.json() as { startedAt: string }).startedAt).toBe(
+      (first.json() as { startedAt: string }).startedAt,
+    );
 
     await server.close();
   });

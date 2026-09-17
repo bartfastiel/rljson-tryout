@@ -148,7 +148,7 @@ immutable version (`_hash`).
 
 | Method and path                                     | Purpose                                                                                        |
 | --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `GET /health`                                       | `{ status: "ok", name, version, commit }`                                                      |
+| `GET /health`                                       | `{ status: "ok", name, version, commit, startedAt }`                                           |
 | `GET /status`                                       | `{ nodeName, nodeId, role, hubAddress, peers: [...], storage, tables: { <table>: rowCount } }` |
 | `GET /api/stats`                                    | Row counts per table, seed size, uptime                                                        |
 | `GET /api/species`                                  | List of current species versions                                                               |
