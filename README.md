@@ -98,6 +98,29 @@ nothing. Override `GITHUB_REPOSITORY`, `STATE_BUCKET`, `AWS_REGION` or
 `ROLE_NAME` as environment variables to reproduce the project under a
 different account or repository.
 
+### Server and DNS
+
+`infra/terraform/cluster` creates one Hetzner Cloud server with k3s installed
+by cloud-init. The public address and the DNS records are created once by
+hand, outside Terraform, so that the server can be destroyed and recreated
+without changing DNS:
+
+1. Create a Hetzner Cloud project and an API token with read and write
+   permission.
+2. In that project, create a primary IPv4 named `rljson-tryout` in the
+   location you want the server in, with auto delete switched off. Terraform
+   reads it by name and places the server in the same location.
+3. In the DNS zone of your domain, point an A record for your subdomain (for
+   example `rljson-tryout`) and a wildcard A record (`*.rljson-tryout`) at
+   that address.
+4. Store the token as the repository secret `HCLOUD_TOKEN`.
+
+The first push to `main` then plans and applies the cluster stage: pull
+requests only plan, `main` applies and waits until the Kubernetes API server
+answers on port 6443. Any later change to `cloud-init.yaml` replaces the
+server on the next apply: the primary IP and the DNS records stay, everything
+stored on the server's local volumes is lost.
+
 ## License
 
 [MIT](LICENSE)

@@ -19,6 +19,8 @@ playwright-report/
 .terraform/
 *.tfstate
 *.tfstate.*
+*.tfplan
+tfplan
 *.tfvars
 !*.auto.tfvars.example
 .terraform.lock.hcl.tmp

@@ -11,7 +11,9 @@ permissions:
 
 concurrency:
   group: checks-${{ github.ref }}
-  cancel-in-progress: true
+  # A superseded pull request run is cancelled; a run on main is never
+  # interrupted because it may be in the middle of a Terraform apply.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
@@ -62,3 +64,83 @@ jobs:
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  terraform-cluster:
+    name: terraform-cluster
+    needs: checks
+    # Forks and Dependabot receive no secrets, so they cannot plan.
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    # Applies on main queue up in one group; pull request plans are read-only
+    # and get a group of their own so they never displace an apply.
+    concurrency:
+      group: ${{ github.event_name == 'push' && 'cluster' || format('cluster-plan-{0}', github.event.pull_request.number) }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/cluster
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.2
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialise
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        if: github.event_name == 'pull_request'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform plan -input=false -lock=false -no-color
+
+      - name: Plan for apply
+        if: github.event_name == 'push'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Apply
+        if: github.event_name == 'push'
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform apply -input=false -no-color tfplan
+
+      # k3s runs the API server with anonymous authentication off, so the
+      # expected answer is a 401 Status body; a version body is accepted too.
+      - name: Wait for the Kubernetes API server
+        if: github.event_name == 'push'
+        run: |
+          server_ipv4="$(terraform output -raw server_ipv4)"
+          version_url="https://${server_ipv4}:6443/version"
+          deadline=$((SECONDS + 720))
+          body=""
+          until printf '%s' "${body}" | grep -Eq '"gitVersion"|"code": ?40[13]'; do
+            if ((SECONDS >= deadline)); then
+              echo "::error::${version_url} did not answer within twelve minutes. Last body: ${body}"
+              exit 1
+            fi
+            sleep 10
+            body="$(curl -sk --max-time 10 "${version_url}" || true)"
+          done
+          echo "${version_url} answered:"
+          printf '%s\n' "${body}"
