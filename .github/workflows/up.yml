@@ -1,0 +1,145 @@
+name: Up
+
+# Brings the system back after Down: the cluster first, then the production
+# workloads with the image of the commit this run was started from. The
+# pipeline built that image when the commit landed on main. Preview
+# environments are not recreated; they come back with the next push to
+# their pull request. See docs/operations.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Up and Down never overlap each other; the job groups below additionally
+# queue them behind a deployment of the pipeline that is in flight.
+concurrency:
+  group: lifecycle
+  cancel-in-progress: false
+
+jobs:
+  # Fails within seconds, before any server exists, when the run cannot
+  # succeed: started from another branch, or the pipeline of this commit
+  # has not pushed the image (yet).
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_REPOSITORY: ghcr.io/${{ github.repository }}/node-service
+    outputs:
+      image: ${{ steps.image-reference.outputs.image }}
+    steps:
+      - name: Check the branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "${REF}" != "refs/heads/main" ]; then
+            echo "::error::Up runs only from main; this run was started from ${REF}."
+            exit 1
+          fi
+
+      # The same reference the pipeline's image job exposes: registry paths
+      # are lower-case, the repository name in the env block keeps the
+      # owner's spelling.
+      - name: Determine the image reference
+        id: image-reference
+        run: echo "image=${IMAGE_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Check that the image of this commit exists
+        env:
+          IMAGE: ${{ steps.image-reference.outputs.image }}
+        run: |
+          if ! docker manifest inspect "${IMAGE}" > /dev/null; then
+            echo "::error::${IMAGE} does not exist; wait for the pipeline of this commit to push it."
+            exit 1
+          fi
+          echo "${IMAGE} exists."
+
+  cluster:
+    name: cluster
+    needs: preflight
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    concurrency:
+      group: cluster
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/cluster
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
+        with:
+          working-directory: infra/terraform/cluster
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Plan for apply
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Apply
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: terraform apply -input=false -no-color tfplan
+
+      - name: Wait for the Kubernetes API server
+        run: ../../scripts/wait-for-kubernetes-api.sh
+
+      - name: Verify the kubeconfig
+        run: ../../scripts/verify-kubeconfig.sh
+
+  workloads:
+    name: workloads
+    needs: [preflight, cluster]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    concurrency:
+      group: workloads-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/workloads
+    env:
+      TF_VAR_image: ${{ needs.preflight.outputs.image }}
+      TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
+        with:
+          working-directory: infra/terraform/workloads
+          workspace: production
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Plan for apply
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Apply
+        run: terraform apply -input=false -no-color tfplan
+
+      # The same checks as the pipeline's smoke job, fed from the Terraform
+      # outputs of this workspace.
+      - name: Verify the deployment
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          node_urls="$(terraform output -json node_urls | jq -r 'join(" ")')"
+          apex_url="$(terraform output -raw apex_url)"
+          if [ -z "${node_urls}" ] || [ -z "${apex_url}" ]; then
+            echo "::error::The Terraform outputs node_urls and apex_url must not be empty."
+            exit 1
+          fi
+          DEPLOYMENT_URLS="${node_urls} ${apex_url}" ../../scripts/verify-deployment.sh

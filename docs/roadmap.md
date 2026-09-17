@@ -71,7 +71,8 @@ docs/
   roadmap.md       what, this file
   findings/        what we learned, one file per topic
 .github/workflows/ pipeline.yml, preview-destroy.yml, preview-sweep.yml,
-                   destroy-all.yml
+                   down.yml, up.yml
+.github/actions/   composite actions shared by the workflows
 ```
 
 ### 2.2 Tooling
@@ -344,9 +345,9 @@ Pull requests from forks get no secrets; that is acceptable.
 
 Other workflows: `preview-destroy.yml` on `pull_request: closed` destroys
 and deletes workspace `pr-<n>`; `preview-sweep.yml` every six hours destroys
-any `pr-*` workspace whose pull request is not open; `destroy-all.yml` is a
-manual workflow with a confirmation input that destroys workloads and then
-the cluster.
+any `pr-*` workspace whose pull request is not open; `down.yml` is a manual
+workflow with a confirmation input that destroys workloads and then the
+cluster, `up.yml` brings both back (see `docs/operations.md`).
 
 ### 4.3 Terraform stage 1, `infra/terraform/cluster`
 
@@ -547,6 +548,9 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       `destroy-all.yml`, `docs/operations.md` describing both. Done when the
       sweep runs green on schedule and `destroy-all` is tested once against a
       preview workspace (never against production during this slice).
+      Deviation: the manual `up` and `down` workflows replaced
+      `destroy-all.yml` and were built early as slice A13a (pull request
+      #17); `preview-sweep.yml` follows with A12/A13.
 
 ### Phase B: the domain on one node (in-memory store)
 

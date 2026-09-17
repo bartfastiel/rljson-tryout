@@ -1,0 +1,135 @@
+name: Down
+
+# Tears the whole system down to stop the server costs: every workloads
+# workspace first, then the cluster. The Terraform state, the primary IP,
+# the DNS records and the container images survive; Up brings the system
+# back. See docs/operations.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type "down" to destroy the workloads and the server.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Up and Down never overlap each other; the job groups below additionally
+# queue them behind a deployment of the pipeline that is in flight.
+concurrency:
+  group: lifecycle
+  cancel-in-progress: false
+
+jobs:
+  # Fails within seconds, before any concurrency group is taken, when the
+  # run was started from another branch or without the confirmation.
+  confirm:
+    name: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "${REF}" != "refs/heads/main" ]; then
+            echo "::error::Down runs only from main; this run was started from ${REF}."
+            exit 1
+          fi
+
+      - name: Check the confirmation input
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [ "${CONFIRMATION}" != "down" ]; then
+            echo "::error::Type down into the confirmation input to destroy the workloads and the server."
+            exit 1
+          fi
+          echo "Confirmed: destroying the workloads and the server."
+
+  workloads:
+    name: workloads
+    needs: confirm
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    concurrency:
+      group: workloads-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/workloads
+    env:
+      # The stage requires these variables and validates them even for a
+      # destroy, which never uses them; the image only has to look like an
+      # image reference.
+      TF_VAR_image: unused.invalid/node-service:unused
+      TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
+        with:
+          working-directory: infra/terraform/workloads
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
+
+      # The destroy script reads the cluster's outputs to learn whether the
+      # cluster is still there.
+      - name: Initialise the cluster stage
+        working-directory: infra/terraform/cluster
+        run: terraform init -input=false
+
+      - name: Destroy every workloads workspace
+        run: ../../scripts/destroy-workloads.sh
+
+  cluster:
+    name: cluster
+    needs: [confirm, workloads]
+    # The cluster is destroyed even when the workloads destroy failed, so
+    # that the server stops costing money; what the workloads state still
+    # lists dies with the server and is reconciled by the next Up or Down.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.confirm.result == 'success' && needs.workloads.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    concurrency:
+      group: cluster
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/cluster
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
+        with:
+          working-directory: infra/terraform/cluster
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
+
+      - name: Destroy the cluster
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          resources="$(terraform state list | grep -v '^data\.' || true)"
+          terraform destroy -input=false -auto-approve -no-color
+          {
+            echo "## Cluster"
+            echo
+            if [ -n "${resources}" ]; then
+              echo "Destroyed:"
+              echo
+              printf '%s\n' "${resources}" | sed 's/^/- /'
+            else
+              echo "The cluster state was already empty; nothing to destroy."
+            fi
+            echo
+            echo "The primary IP, the DNS records, the Terraform state and the container images stay. Run the Up workflow to bring the system back."
+          } >> "${GITHUB_STEP_SUMMARY}"

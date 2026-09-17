@@ -189,6 +189,15 @@ Terraform variable `base_domain` and the repository secret
 `LETSENCRYPT_EMAIL`; nothing else in the stage knows the domain, and the
 image reference follows the repository that runs the pipeline.
 
+### Switching the system off and on
+
+The server costs money every hour it exists. The manual workflows `Down`
+and `Up` destroy everything and bring it back with one click each; the
+Terraform state, the primary IP, the DNS records and the container images
+survive in between. [docs/operations.md](docs/operations.md) describes the
+sequence, the durations, what is lost and how to recover from a stale
+state lock or a server that was deleted by hand.
+
 ## License
 
 [MIT](LICENSE)

@@ -1,0 +1,48 @@
+name: Terraform session
+description: >-
+  Assumes the AWS role that owns the state bucket through OIDC, installs
+  Terraform without the output wrapper, initialises a stage and optionally
+  selects one of its workspaces. Shared by the pipeline and by the manual
+  Up and Down workflows.
+
+inputs:
+  working-directory:
+    description: Terraform stage to initialise, relative to the repository root.
+    required: true
+  workspace:
+    description: >-
+      Workspace to select after the initialisation, created when it does not
+      exist yet. Empty keeps the default workspace.
+    required: false
+    default: ''
+  aws-role-arn:
+    description: ARN of the IAM role that may read and write the state bucket.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v6
+      with:
+        role-to-assume: ${{ inputs.aws-role-arn }}
+        aws-region: eu-central-1
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: 1.16.2
+        terraform_wrapper: false
+
+    - name: Initialise
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: terraform init -input=false
+
+    - name: Select the workspace
+      if: inputs.workspace != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        WORKSPACE: ${{ inputs.workspace }}
+      run: terraform workspace select -or-create "${WORKSPACE}"
