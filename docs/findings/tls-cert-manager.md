@@ -76,6 +76,20 @@ Ersatz Emmer YR2` on the runner (OpenSSL 3.0 prints spaces around the
   and the reused account keys mean no new ACME registration. The module
   depends on the issuers, so a destroy removes the ingresses and any open
   challenge before cert-manager and its finalizers are gone.
+- Preview environments (slice A12) take their certificates from
+  `letsencrypt-staging`, chosen by the workspace mapping in the root module
+  and passed to the module as `cluster_issuer`. The production issuer's
+  limit that matters here is 50 new certificates per registered domain per
+  week (`wer-ist-daniel-schwarz.de`, not the `rljson-tryout` subdomain),
+  and every preview host is a new certificate, so a busy week of pull
+  requests on the production issuer could leave `node2` and `node3`
+  without a certificate when they arrive. The staging environment has far
+  higher limits, at the price of a chain no browser trusts: reviewers
+  accept one warning per preview, the smoke job runs with
+  `ALLOW_STAGING_CERTIFICATE=true` (`curl -k` plus `(STAGING)` required in
+  the issuer) for pull requests and stays strict for production. The
+  issuers live in the production workspace and a preview only names them,
+  so a preview cannot exist without production having been applied once.
 
 ## What it means for rljson users
 

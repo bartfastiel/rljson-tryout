@@ -1,0 +1,64 @@
+name: Preview sweep
+
+# Budget guard for preview environments: every six hours, destroys any
+# workloads workspace pr-<number> whose pull request is not open any more,
+# which catches what Preview destroy missed: a destroy that failed on a
+# stale state lock or a GitHub outage, or a pipeline run that deployed a
+# preview although its pull request had just been closed (the pipeline
+# checks the state right before it applies, so only a close during the
+# apply itself slips through). A preview whose pull request state cannot
+# be read is kept and the run fails, so a GitHub hiccup never removes a
+# live preview. See docs/operations.md.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Sweeps never overlap each other; a collision with Preview destroy or Down
+# on the same workspace fails on the state lock and the next sweep cleans up.
+concurrency:
+  group: preview-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: sweep
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: read
+    defaults:
+      run:
+        working-directory: infra/terraform/workloads
+    env:
+      # The stage requires these variables and validates them even for a
+      # destroy, which never uses them; the image only has to look like an
+      # image reference.
+      TF_VAR_image: unused.invalid/node-service:unused
+      TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
+        with:
+          working-directory: infra/terraform/workloads
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
+
+      # The destroy script reads the cluster's outputs to learn whether the
+      # cluster is still there.
+      - name: Initialise the cluster stage
+        working-directory: infra/terraform/cluster
+        run: terraform init -input=false
+
+      - name: Destroy the previews of closed pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ../../scripts/sweep-previews.sh

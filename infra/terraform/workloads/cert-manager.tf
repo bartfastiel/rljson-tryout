@@ -1,7 +1,7 @@
 # cert-manager and the ClusterIssuers exist once per cluster; the production
 # workspace owns them and every other workspace only refers to them by name.
 locals {
-  manages_cluster_services = terraform.workspace == "production"
+  manages_cluster_services = local.is_production_workspace
   acme_servers = {
     staging    = "https://acme-staging-v02.api.letsencrypt.org/directory"
     production = "https://acme-v02.api.letsencrypt.org/directory"

@@ -153,12 +153,12 @@ plan passes, it is available.
 `infra/terraform/workloads` is the second stage. It reads the kubeconfig
 from the state of the cluster stage, configures the `kubernetes`, `helm`
 and `kubectl` providers from it and calls the module
-`modules/petshop-environment` once for production:
-namespace `petshop`, one `Deployment` of the node service per node (so far
-only `node1` with the in-memory store), a `ClusterIP` service and a Traefik
-`Ingress` per node, plus an ingress for the apex host that routes to
-`node1`. The image is the one the `image` job pushed for the same commit,
-`ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`.
+`modules/petshop-environment` once per workspace: namespace `petshop` in
+workspace `production`, one `Deployment` of the node service per node (so
+far only `node1` with the in-memory store), a `ClusterIP` service and a
+Traefik `Ingress` per node, plus an ingress for the apex host that routes
+to `node1`. The image is the one the `image` job pushed for the same
+commit, `ghcr.io/bartfastiel/rljson-tryout/node-service:<commit sha>`.
 
 Every push to `main` deploys automatically: the `image` job pushes
 `ghcr.io/<repository>/node-service:<commit sha>`, the `terraform-workloads`
@@ -167,9 +167,9 @@ and exposes the deployed URLs as a job output, and the `smoke` job runs
 `infra/scripts/verify-deployment.sh` against them: it polls `/health` until
 it reports the commit that was just pushed with a certificate the runner
 trusts, then checks that `http://` redirects, that `/api/species` lists
-species and that `/` serves the web app. Pull requests only plan. The
-hostnames follow `<node>.<base_domain>` with the apex host as an alias of
-`node1`; with the default `base_domain` that is
+species and that `/` serves the web app. The hostnames follow
+`<node>.<base_domain>` with the apex host as an alias of `node1`; with the
+default `base_domain` that is
 
 - `https://node1.rljson-tryout.wer-ist-daniel-schwarz.de/health`
 - `https://rljson-tryout.wer-ist-daniel-schwarz.de/health`
@@ -189,6 +189,21 @@ certificates per week. To reproduce under another domain, set the
 Terraform variable `base_domain` and the repository secret
 `LETSENCRYPT_EMAIL`; nothing else in the stage knows the domain, and the
 image reference follows the repository that runs the pipeline.
+
+### Preview environments
+
+Every pull request from this repository deploys its own preview: the same
+pipeline applies the workloads workspace `pr-<number>`, which maps to the
+namespace `pr-<number>` and the host
+`node1-pr-<number>.rljson-tryout.wer-ist-daniel-schwarz.de`, and the
+`smoke` job posts one comment with the links and the deployed commit that
+later pushes update. Previews take their certificate from the Let's
+Encrypt staging issuer so that they never use up the production rate
+limit, which means one browser warning per preview (or `curl -k`). The
+`Preview destroy` workflow removes the preview when the pull request is
+closed or merged, and `Preview sweep` removes every six hours whatever
+that missed. [docs/operations.md](docs/operations.md) has the details,
+including what happens while the system is switched off.
 
 ### Switching the system off and on
 

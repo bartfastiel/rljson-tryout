@@ -1,38 +1,12 @@
-import { spawnSync } from 'node:child_process';
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-
-const scriptPath = fileURLToPath(
-  new URL('./verify-deployment.sh', import.meta.url),
-);
-const testDoublesDirectory = fileURLToPath(
-  new URL('./test-doubles/verify-deployment/', import.meta.url),
-);
-
-// On Windows the first bash on PATH may be the one of the Windows Subsystem
-// for Linux, which cannot see the temporary directory; Git Bash can.
-const gitBashOnWindows = join(
-  process.env['ProgramFiles'] ?? 'C:\\Program Files',
-  'Git',
-  'usr',
-  'bin',
-  'bash.exe',
-);
-const bash =
-  process.platform === 'win32' && existsSync(gitBashOnWindows)
-    ? gitBashOnWindows
-    : 'bash';
+import {
+  posixPath,
+  runShellScript,
+  type ShellOutcome as Outcome,
+} from './test-support/shell.ts';
 
 const expectedCommit = '8c95897323ad88221e43f88f281d86b6f13520cd';
 const nodeUrl = 'https://node1.example.org';
@@ -42,80 +16,48 @@ type Scenario = {
   deploymentUrls?: string;
   expectedCommit?: string;
   healthReadyAfter?: number;
+  issuerReadyAfter?: number;
   timeoutSeconds?: number;
   issuer?: string;
+  allowStagingCertificate?: string;
   redirect?: string;
   species?: string;
   webApp?: string;
 };
 
-type Outcome = {
-  status: number | null;
-  output: string;
-  calls: string[];
-};
-
 let temporaryDirectory: string;
 
-// Git Bash accepts forward slashes in Windows paths, so the fake binaries
-// and the script agree on every file they exchange.
-function posixPath(path: string): string {
-  return path.replaceAll('\\', '/');
-}
-
 function runScript(scenario: Scenario): Outcome {
-  const fakeBinariesDirectory = join(temporaryDirectory, 'bin');
   const stateDirectory = join(temporaryDirectory, 'state');
-  const logFile = join(temporaryDirectory, 'calls.log');
-  for (const directory of [fakeBinariesDirectory, stateDirectory]) {
-    mkdirSync(directory, { recursive: true });
-  }
-  for (const name of ['curl', 'openssl', 'sleep']) {
-    const target = join(fakeBinariesDirectory, name);
-    copyFileSync(join(testDoublesDirectory, `${name}.sh`), target);
-    chmodSync(target, 0o755);
-  }
+  mkdirSync(stateDirectory, { recursive: true });
 
-  const environment: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    PATH: `${fakeBinariesDirectory}${delimiter}${process.env['PATH'] ?? ''}`,
-    FAKE_LOG: posixPath(logFile),
-    FAKE_STATE_DIRECTORY: posixPath(stateDirectory),
-    FAKE_HEALTH_COMMIT: expectedCommit,
-    FAKE_HEALTH_READY_AFTER: String(scenario.healthReadyAfter ?? 0),
-    FAKE_ISSUER:
-      scenario.issuer ?? "issuer=C = US, O = Let's Encrypt, CN = YR2",
-    FAKE_REDIRECT: scenario.redirect ?? '301 __HEALTH_URL__',
-    FAKE_SPECIES: scenario.species ?? '[{"id":"a"},{"id":"b"},{"id":"c"}]',
-    FAKE_WEB_APP: scenario.webApp ?? '200 text/html; charset=utf-8',
-    EXPECTED_COMMIT: scenario.expectedCommit ?? expectedCommit,
-    VERIFY_TIMEOUT_SECONDS: String(scenario.timeoutSeconds ?? 300),
-  };
-  if (scenario.deploymentUrls !== undefined) {
-    environment['DEPLOYMENT_URLS'] = scenario.deploymentUrls;
-  } else {
-    delete environment['DEPLOYMENT_URLS'];
-  }
   // The fake redirect names the health URL of the host being asked.
-  if (environment['FAKE_REDIRECT'].includes('__HEALTH_URL__')) {
-    environment['FAKE_REDIRECT'] = environment['FAKE_REDIRECT'].replace(
-      '__HEALTH_URL__',
-      `${(scenario.deploymentUrls ?? nodeUrl).split(' ')[0]}/health`,
-    );
-  }
+  const redirect = (scenario.redirect ?? '301 __HEALTH_URL__').replace(
+    '__HEALTH_URL__',
+    `${(scenario.deploymentUrls ?? nodeUrl).split(' ')[0]}/health`,
+  );
 
-  const result = spawnSync(bash, [posixPath(scriptPath)], {
-    encoding: 'utf8',
-    env: environment,
+  return runShellScript({
+    scriptName: 'verify-deployment.sh',
+    doubles: { 'verify-deployment': ['curl', 'openssl', 'sleep'] },
+    binDirectory: join(temporaryDirectory, 'bin'),
+    logFile: join(temporaryDirectory, 'calls.log'),
+    environment: {
+      FAKE_STATE_DIRECTORY: posixPath(stateDirectory),
+      FAKE_HEALTH_COMMIT: expectedCommit,
+      FAKE_HEALTH_READY_AFTER: String(scenario.healthReadyAfter ?? 0),
+      FAKE_ISSUER_READY_AFTER: String(scenario.issuerReadyAfter ?? 0),
+      FAKE_ISSUER:
+        scenario.issuer ?? "issuer=C = US, O = Let's Encrypt, CN = YR2",
+      FAKE_REDIRECT: redirect,
+      FAKE_SPECIES: scenario.species ?? '[{"id":"a"},{"id":"b"},{"id":"c"}]',
+      FAKE_WEB_APP: scenario.webApp ?? '200 text/html; charset=utf-8',
+      DEPLOYMENT_URLS: scenario.deploymentUrls,
+      EXPECTED_COMMIT: scenario.expectedCommit ?? expectedCommit,
+      ALLOW_STAGING_CERTIFICATE: scenario.allowStagingCertificate,
+      VERIFY_TIMEOUT_SECONDS: String(scenario.timeoutSeconds ?? 300),
+    },
   });
-  const calls = existsSync(logFile)
-    ? readFileSync(logFile, 'utf8').trim().split('\n')
-    : [];
-  return {
-    status: result.status,
-    output: `${result.stdout}${result.stderr}`,
-    calls,
-  };
 }
 
 beforeEach(() => {
@@ -156,6 +98,24 @@ describe('verify-deployment.sh', () => {
     ).toHaveLength(3);
   });
 
+  it('keeps polling while Traefik still serves its default certificate', () => {
+    const outcome = runScript({
+      deploymentUrls: nodeUrl,
+      issuerReadyAfter: 2,
+      allowStagingCertificate: 'true',
+      issuer:
+        "issuer=C = US, O = Let's Encrypt, CN = (STAGING) Ersatz Emmer YR2",
+    });
+
+    expect(outcome.status, outcome.output).toBe(0);
+    expect(outcome.calls.filter((call) => call === 'sleep 10')).toHaveLength(2);
+    expect(
+      outcome.calls.filter((call) => call.startsWith('openssl x509')),
+    ).toHaveLength(3);
+    expect(outcome.output).not.toContain('TRAEFIK DEFAULT CERT');
+    expect(outcome.output).toContain('certificate issuer: issuer=C = US');
+  });
+
   it('checks every URL of the list', () => {
     const outcome = runScript({
       deploymentUrls: `${nodeUrl} ${apexUrl}`,
@@ -191,12 +151,80 @@ describe('verify-deployment.sh', () => {
     const outcome = runScript({
       deploymentUrls: nodeUrl,
       issuer: 'issuer=CN=TRAEFIK DEFAULT CERT',
+      timeoutSeconds: 0,
     });
 
     expect(outcome.status).toBe(1);
     expect(outcome.output).toContain(
-      "::error::https://node1.example.org/health does not serve a Let's Encrypt certificate, got: issuer=CN=TRAEFIK DEFAULT CERT",
+      "::error::https://node1.example.org/health does not serve a Let's Encrypt production certificate after 0 seconds, got: issuer=CN=TRAEFIK DEFAULT CERT",
     );
+  });
+
+  describe('certificate chain verification', () => {
+    const stagingIssuer =
+      "issuer=C = US, O = Let's Encrypt, CN = (STAGING) Ersatz Emmer YR2";
+    const httpsCalls = (outcome: Outcome) =>
+      outcome.calls.filter((call) => call.includes(' https://'));
+
+    it('verifies the chain and rejects a staging certificate by default', () => {
+      const outcome = runScript({
+        deploymentUrls: nodeUrl,
+        issuer: stagingIssuer,
+        timeoutSeconds: 0,
+      });
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.output).toContain(
+        `::error::${nodeUrl}/health does not serve a Let's Encrypt production certificate after 0 seconds, got: ${stagingIssuer}`,
+      );
+      expect(httpsCalls(outcome).length).toBeGreaterThan(0);
+      for (const call of outcome.calls) {
+        expect(call).not.toContain(' -k ');
+      }
+    });
+
+    it('accepts a staging certificate without chain verification when allowed', () => {
+      const outcome = runScript({
+        deploymentUrls: nodeUrl,
+        issuer: stagingIssuer,
+        allowStagingCertificate: 'true',
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(outcome.output).toContain(
+        `${nodeUrl}/health certificate issuer: ${stagingIssuer}`,
+      );
+      expect(httpsCalls(outcome).length).toBeGreaterThan(0);
+      for (const call of httpsCalls(outcome)) {
+        expect(call).toContain(' -k ');
+      }
+    });
+
+    it('rejects a production certificate when a staging one is expected', () => {
+      const outcome = runScript({
+        deploymentUrls: nodeUrl,
+        allowStagingCertificate: 'true',
+        timeoutSeconds: 0,
+      });
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.output).toContain(
+        `::error::${nodeUrl}/health does not serve a Let's Encrypt staging certificate after 0 seconds, got: issuer=C = US, O = Let's Encrypt, CN = YR2`,
+      );
+    });
+
+    it('refuses any other value of ALLOW_STAGING_CERTIFICATE', () => {
+      const outcome = runScript({
+        deploymentUrls: nodeUrl,
+        allowStagingCertificate: 'yes',
+      });
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.output).toContain(
+        '::error::ALLOW_STAGING_CERTIFICATE must be true or false, got: yes',
+      );
+      expect(outcome.calls).toHaveLength(0);
+    });
   });
 
   it('fails when http does not redirect to the https health URL', () => {

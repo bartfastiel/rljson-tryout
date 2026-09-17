@@ -102,7 +102,7 @@ docs/
 | Public IPv4           | Hetzner Primary IP named `rljson-tryout` in `nbg1`, address `162.55.190.77`, created once by hand, attached to the server by Terraform, survives server replacement                                        |
 | DNS records           | `rljson-tryout` A and `*.rljson-tryout` A in the zone `wer-ist-daniel-schwarz.de` (Hetzner Cloud Console, project `konsoleH`), pointing to that primary IP, entered once by hand, not managed by Terraform |
 | Production hostnames  | `node1.rljson-tryout.wer-ist-daniel-schwarz.de`, `node2…`, `node3…`; the apex host routes to node1                                                                                                         |
-| Preview hostnames     | `node1-pr-<n>.rljson-tryout.wer-ist-daniel-schwarz.de`, apex `pr-<n>.rljson-tryout…`                                                                                                                       |
+| Preview hostnames     | `node1-pr-<n>.rljson-tryout.wer-ist-daniel-schwarz.de`, no apex host (decided in A12)                                                                                                                      |
 | Terraform state       | S3 bucket `bartfastiel-rljson-tryout-tfstate`, region `eu-central-1`, keys `cluster/terraform.tfstate` and `workloads/terraform.tfstate` (workspaces add their prefix)                                     |
 | AWS access from CI    | OIDC, role ARN in repository variable `AWS_ROLE_ARN`, no access keys                                                                                                                                       |
 | Repository secrets    | `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY`, `LETSENCRYPT_EMAIL`                                                                                                                                    |
@@ -110,7 +110,7 @@ docs/
 | SonarCloud            | organization `bartfastiel-github`, project key `bartfastiel_rljson-tryout`, automatic analysis off                                                                                                         |
 | Secret expiry         | `SONAR_TOKEN` and `ANTHROPIC_API_KEY` expire on 2026-12-16, `HCLOUD_TOKEN` does not expire                                                                                                                 |
 | Kubernetes namespaces | `petshop` for production, `pr-<n>` for previews                                                                                                                                                            |
-| Ingress               | Traefik as shipped with k3s, cert-manager with ClusterIssuers `letsencrypt-staging` and `letsencrypt-production`, HTTP redirected to HTTPS                                                                 |
+| Ingress               | Traefik as shipped with k3s, cert-manager with ClusterIssuers `letsencrypt-staging` (previews) and `letsencrypt-production` (production), HTTP redirected to HTTPS                                         |
 | Ports inside a node   | HTTP `8080`, hub transport `3000`, UDP broadcast `41234`                                                                                                                                                   |
 | rljson network domain | `petshop-production` in production, `petshop-pr-<n>` in previews                                                                                                                                           |
 
@@ -335,11 +335,12 @@ Triggers: `pull_request` and `push` to `main`. Jobs:
 3. `terraform-cluster`: `plan` on pull requests, `apply` on `main`.
    Workspace `default`. Needs `id-token: write` for AWS and `HCLOUD_TOKEN`.
 4. `terraform-workloads`: on `main` workspace `production`, on pull requests
-   workspace `pr-<n>` with `apply` (this is the preview), image tag from job
-   2, `TF_VAR_letsencrypt_email` from the repository secret. Comments the
-   preview links on the pull request (update the same comment on later runs).
+   workspace `pr-<n>` with `apply` (this is the preview, skipped when the
+   pull request is no longer open by the time the job starts), image tag
+   from job 2, `TF_VAR_letsencrypt_email` from the repository secret.
 5. `smoke`: waits until `https://<host>/health` returns the deployed commit
-   sha, for production and preview alike.
+   sha, for production and preview alike; on a pull request it then
+   comments the preview links (updating the same comment on later runs).
 
 `concurrency` groups: `cluster`, `workloads-production`, `workloads-pr-<n>`.
 Pull requests from forks get no secrets; that is acceptable.
@@ -387,9 +388,12 @@ cluster, `up.yml` brings both back (see `docs/operations.md`).
   (`mcr.microsoft.com/mssql/server:2022-latest`, `MSSQL_PID=Express`,
   `MSSQL_MEMORY_LIMIT_MB=1536`, 4 Gi claim) controlled by `enable_mssql`
   (true in production, false in previews).
-- Variables: `environment_name`, `image` (the full reference the `image`
-  job pushed), `hostname_suffix`, `enable_mssql`, `letsencrypt_email`,
-  `seed_size`, `rljson_domain`.
+- Module variables: `environment_name`, `image` (the full reference the
+  `image` job pushed), `base_domain`, `hostname_infix`, `cluster_issuer`,
+  `enable_apex_ingress`, `nodes`; later slices add `enable_mssql`,
+  `seed_size`, `rljson_domain`. The root module chooses them from the
+  workspace name and takes `image`, `base_domain` and `letsencrypt_email`
+  (for the issuers) as its own variables.
 
 ## 5. Slices
 
@@ -540,18 +544,34 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       `workloads-production` existed since A6 and A9; the workflow-level
       group serializes whole runs on `main`, so `smoke` needs no group of
       its own.
-- [ ] **A12 Preview environments.** Depends on: A11. Workspace `pr-<n>`,
+- [x] **A12 Preview environments.** Depends on: A11. Workspace `pr-<n>`,
       namespace, flattened hostnames, pull request comment,
       `preview-destroy.yml`. Done when the pull request that adds this feature
       shows its own preview at `https://node1-pr-<n>.rljson-tryout…/health` and
-      the namespace disappears after the merge.
-- [ ] **A13 Budget guards.** Depends on: A12. `preview-sweep.yml`,
+      the namespace disappears after the merge. Deviation: previews take
+      their certificates from `letsencrypt-staging`, not from the
+      production issuer, because Let's Encrypt allows 50 new certificates
+      per registered domain per week and every preview host is a new one;
+      reviewers accept one browser warning per preview and the smoke job
+      verifies previews with `ALLOW_STAGING_CERTIFICATE=true`. A preview has
+      no apex host (`pr-<n>.rljson-tryout…`); one host per node is enough
+      for a review, and the module's apex ingress became optional
+      (`enable_apex_ingress`). The workspace name alone selects the
+      environment in the root module and any other name fails the plan. The
+      pipeline no longer cancels a superseded pull request run in progress,
+      because it may be in the middle of the preview apply and a killed
+      apply leaves a stale state lock; a run that has not started yet is
+      still dropped.
+- [x] **A13 Budget guards.** Depends on: A12. `preview-sweep.yml`,
       `destroy-all.yml`, `docs/operations.md` describing both. Done when the
       sweep runs green on schedule and `destroy-all` is tested once against a
       preview workspace (never against production during this slice).
       Deviation: the manual `up` and `down` workflows replaced
       `destroy-all.yml` and were built early as slice A13a (pull request
-      #17); `preview-sweep.yml` follows with A12/A13.
+      #17); `preview-sweep.yml` landed with A12 and reuses
+      `destroy-workloads.sh`, which now takes workspace names as arguments,
+      and `Preview destroy` (not `Down`) is what the acceptance test ran
+      against the preview workspace of the A12 pull request.
 
 ### Phase B: the domain on one node (in-memory store)
 

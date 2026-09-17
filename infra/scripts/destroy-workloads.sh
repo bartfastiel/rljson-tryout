@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Destroys every workspace of the workloads stage except `default`: preview
-# workspaces (`pr-*`) first, `production` last. Preview workspaces are
+# Destroys workspaces of the workloads stage: without arguments every
+# workspace except `default`, with arguments only the named ones. Preview
+# workspaces (`pr-*`) go first, `production` last. Preview workspaces are
 # deleted afterwards, `production` is kept empty so that the next apply
-# reuses it. The Down workflow runs this before it destroys the cluster,
-# because the workloads stage reads the cluster's kubeconfig from the
-# cluster state and cannot even plan once that output is gone.
+# reuses it. A named workspace that does not exist is reported and skipped,
+# because a pull request that never got a preview has nothing to destroy.
+# The Down workflow runs this without arguments before it destroys the
+# cluster, because the workloads stage reads the cluster's kubeconfig from
+# the cluster state and cannot even plan once that output is gone; the
+# preview workflows name the workspaces of closed pull requests.
 #
 # When the cluster is already unreachable (its state has no kubeconfig
 # output, or the Kubernetes API server behind it does not answer) every
@@ -24,6 +28,13 @@ set -euo pipefail
 
 cluster_directory="${CLUSTER_DIRECTORY:-../cluster}"
 summary_file="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+
+for requested in "$@"; do
+  if ! [[ "${requested}" =~ ^(production|pr-[1-9][0-9]*)$ ]]; then
+    echo "::error::\"${requested}\" is not a workspace this script destroys: name production or a pr-<number> workspace."
+    exit 2
+  fi
+done
 
 # The kubeconfig output is sensitive: its presence is tested through the
 # exit code only and its value never reaches a terminal or a log.
@@ -95,14 +106,32 @@ finish() {
 }
 trap finish EXIT
 
-workspaces="$(list_workspaces)"
+existing_workspaces="$(list_workspaces)"
+if [ "$#" -gt 0 ]; then
+  workspaces=""
+  for requested in "$@"; do
+    if printf '%s\n' "${workspaces}" | grep -qx "${requested}"; then
+      continue
+    fi
+    if printf '%s\n' "${existing_workspaces}" | grep -qx "${requested}"; then
+      workspaces+="${requested}"$'\n'
+    else
+      echo "Workspace ${requested} does not exist; nothing to destroy."
+      summary_rows+=("| ${requested} | does not exist, nothing to destroy |")
+    fi
+  done
+else
+  workspaces="${existing_workspaces}"
+fi
 previews="$(printf '%s\n' "${workspaces}" | grep '^pr-' || true)"
 others="$(printf '%s\n' "${workspaces}" | grep -v '^pr-' | grep -vx 'production' || true)"
 production="$(printf '%s\n' "${workspaces}" | grep -x 'production' || true)"
 mapfile -t ordered < <(printf '%s\n' "${previews}" "${others}" "${production}" | sed '/^$/d')
 
 if [ "${#ordered[@]}" -eq 0 ]; then
-  echo "No workloads workspace besides default exists; nothing to destroy."
+  if [ "$#" -eq 0 ]; then
+    echo "No workloads workspace besides default exists; nothing to destroy."
+  fi
   exit 0
 fi
 

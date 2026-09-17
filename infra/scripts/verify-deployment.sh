@@ -2,21 +2,50 @@
 set -euo pipefail
 
 # Proves that every deployed base URL serves the expected commit over https
-# with a certificate the runner trusts, redirects http, lists species and
-# serves the web app. curl verifies the certificate chain, so the health
-# poll only succeeds once Let's Encrypt has issued; the issuer line
-# documents which authority signed.
-#   DEPLOYMENT_URLS         space separated https base URLs, no trailing slash
-#   EXPECTED_COMMIT         the commit /health has to report
-#   VERIFY_TIMEOUT_SECONDS  how long to wait per URL for that commit, default 300
+# with a Let's Encrypt certificate, redirects http, lists species and serves
+# the web app. In production curl verifies the certificate chain, so the
+# health poll only succeeds once Let's Encrypt has issued, and the issuer
+# must be the production one. Previews are signed by the staging issuer,
+# whose chain no runner trusts: with ALLOW_STAGING_CERTIFICATE=true the
+# https probes skip the chain check and the issuer must carry the
+# `(STAGING)` mark instead, so a preview can never quietly consume the
+# production rate limit.
+#   DEPLOYMENT_URLS            space separated https base URLs, no trailing slash
+#   EXPECTED_COMMIT            the commit /health has to report
+#   ALLOW_STAGING_CERTIFICATE  true for previews, default false
+#   VERIFY_TIMEOUT_SECONDS     how long to wait per URL for that commit, default 300
 
 : "${DEPLOYMENT_URLS:?DEPLOYMENT_URLS must list the https base URLs to verify}"
 : "${EXPECTED_COMMIT:?EXPECTED_COMMIT must name the commit /health has to report}"
+allow_staging_certificate="${ALLOW_STAGING_CERTIFICATE:-false}"
 timeout_seconds="${VERIFY_TIMEOUT_SECONDS:-300}"
 
 fail() {
   echo "::error::$*"
   exit 1
+}
+
+case "${allow_staging_certificate}" in
+  true)
+    certificate_options=(-k)
+    expected_issuer="Let's Encrypt staging"
+    ;;
+  false)
+    certificate_options=()
+    expected_issuer="Let's Encrypt production"
+    ;;
+  *)
+    fail "ALLOW_STAGING_CERTIFICATE must be true or false, got: ${allow_staging_certificate}"
+    ;;
+esac
+
+issuer_matches() {
+  case "${allow_staging_certificate}:$1" in
+    "true:"*"Let's Encrypt"*"(STAGING)"*) return 0 ;;
+    "false:"*"(STAGING)"*) return 1 ;;
+    "false:"*"Let's Encrypt"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # shellcheck disable=SC2206 # the variable is a space separated list by contract
@@ -28,36 +57,38 @@ fi
 # The single-shot probes retry on transport errors; -sS keeps curl quiet
 # except for the error message that explains an empty answer.
 probe() {
-  curl -sS --retry 3 --retry-connrefused --max-time 10 "$@"
+  curl -sS --retry 3 --retry-connrefused --max-time 10 "${certificate_options[@]}" "$@"
 }
 
+served_issuer() {
+  timeout 15 openssl s_client -connect "$1:443" -servername "$1" < /dev/null 2> /dev/null | openssl x509 -noout -issuer 2> /dev/null || true
+}
+
+# The certificate is ordered when the ingress appears, so the served
+# issuer is polled together with the commit: Traefik answers with its
+# default certificate until cert-manager has stored the issued one.
 for base_url in "${urls[@]}"; do
   host="${base_url#https://}"
   health_url="${base_url}/health"
   deadline=$((SECONDS + timeout_seconds))
   while true; do
-    payload="$(curl -sS --max-time 10 "${health_url}" || true)"
+    payload="$(curl -sS --max-time 10 "${certificate_options[@]}" "${health_url}" || true)"
     commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2> /dev/null || true)"
-    if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
+    issuer="$(served_issuer "${host}")"
+    if [ "${commit}" = "${EXPECTED_COMMIT}" ] && issuer_matches "${issuer}"; then
       break
     fi
     if ((SECONDS >= deadline)); then
-      fail "${health_url} did not report commit ${EXPECTED_COMMIT} within ${timeout_seconds} seconds. Last payload: ${payload}"
+      if [ "${commit}" != "${EXPECTED_COMMIT}" ]; then
+        fail "${health_url} did not report commit ${EXPECTED_COMMIT} within ${timeout_seconds} seconds. Last payload: ${payload}"
+      fi
+      fail "${health_url} does not serve a ${expected_issuer} certificate after ${timeout_seconds} seconds, got: ${issuer}"
     fi
     sleep 10
   done
   echo "${health_url} answered:"
   printf '%s\n' "${payload}"
-
-  issuer="$(timeout 15 openssl s_client -connect "${host}:443" -servername "${host}" < /dev/null 2> /dev/null | openssl x509 -noout -issuer 2> /dev/null || true)"
-  case "${issuer}" in
-    *"Let's Encrypt"*)
-      echo "${health_url} certificate issuer: ${issuer}"
-      ;;
-    *)
-      fail "${health_url} does not serve a Let's Encrypt certificate, got: ${issuer}"
-      ;;
-  esac
+  echo "${health_url} certificate issuer: ${issuer}"
 
   plain_http_url="http://${host}/health"
   redirect="$(probe -o /dev/null -w '%{http_code} %{redirect_url}' "${plain_http_url}" || true)"

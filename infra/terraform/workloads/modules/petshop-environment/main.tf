@@ -214,7 +214,16 @@ resource "kubernetes_ingress_v1" "node" {
   }
 }
 
+# The apex ingress became optional after production was created; the
+# existing one keeps its identity under the indexed address.
+moved {
+  from = kubernetes_ingress_v1.apex
+  to   = kubernetes_ingress_v1.apex[0]
+}
+
 resource "kubernetes_ingress_v1" "apex" {
+  count = var.enable_apex_ingress ? 1 : 0
+
   metadata {
     name        = "apex"
     namespace   = kubernetes_namespace_v1.environment.metadata[0].name

@@ -81,6 +81,21 @@
   job output and the `smoke` job verifies them without Terraform. Runs on
   `main` are serialized by the workflow-level concurrency group, so a
   smoke test never races a newer apply.
+- Previews since slice A12: the workspace name alone selects the
+  environment (`production`, or `pr-<number>` validated with a regex; a
+  `precondition` on the remote state data source fails any other plan
+  with a message naming both forms), so the pipeline only has to pass the
+  workspace to the composite action. Renaming the module call from
+  `production` to `environment` needed a `moved` block in the root module,
+  and making the apex ingress optional with `count` needed a second one
+  inside the module (`kubernetes_ingress_v1.apex` to `[0]`): without it,
+  Terraform 1.16 planned the apex ingress as "destroyed (because resource
+  uses count or for_each)" plus a fresh create instead of moving it. A
+  read-only `terraform plan -lock=false` in workspace `production` proved
+  both moves as "has moved to" lines with no resource change; the preview
+  mapping was planned against a copy of the stage with a local backend and
+  `TF_WORKSPACE=pr-42` (the S3 backend would have written an empty state
+  object for a workspace that only exists locally).
 
 ## What it means for rljson users
 

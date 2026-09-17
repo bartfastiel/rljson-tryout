@@ -6,6 +6,16 @@ data "terraform_remote_state" "cluster" {
     key    = "cluster/terraform.tfstate"
     region = "eu-central-1"
   }
+
+  # Evaluated before anything is read, so a mistyped workspace fails the
+  # plan instead of deploying an environment nobody asked for (a name that
+  # also breaks the module's variable validations fails on those first).
+  lifecycle {
+    precondition {
+      condition     = local.is_production_workspace || local.is_preview_workspace
+      error_message = "Workspace \"${terraform.workspace}\" names no environment. Select production or pr-<pull request number>, for example pr-42."
+    }
+  }
 }
 
 # The remote state data source hands the cluster's outputs over without the
@@ -46,22 +56,4 @@ provider "kubectl" {
   client_key             = local.client_key
   load_config_file       = false
   apply_retry_count      = 15
-}
-
-# The dependency serializes the environment behind the issuers in both
-# directions: on destroy, the ingresses and any open ACME challenge go before
-# cert-manager, so no finalizer is left without its controller.
-module "production" {
-  source = "./modules/petshop-environment"
-
-  environment_name = "petshop"
-  image            = var.image
-  base_domain      = var.base_domain
-  hostname_infix   = ""
-  cluster_issuer   = local.cluster_issuer_names.production
-  nodes = [
-    { name = "node1" },
-  ]
-
-  depends_on = [kubectl_manifest.cluster_issuer]
 }
