@@ -15,8 +15,9 @@ other nodes.
 
 ## Status
 
-Planning. See [docs/plan.md](docs/plan.md) for the roadmap and the vertical
-slices this project is built in.
+Bootstrapped. Implementation follows [docs/roadmap.md](docs/roadmap.md)
+slice by slice; the reasoning behind the architecture is in
+[docs/plan.md](docs/plan.md).
 
 ## Principles
 
