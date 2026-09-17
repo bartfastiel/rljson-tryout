@@ -21,6 +21,7 @@ const testConfiguration: Configuration = Object.freeze({
     'web-app',
     'public',
   ),
+  traitRelationMode: 'multi-reference',
 });
 
 describe('GET /api/traits', () => {
