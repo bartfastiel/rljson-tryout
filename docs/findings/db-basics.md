@@ -158,6 +158,81 @@ Validation:
   nor `IoMem`'s write-time type check (see "What happened" above) rejects a
   dangling reference; only running `Validate` catches it.
 
+## Filtering by id
+
+- `@rljson/db` 0.0.42, while building slice B4's `PetShopStore.getAnimal`.
+  The B1 finding above says "`db.get(route, { _hash })` and
+  `db.get(route, { id })` filter on a column value; any column works the
+  same way." That is wrong for a table that has a reference column, and B1's
+  `species` table did not, which is why it went unnoticed: `species` has no
+  `ref` column, so the bug this section describes could not fire there.
+- `db.get(Route.fromFlat('animals'), { id: 'quackmore-junior' })` returns
+  `{ animals: { _data: [], _type: 'components' } }` even though the row
+  exists; the same call with `{ bornOn: '2022-03-14' }` (a column with no
+  name collision, see below) finds it correctly, and `{ _hash: <hash> }`
+  always works (it takes a different, dedicated code path).
+- Cause: `ComponentController._referenceColumns` is supposed to be the
+  _referencing_ table's own `ref`-typed columns (`animals.speciesRef`), so
+  that `_getByWhere` can tell a plain column filter from a foreign-key
+  lookup that needs resolving against another table. The actual
+  implementation of `_resolveReferenceColumns` instead collects the columns
+  of the _referenced_ table (`species`: `_hash`, `id`, `name`, `latinName`,
+  `description`) and returns those from `_referenceColumns`. `_hasReferenceColumns(where)`
+  then checks `where`'s keys against that wrong list, so any `where` key
+  that happens to also be a column name of the referenced table (`animals`
+  filtered by `id` or by `name`, both columns `species` also has) is
+  misread as a foreign-key value to resolve against `species`, finds no
+  species row with that value, and returns nothing. A column `species` does
+  not have (`bornOn`, `priceCents`, `backgroundStory`) filters correctly,
+  because it never enters the broken branch.
+- `PetShopStore.getAnimal` therefore does not filter by `id` at all: it
+  reads the full `animals` and `species` tables (the same
+  `db.get(route, {})` two-table read `listAnimals` already uses) and finds
+  the row by `id` in JavaScript. A table with no reference column, or a
+  `where` key that never collides with a referenced table's column names,
+  would not need this workaround, but relying on that coincidence for every
+  future query is fragile, so the full-read-then-filter fallback is the
+  safer default whenever a `where` key might collide.
+
+## Long strings
+
+- `@rljson/db` 0.0.42, `@rljson/hash` 0.0.19, `@rljson/io` 0.0.78, Node
+  24.18.0, while building slice B4 (the `animals.backgroundStory` column,
+  seeded with nine stories of roughly 700 to 900 characters and one
+  hand-written story of 7 141 characters). Timed `hsh()` on a seeded row in
+  isolation (2 000 iterations, averaged) and timed `Db.insert`/`Db.get` on
+  synthetic rows with a `backgroundStory` of 4 000, 40 000, 400 000 and
+  4 000 000 characters against a fresh `Db` over `IoMem`.
+- Hashing itself is not the bottleneck at story-sized content: hashing a
+  704-character row (`quackmore-junior`) took 0.0055 ms on average, hashing
+  the 7 141-character `sir-quackington` row took 0.0298 ms, about five times
+  longer for about ten times the content, still far under a millisecond and
+  unnoticeable next to anything that touches the network or disk.
+- `Db.insert` scales roughly linearly with story length once content grows
+  well past what any real background story needs: 4 000 characters inserted
+  in 0.63 ms, 40 000 in 0.79 ms, 400 000 in 7.20 ms, 4 000 000 in 63.47 ms
+  (single run, `IoMem`, no persistence). The cost is dominated by hashing the
+  row on write (`hip`/`hsh` walks the whole object), not by `IoMem` itself.
+- `Db.get` by `_hash` stayed at a fraction of a millisecond regardless of
+  story size (0.05 to 0.77 ms across the same four sizes): a read returns
+  the stored reference without rehashing or copying character by character,
+  so story length does not make reads slower.
+- No error, truncation or corruption up to 4 000 000 characters (4 MB) in a
+  single column: `IoMem`'s in-memory `Map`-backed storage and the `Validate`
+  type check (`dataDoesNotMatchColumnConfig`, "What happened" above) both
+  treat a `string` column as an arbitrary-length JavaScript string; nothing
+  in the write or read path imposes a length ceiling. This was not tested
+  against `io-sqlite-node` or `io-mssql` yet, which the roadmap's "Known
+  pitfalls" section already flags as a separate risk ("Long strings and
+  `jsonArray` columns map differently per store; test with the 4 000
+  character story in every store", slices C1 and C4) since a SQL column type
+  can impose a real ceiling `IoMem` does not have.
+- Practical takeaway for `PetShopStore`: a background story of several
+  thousand characters costs nothing worth designing around on the `IoMem`
+  path. `GET /api/animals` still leaves `backgroundStory` out of the list
+  response (roadmap section 2.5) for payload size on the wire, not because
+  the store or the hash is slow.
+
 ## Candidates for upstream issues
 
 - `Db.insert` returns one `InsertHistoryRow` per inserted row but persists
@@ -180,3 +255,16 @@ Validation:
   and one with a hash no `species` row has;
   `Route.fromFlat('animals/species')` returns only the valid row in
   `container.rljson.animals._data`.
+- `ComponentController._resolveReferenceColumns` (used by `_getByWhere`
+  through `_referenceColumns`/`_hasReferenceColumns`) collects the columns
+  of the table a `ref` column points at, not the `ref` column itself, so
+  `_referenceColumns` for `animals` (which has one `ref` column,
+  `speciesRef`) resolves to `species`'s own columns (`_hash`, `id`, `name`,
+  `latinName`, `description`). Any `db.get(route, where)` call whose `where`
+  key happens to match one of those names is then wrongly treated as a
+  foreign-key lookup into `species` instead of a plain column filter, and
+  finds nothing. Reproduction: seed `species` and `animals` per this
+  project's `TableCfg`s, then compare
+  `db.get(Route.fromFlat('animals'), { bornOn: '<value>' })` (finds the row)
+  against `db.get(Route.fromFlat('animals'), { id: '<value>' })` or
+  `{ name: '<value>' }` (finds nothing), see "Filtering by id" above.

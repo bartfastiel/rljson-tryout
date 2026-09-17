@@ -597,11 +597,29 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       animals view. The species filter is a row of chips that are plain
       links into the hash query (`#/animals?species=duck`), so selecting one
       is an ordinary navigation and the filtered view is shareable.
-- [ ] **B4 Long background story.** Depends on: B3. Column
+- [x] **B4 Long background story.** Depends on: B3. Column
       `backgroundStory`, `GET /api/animals/:id`, view `animal-detail`, Gherkin
       set up with a first feature that round-trips a 4 000 character story.
       Done when the feature passes and the story reads well on a phone
-      (line length, font size).
+      (line length, font size). Deviation: `@amiceli/vitest-cucumber` 8.0.0
+      is the current version (checked with `pnpm view`); its step files use
+      the extension `*.steps.ts` the roadmap's own section 1 names, which is
+      outside Vitest's default `include` pattern, so `node-service` gets its
+      own `vitest.config.ts` widening `include` to also match
+      `features/**/*.steps.ts`. `PetShopStore.getAnimal(id)` does not filter
+      `db.get` by `{ id }`: that path is broken by an upstream `@rljson/db`
+      bug for any table with a reference column (`docs/findings/db-basics.md`,
+      "Filtering by id"), so it reads the full `animals` and `species` tables
+      and finds the row by `id` in JavaScript, the same fallback
+      `listAnimals` already uses for a different reason. Nine seed animals
+      get a 700 to 900 character story; Sir Quackington's is the hand-written
+      long one at 7 141 characters (multiple paragraphs), comfortably past
+      the 4 000 character floor the Gherkin feature checks. The web app
+      reuses the not-found rendering between the router's own unknown-route
+      page and `animal-detail`'s unknown-id state through a small shared
+      `not-found-view.js`, and an animal card is now the whole `<a>` element
+      rather than an `<article>` with a separate link, so the link target
+      covers the entire card.
 - [ ] **B5 Traits as multi-reference.** Depends on: B4. Table `traits`,
       column `traitsRefs` (jsonArray of hashes), validation test for a dangling
       entry, trait chips in the detail view, filter `?trait=<id>`. Done when
