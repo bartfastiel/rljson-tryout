@@ -5,10 +5,11 @@ import type { NodeRole } from './roleOrchestrator.ts';
 
 /**
  * One node of the environment as `NODE_URLS` lists it, with what the last
- * `GET /status` against it revealed: its display name, its node id and the
- * role it reported. `self` marks the entry whose URL is this node's own
- * `PUBLIC_URL`; it is never fetched over HTTP, its values come from the
- * local snapshot instead.
+ * `GET /status` against it revealed: its display name, its node id, the
+ * role it reported and, when it is the hub, how many clients its hub
+ * transport holds (`null` otherwise). `self` marks the entry whose URL is
+ * this node's own `PUBLIC_URL`; it is never fetched over HTTP, its values
+ * come from the local snapshot instead.
  */
 export type DirectoryEntry = Readonly<{
   url: string;
@@ -16,6 +17,7 @@ export type DirectoryEntry = Readonly<{
   name: string | null;
   nodeId: string | null;
   role: NodeRole | null;
+  connectedClients: number | null;
   reachable: boolean;
   lastSeen: string | null;
 }>;
@@ -28,6 +30,7 @@ export type SelfDescription = Readonly<{
   name: string;
   nodeId: string | null;
   role: NodeRole;
+  connectedClients: number | null;
 }>;
 
 export type NodeDirectoryOptions = Readonly<{
@@ -42,6 +45,7 @@ type PolledStatus = {
   name: string | null;
   nodeId: string | null;
   role: NodeRole | null;
+  connectedClients: number | null;
   reachable: boolean;
   lastSeen: number | null;
 };
@@ -58,6 +62,7 @@ const unknownStatus = (statusUrl: string): PolledStatus => ({
   name: null,
   nodeId: null,
   role: null,
+  connectedClients: null,
   reachable: false,
   lastSeen: null,
 });
@@ -67,6 +72,20 @@ const readString = (value: unknown): string | null =>
 
 const readRole = (value: unknown): NodeRole | null =>
   nodeRoles.has(value as NodeRole) ? (value as NodeRole) : null;
+
+/**
+ * The `transport.connectedClients` of a polled `/status`, which only a
+ * hub reports.
+ */
+const readConnectedClients = (transport: unknown): number | null => {
+  if (typeof transport !== 'object' || transport === null) {
+    return null;
+  }
+  const count = (transport as { connectedClients?: unknown }).connectedClients;
+  return typeof count === 'number' && Number.isInteger(count) && count >= 0
+    ? count
+    : null;
+};
 
 /**
  * Polls `GET /status` of every other node named in `NODE_URLS` every few
@@ -157,6 +176,7 @@ export class NodeDirectory {
           name: self.name,
           nodeId: self.nodeId,
           role: self.role,
+          connectedClients: self.connectedClients,
           reachable: true,
           lastSeen: new Date(this.now()).toISOString(),
           seenInTopology: true,
@@ -169,6 +189,7 @@ export class NodeDirectory {
         name: status.name,
         nodeId: status.nodeId,
         role: status.role,
+        connectedClients: status.connectedClients,
         reachable: status.reachable,
         lastSeen:
           status.lastSeen === null
@@ -228,6 +249,7 @@ export class NodeDirectory {
       status.name = readString(body.nodeName);
       status.nodeId = nodeId;
       status.role = readRole(body.role);
+      status.connectedClients = readConnectedClients(body.transport);
       status.reachable = true;
       status.lastSeen = this.now();
     } catch (error) {
@@ -235,6 +257,7 @@ export class NodeDirectory {
         this.logger.warn({ url, statusUrl, err: error }, 'node unreachable');
       }
       status.reachable = false;
+      status.connectedClients = null;
     }
   }
 }

@@ -13,7 +13,7 @@ import {
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { Configuration } from '../configuration.ts';
-import { HubPortListener } from './hubPortListener.ts';
+import type { Transport, TransportSnapshot } from './hubTransport.ts';
 
 /**
  * This node's role as `/status` reports it. `starting` until discovery has
@@ -60,6 +60,7 @@ export type NetworkSnapshot = Readonly<{
   hubNodeId: string | null;
   hubAddress: string | null;
   peers: readonly PeerSnapshot[];
+  transport: TransportSnapshot;
 }>;
 
 /**
@@ -73,7 +74,6 @@ export type DiscoveryManager = Pick<
 
 export type RoleOrchestratorOptions = Readonly<{
   createDiscoveryManager?: (config: NetworkConfig) => DiscoveryManager;
-  hubPortListener?: HubPortListener;
   now?: () => number;
 }>;
 
@@ -86,10 +86,12 @@ const isoString = (milliseconds: number): string =>
  * Owns the `NetworkManager` of `@rljson/network` (roadmap section 3.3 and
  * decision D4 of `docs/plan.md`): starts discovery with the configured
  * domain and ports, keeps the identity under `<DATA_DIR>/identity`,
- * follows the role the election gives this node, holds the hub port while
- * this node is the hub, logs every transition and answers with a snapshot
- * for `/status`. Slice D2 adds the hub transport and the client connection
- * on top of the same role changes.
+ * follows the role the election gives this node, drives the hub
+ * transport through the role changes (serve on the hub port as hub,
+ * connect to the hub as client, neither otherwise; modelled after the
+ * transitions of `Node` in `@rljson/server`, which cannot be used itself
+ * because it builds its own in-memory stores), logs every transition and
+ * answers with a snapshot for `/status`.
  */
 export type RoleOrchestratorConfiguration = Pick<
   Configuration,
@@ -99,27 +101,28 @@ export type RoleOrchestratorConfiguration = Pick<
 export class RoleOrchestrator {
   private readonly configuration: RoleOrchestratorConfiguration;
   private readonly logger: FastifyBaseLogger;
+  private readonly transport: Transport;
   private readonly createDiscoveryManager: (
     config: NetworkConfig,
   ) => DiscoveryManager;
-  private readonly hubPortListener: HubPortListener;
   private readonly now: () => number;
   private readonly seen = new Map<string, SeenTimes>();
   private manager: DiscoveryManager | null = null;
   private selfNodeId: string | null = null;
-  private hubPortTransition: Promise<void> = Promise.resolve();
+  private followedRole: NetworkTopology['myRole'] = 'unassigned';
 
   constructor(
     configuration: RoleOrchestratorConfiguration,
     logger: FastifyBaseLogger,
+    transport: Transport,
     options: RoleOrchestratorOptions = {},
   ) {
     this.configuration = configuration;
     this.logger = logger;
+    this.transport = transport;
     this.createDiscoveryManager =
       options.createDiscoveryManager ??
       ((config) => new NetworkManager(config));
-    this.hubPortListener = options.hubPortListener ?? new HubPortListener();
     this.now = options.now ?? Date.now;
   }
 
@@ -177,9 +180,9 @@ export class RoleOrchestrator {
   }
 
   /**
-   * Stops discovery and releases the hub port; the port is released even
+   * Stops discovery and the hub transport; the transport is stopped even
    * when the manager fails to stop, so that a restart of this process can
-   * bind it again.
+   * bind the hub port again.
    */
   async stop(): Promise<void> {
     const manager = this.manager;
@@ -190,13 +193,13 @@ export class RoleOrchestrator {
         this.logger.info('discovery stopped');
       }
     } finally {
-      await this.hubPortTransition;
-      await this.hubPortListener.stop();
+      await this.transport.stop();
     }
   }
 
   snapshot(): NetworkSnapshot {
     const domain = this.configuration.rljsonDomain;
+    const transport = this.transport.snapshot();
     if (this.selfNodeId === null) {
       return {
         nodeId: null,
@@ -205,6 +208,7 @@ export class RoleOrchestrator {
         hubNodeId: null,
         hubAddress: null,
         peers: [],
+        transport,
       };
     }
     if (this.manager === null) {
@@ -215,6 +219,7 @@ export class RoleOrchestrator {
         hubNodeId: null,
         hubAddress: null,
         peers: [],
+        transport,
       };
     }
 
@@ -227,6 +232,7 @@ export class RoleOrchestrator {
       hubNodeId: topology.hubNodeId,
       hubAddress: topology.hubAddress,
       peers,
+      transport,
     };
   }
 
@@ -314,17 +320,25 @@ export class RoleOrchestrator {
         { previous: event.previous, current: event.current },
         'role changed',
       );
-      this.ownHubPort(event.current === 'hub');
+      this.followRole(manager.getTopology());
     });
     manager.on('hub-changed', (event) => {
+      const topology = manager.getTopology();
       this.logger.info(
         {
           previousHub: event.previousHub,
           currentHub: event.currentHub,
-          hubAddress: manager.getTopology().hubAddress,
+          hubAddress: topology.hubAddress,
         },
         'hub changed',
       );
+      // A client whose hub changed keeps the client role, so no role
+      // change follows and the transport has to move to the new hub here.
+      // When the role changed as well, the role change (emitted right
+      // after this event) moves it.
+      if (topology.myRole === 'client' && this.followedRole === 'client') {
+        this.followRole(topology);
+      }
     });
     manager.on('log', (entry: NetworkLogEntry) => {
       // Election and probe messages repeat on every probe cycle; the
@@ -338,23 +352,23 @@ export class RoleOrchestrator {
   }
 
   /**
-   * Transitions are queued so that a role flapping faster than a bind or a
-   * close completes still leaves the port in the state of the last change.
+   * Points the transport at the role the topology gives this node. The
+   * transport queues its transitions and logs their failures, so a role
+   * flapping faster than a transition completes still ends in the state
+   * of the last change. A client role without a hub address (the hub was
+   * elected but its address is not resolvable) leaves the transport as it
+   * is until the next topology change names one.
    */
-  private ownHubPort(shouldOwn: boolean): void {
-    const port = this.configuration.hubPort;
-    this.hubPortTransition = this.hubPortTransition
-      .then(async () => {
-        if (shouldOwn && !this.hubPortListener.isListening()) {
-          await this.hubPortListener.start(port);
-          this.logger.info({ port }, 'hub port bound');
-        } else if (!shouldOwn && this.hubPortListener.isListening()) {
-          await this.hubPortListener.stop();
-          this.logger.info({ port }, 'hub port released');
-        }
-      })
-      .catch((error: unknown) => {
-        this.logger.error({ err: error, port }, 'hub port transition failed');
-      });
+  private followRole(topology: NetworkTopology): void {
+    this.followedRole = topology.myRole;
+    if (topology.myRole === 'hub') {
+      void this.transport.becomeHub(topology.hubAddress);
+    } else if (topology.myRole === 'client') {
+      if (topology.hubAddress !== null) {
+        void this.transport.becomeClient(topology.hubAddress);
+      }
+    } else {
+      void this.transport.becomeStandalone();
+    }
   }
 }

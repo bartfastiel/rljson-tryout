@@ -2,6 +2,7 @@ import type { SeedSize } from '@rljson-tryout/domain';
 import type { FastifyInstance } from 'fastify';
 
 import type { Configuration, StorageKind } from '../configuration.ts';
+import type { TransportSnapshot } from '../network/hubTransport.ts';
 import type {
   DirectoryEntry,
   NodeDirectory,
@@ -25,7 +26,8 @@ export type StatusNode = DirectoryEntry & { seenInTopology: boolean };
  * The answer of `GET /status` (roadmap section 2.5): this node's identity
  * and role, the hub it follows or is, the peers discovery knows, every
  * node of the environment with one flag from discovery and one from the
- * server-side probe, and the row counts of the store.
+ * server-side probe, the state of the hub transport, and the row counts
+ * of the store.
  */
 export type StatusReport = {
   nodeName: string;
@@ -37,6 +39,7 @@ export type StatusReport = {
   hubAddress: string | null;
   peers: StatusPeer[];
   nodes: StatusNode[];
+  transport: TransportSnapshot;
   storage: StorageKind;
   seedSize: SeedSize;
   tables: Record<string, number>;
@@ -68,6 +71,10 @@ export const buildStatusReport = async ({
       name: configuration.nodeName,
       nodeId: network.nodeId,
       role: network.role,
+      connectedClients:
+        network.transport.role === 'hub'
+          ? network.transport.connectedClients
+          : null,
     },
     peers.map((peer) => peer.nodeId),
   );
@@ -82,6 +89,7 @@ export const buildStatusReport = async ({
     hubAddress: network.hubAddress,
     peers,
     nodes,
+    transport: network.transport,
     storage: configuration.storage,
     seedSize: configuration.seedSize,
     tables: await store.tableRowCounts(),

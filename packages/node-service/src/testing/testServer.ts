@@ -1,10 +1,12 @@
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { BsMem } from '@rljson/bs';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import pino from 'pino';
 
 import type { Configuration } from '../configuration.ts';
+import { HubTransport } from '../network/hubTransport.ts';
 import { NodeDirectory } from '../network/nodeDirectory.ts';
 import { RoleOrchestrator } from '../network/roleOrchestrator.ts';
 import { buildServer } from '../server.ts';
@@ -47,13 +49,32 @@ export const testConfiguration: Configuration = Object.freeze({
 export const silentLogger = (): FastifyBaseLogger => pino({ level: 'silent' });
 
 /**
+ * A hub transport over the given store with a silent logger, wired the
+ * way `main.ts` wires it (the store's `Io` lent to `@rljson/server`, blobs
+ * in memory). Not started: it binds and connects only when a test drives
+ * it. Port `0` in the test configuration keeps a hub on an ephemeral port.
+ */
+export const buildTestTransport = (
+  store: PetShopStore,
+  overrides: Partial<Configuration> = {},
+): HubTransport =>
+  new HubTransport(
+    { ...testConfiguration, ...overrides },
+    silentLogger(),
+    store,
+    new BsMem(),
+  );
+
+/**
  * A server over the given store with a silent logger and network
  * components that are built but not started: `/status` then reports the
- * role `starting` with no node id, and nothing polls or binds.
+ * role `starting` with no node id and a standalone transport, and nothing
+ * polls, binds or connects.
  */
 export const buildTestServer = (
   store: PetShopStore,
   overrides: Partial<Configuration> = {},
+  transport: HubTransport = buildTestTransport(store, overrides),
 ): FastifyInstance => {
   const configuration: Configuration = Object.freeze({
     ...testConfiguration,
@@ -63,7 +84,7 @@ export const buildTestServer = (
   return buildServer({
     configuration,
     store,
-    orchestrator: new RoleOrchestrator(configuration, logger),
+    orchestrator: new RoleOrchestrator(configuration, logger, transport),
     directory: new NodeDirectory(configuration, logger),
     logger,
   });

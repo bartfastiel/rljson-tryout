@@ -9,8 +9,8 @@ import {
   FakeDiscoveryManager,
   fakeNodeInfo,
 } from '../testing/fakeDiscoveryManager.ts';
+import { FakeTransport } from '../testing/fakeTransport.ts';
 import { recordingLogger } from '../testing/recordingLogger.ts';
-import { HubPortListener } from './hubPortListener.ts';
 import {
   RoleOrchestrator,
   type RoleOrchestratorConfiguration,
@@ -44,10 +44,16 @@ const configuration = (
   ...overrides,
 });
 
+const standaloneTransport = {
+  role: 'standalone',
+  hubAddress: null,
+  lastError: null,
+};
+
 /**
- * An orchestrator over a fake manager, with a clock the test advances and a
- * real `HubPortListener` on port 0 so that the hub port handling is
- * exercised without a fixed port.
+ * An orchestrator over a fake manager and a fake transport, with a clock
+ * the test advances, so that the state machine is exercised without a
+ * socket.
  */
 const orchestratorOverFake = (
   overrides: Partial<RoleOrchestratorConfiguration> = {},
@@ -55,22 +61,26 @@ const orchestratorOverFake = (
   let manager: FakeDiscoveryManager | undefined;
   let now = 1_700_000_000_000;
   const { logger, records } = recordingLogger();
-  const hubPortListener = new HubPortListener();
-  const orchestrator = new RoleOrchestrator(configuration(overrides), logger, {
-    createDiscoveryManager: (config: NetworkConfig) => {
-      manager = new FakeDiscoveryManager(
-        config,
-        fakeNodeInfo(selfNodeId, { startedAt: 500 }),
-      );
-      return manager;
+  const transport = new FakeTransport();
+  const orchestrator = new RoleOrchestrator(
+    configuration(overrides),
+    logger,
+    transport,
+    {
+      createDiscoveryManager: (config: NetworkConfig) => {
+        manager = new FakeDiscoveryManager(
+          config,
+          fakeNodeInfo(selfNodeId, { startedAt: 500 }),
+        );
+        return manager;
+      },
+      now: () => now,
     },
-    hubPortListener,
-    now: () => now,
-  });
+  );
   return {
     orchestrator,
     records,
-    hubPortListener,
+    transport,
     manager: () => {
       if (manager === undefined) {
         throw new Error('the orchestrator has not created its manager yet');
@@ -96,6 +106,7 @@ describe('RoleOrchestrator before start', () => {
       hubNodeId: null,
       hubAddress: null,
       peers: [],
+      transport: standaloneTransport,
     });
   });
 });
@@ -245,8 +256,8 @@ describe('RoleOrchestrator with discovery enabled', () => {
     await orchestrator.stop();
   });
 
-  it('becomes the hub, binds the hub port and marks the peers as clients', async () => {
-    const { orchestrator, manager, hubPortListener, records } =
+  it('becomes the hub, starts the hub transport and marks the peers as clients', async () => {
+    const { orchestrator, manager, transport, records } =
       orchestratorOverFake();
     await orchestrator.start();
     manager().join(fakeNodeInfo('bbbbbbbb-peer'));
@@ -259,42 +270,45 @@ describe('RoleOrchestrator with discovery enabled', () => {
       role: 'hub',
       hubNodeId: selfNodeId,
       hubAddress: '10.0.0.13:3000',
+      transport: { role: 'hub', hubAddress: '10.0.0.13:3000' },
     });
     expect(
       orchestrator.snapshot().peers.map((peer) => peer.role),
     ).toStrictEqual(['client', 'client']);
-    expect(hubPortListener.isListening()).toBe(true);
+    expect(transport.calls).toStrictEqual([
+      { kind: 'hub', hubAddress: '10.0.0.13:3000' },
+    ]);
     expect(records).toContainEqual(
       expect.objectContaining({
         message: 'role changed',
         fields: { previous: 'unassigned', current: 'hub' },
       }),
     );
-    expect(records).toContainEqual(
-      expect.objectContaining({ message: 'hub port bound' }),
-    );
     await orchestrator.stop();
-    expect(hubPortListener.isListening()).toBe(false);
+    expect(transport.stopped).toBe(1);
   });
 
-  it('becomes a client of another hub and releases the hub port again', async () => {
-    const { orchestrator, manager, hubPortListener, records } =
+  it('becomes a client of another hub and connects the transport to it', async () => {
+    const { orchestrator, manager, transport, records } =
       orchestratorOverFake();
     await orchestrator.start();
     manager().join(fakeNodeInfo('bbbbbbbb-peer'));
     manager().elect(selfNodeId, '10.0.0.13:3000');
     await settle();
-    expect(hubPortListener.isListening()).toBe(true);
 
-    manager().elect('bbbbbbbb-peer', '10.0.0.13:3000');
+    manager().elect('bbbbbbbb-peer', '10.0.0.14:3000');
     await settle();
 
     expect(orchestrator.snapshot()).toMatchObject({
       role: 'client',
       hubNodeId: 'bbbbbbbb-peer',
+      transport: { role: 'client', hubAddress: '10.0.0.14:3000' },
     });
     expect(orchestrator.snapshot().peers[0]?.role).toBe('hub');
-    expect(hubPortListener.isListening()).toBe(false);
+    expect(transport.calls).toStrictEqual([
+      { kind: 'hub', hubAddress: '10.0.0.13:3000' },
+      { kind: 'client', hubAddress: '10.0.0.14:3000' },
+    ]);
     expect(records).toContainEqual(
       expect.objectContaining({
         message: 'hub changed',
@@ -304,8 +318,44 @@ describe('RoleOrchestrator with discovery enabled', () => {
         }) as Record<string, unknown>,
       }),
     );
-    expect(records).toContainEqual(
-      expect.objectContaining({ message: 'hub port released' }),
+    await orchestrator.stop();
+  });
+
+  it('moves the transport to the new hub when the hub changes while client', async () => {
+    const { orchestrator, manager, transport } = orchestratorOverFake();
+    await orchestrator.start();
+    manager().join(fakeNodeInfo('bbbbbbbb-peer'));
+    manager().join(fakeNodeInfo('cccccccc-peer'));
+    manager().elect('bbbbbbbb-peer', '10.0.0.14:3000');
+    await settle();
+
+    manager().elect('cccccccc-peer', '10.0.0.15:3000');
+    await settle();
+
+    expect(transport.calls).toStrictEqual([
+      { kind: 'client', hubAddress: '10.0.0.14:3000' },
+      { kind: 'client', hubAddress: '10.0.0.15:3000' },
+    ]);
+    expect(orchestrator.snapshot().transport).toMatchObject({
+      role: 'client',
+      hubAddress: '10.0.0.15:3000',
+    });
+    await orchestrator.stop();
+  });
+
+  it('stops the transport when the election leaves this node unassigned', async () => {
+    const { orchestrator, manager, transport } = orchestratorOverFake();
+    await orchestrator.start();
+    manager().join(fakeNodeInfo('bbbbbbbb-peer'));
+    manager().elect('bbbbbbbb-peer', '10.0.0.14:3000');
+    await settle();
+
+    manager().unassign();
+    await settle();
+
+    expect(transport.calls.at(-1)).toStrictEqual({ kind: 'standalone' });
+    expect(orchestrator.snapshot().transport).toStrictEqual(
+      standaloneTransport,
     );
     await orchestrator.stop();
   });
@@ -382,12 +432,17 @@ describe('RoleOrchestrator with discovery enabled', () => {
     let managersCreated = 0;
     const { orchestrator } = orchestratorOverFake();
     const { logger } = recordingLogger();
-    const counting = new RoleOrchestrator(configuration(), logger, {
-      createDiscoveryManager: (config: NetworkConfig) => {
-        managersCreated += 1;
-        return new FakeDiscoveryManager(config, fakeNodeInfo(selfNodeId));
+    const counting = new RoleOrchestrator(
+      configuration(),
+      logger,
+      new FakeTransport(),
+      {
+        createDiscoveryManager: (config: NetworkConfig) => {
+          managersCreated += 1;
+          return new FakeDiscoveryManager(config, fakeNodeInfo(selfNodeId));
+        },
       },
-    });
+    );
 
     await counting.start();
     await counting.start();
@@ -401,26 +456,31 @@ describe('RoleOrchestrator with discovery enabled', () => {
     await orchestrator.stop();
   });
 
-  it('releases the hub port even when the manager fails to stop', async () => {
+  it('stops the transport even when the manager fails to stop', async () => {
     const { logger } = recordingLogger();
-    const hubPortListener = new HubPortListener();
+    const transport = new FakeTransport();
     let manager: FakeDiscoveryManager | undefined;
-    const orchestrator = new RoleOrchestrator(configuration(), logger, {
-      createDiscoveryManager: (config: NetworkConfig) => {
-        manager = new FakeDiscoveryManager(config, fakeNodeInfo(selfNodeId));
-        manager.stop = () => Promise.reject(new Error('socket already gone'));
-        return manager;
+    const orchestrator = new RoleOrchestrator(
+      configuration(),
+      logger,
+      transport,
+      {
+        createDiscoveryManager: (config: NetworkConfig) => {
+          manager = new FakeDiscoveryManager(config, fakeNodeInfo(selfNodeId));
+          manager.stop = () => Promise.reject(new Error('socket already gone'));
+          return manager;
+        },
       },
-      hubPortListener,
-    });
+    );
     await orchestrator.start();
     manager?.elect(selfNodeId, '10.0.0.13:3000');
     await settle();
-    expect(hubPortListener.isListening()).toBe(true);
+    expect(transport.snapshot().role).toBe('hub');
 
     await expect(orchestrator.stop()).rejects.toThrow('socket already gone');
 
-    expect(hubPortListener.isListening()).toBe(false);
+    expect(transport.stopped).toBe(1);
+    expect(transport.snapshot().role).toBe('standalone');
   });
 
   it('stops the manager and reports standalone afterwards', async () => {
