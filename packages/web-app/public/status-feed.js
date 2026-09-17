@@ -48,6 +48,39 @@ import { fetchJson } from './api.js';
  */
 
 /**
+ * One change set transfer, from `GET /status` under `sync.transfers`:
+ * which way it went, the node it came from or went to (`null` when the
+ * announcement named none, or for a hub announcing to every client), the
+ * change set by hash and id, the rows it named per table, how long the
+ * pull took, when it finished and how it ended.
+ *
+ * @typedef {object} SyncTransfer
+ * @property {'incoming' | 'outgoing'} direction
+ * @property {string | null} peerNodeId
+ * @property {string} changeSetHash
+ * @property {string | null} changeSetId
+ * @property {Record<string, number>} tables
+ * @property {number} durationMs
+ * @property {string} at
+ * @property {'completed' | 'pending' | 'failed'} status
+ * @property {string} [error]
+ */
+
+/**
+ * The change set synchronisation of this node, from `GET /status` under
+ * `sync`: the counters and the last ten transfers, newest first.
+ *
+ * @typedef {object} StatusSync
+ * @property {number} announced
+ * @property {number} received
+ * @property {number} skipped
+ * @property {number} pending
+ * @property {number} failed
+ * @property {string | null} lastError
+ * @property {SyncTransfer[]} transfers
+ */
+
+/**
  * The answer of `GET /status`.
  *
  * @typedef {object} Status
@@ -61,6 +94,7 @@ import { fetchJson } from './api.js';
  * @property {StatusPeer[]} peers
  * @property {StatusNode[]} nodes
  * @property {StatusTransport} transport
+ * @property {StatusSync} sync
  * @property {string} storage
  * @property {Record<string, number>} tables
  */
