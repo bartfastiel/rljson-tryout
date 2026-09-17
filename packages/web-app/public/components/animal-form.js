@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJson, putJson } from '../api.js';
 import { element } from '../dom.js';
+import { animalDetailHref, animalListHref } from '../hash-route.js';
 import { notFoundView } from '../not-found-view.js';
 import { applicationName, errorState, statusMessage } from '../view-helpers.js';
 
@@ -56,17 +57,16 @@ import { applicationName, errorState, statusMessage } from '../view-helpers.js';
  */
 
 /**
- * @param {string} animalId
- */
-const detailHref = (animalId) => `#/animals/${encodeURIComponent(animalId)}`;
-
-/**
+ * The detail this form returns to, with the list filter the detail's Edit
+ * action carried into this hash, so that the way back from the detail
+ * still leads to the filtered list.
+ *
  * @param {EditableAnimal} animal
  * @returns {HTMLAnchorElement}
  */
 const backLink = (animal) => {
   const link = element('a', 'back-link', `← Back to ${animal.name}`);
-  link.href = detailHref(animal.id);
+  link.href = animalDetailHref(animal.id, null);
   return link;
 };
 
@@ -241,12 +241,14 @@ const isCalendarDate = (value) => {
 
 /**
  * The edit form, built once when the animal and the choices are loaded.
- * Every field is validated inline: on every change once the person has
- * left the field, and for every field at once when the form is submitted,
- * which then focuses the first field with a problem instead of sending
- * anything. A successful save navigates to the animal's detail, where the
- * new version is the current one; a refused save shows the node's message
- * above the buttons.
+ * Every field is validated inline: for every field at once when the form
+ * is submitted, which then focuses the first field with a problem instead
+ * of sending anything, and from then on again on every keystroke, so that
+ * a message appears while the person types and never on leaving the
+ * field: a message inserted on blur would push the Save button down under
+ * the very tap that blurred the field. A successful save navigates to the
+ * animal's detail, where the new version is the current one; a refused
+ * save shows the node's message above the buttons.
  *
  * @param {EditableAnimal} animal
  * @param {FormSpecies[]} species
@@ -351,14 +353,10 @@ const animalForm = (animal, species, breeders, traits) => {
     return false;
   };
 
+  let submitAttempted = false;
   for (const check of checks) {
-    let touched = false;
-    check.field.control.addEventListener('blur', () => {
-      touched = true;
-      validate(check);
-    });
     check.field.control.addEventListener('input', () => {
-      if (touched) {
+      if (submitAttempted) {
         validate(check);
       }
     });
@@ -371,13 +369,14 @@ const animalForm = (animal, species, breeders, traits) => {
   const save = element('button', 'button', 'Save');
   save.type = 'submit';
   const cancel = element('a', 'button button-secondary', 'Cancel');
-  cancel.href = detailHref(animal.id);
+  cancel.href = animalDetailHref(animal.id, null);
   const actions = element('div', 'form-actions');
   actions.append(save, cancel);
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     alert.hidden = true;
+    submitAttempted = true;
     const invalid = checks.filter((check) => !validate(check));
     if (invalid.length > 0) {
       invalid[0].field.control.focus();
@@ -397,7 +396,7 @@ const animalForm = (animal, species, breeders, traits) => {
           .map((trait) => trait.id)
           .filter((traitId) => selectedTraitIds.has(traitId)),
       });
-      location.hash = detailHref(animal.id);
+      location.hash = animalDetailHref(animal.id, null);
     } catch (error) {
       alert.textContent =
         error instanceof Error ? error.message : String(error);
@@ -451,7 +450,7 @@ class AnimalFormElement extends HTMLElement {
       if (response.status === 404) {
         this.replaceChildren(
           notFoundView(`There is no animal with id "${id}".`, {
-            href: '#/animals',
+            href: animalListHref(),
             text: 'Back to Animals',
           }),
         );

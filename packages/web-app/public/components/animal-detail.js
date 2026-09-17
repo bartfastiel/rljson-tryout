@@ -1,7 +1,13 @@
 // @ts-check
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
-import { hashQuery } from '../hash-route.js';
+import {
+  animalDetailHref,
+  animalFilterParams,
+  animalListHref,
+  hashQuery,
+  hrefWithParams,
+} from '../hash-route.js';
 import { notFoundView } from '../not-found-view.js';
 import {
   applicationName,
@@ -72,65 +78,29 @@ import {
  */
 
 /**
- * The `species`, `breeder` and `trait` filters this view's own hash query
- * carries (the animal card that links here puts them there, see
- * `animals-list.js`), so that every href this view builds keeps them and
- * the back link returns to the filtered list the detail was opened from.
- */
-const filterParams = () => {
-  const query = hashQuery(location.hash);
-  const params = new URLSearchParams();
-  for (const name of ['species', 'breeder', 'trait']) {
-    const value = query.get(name);
-    if (value !== null) {
-      params.set(name, value);
-    }
-  }
-  return params;
-};
-
-/**
  * The hash of the version this view shows, from `?version=<hash>`, or
  * `null` for the current version.
  */
 const requestedVersion = () => hashQuery(location.hash).get('version');
 
 /**
- * @param {string} path
- * @param {URLSearchParams} params
- */
-const hrefWith = (path, params) => {
-  const queryString = params.toString();
-  return queryString === '' ? path : `${path}?${queryString}`;
-};
-
-/**
- * The href of the list a "back" link should return to: the filtered list
- * the detail was opened from, the full list when no filter is present.
- */
-const listHref = () => hrefWith('#/animals', filterParams());
-
-/**
- * The href of this animal's detail, for the current version when `version`
- * is `null` and for that exact version otherwise, keeping the filters.
+ * The href of the form that writes the next version, keeping the list
+ * filter so that the form's own way back returns to the same list.
  *
  * @param {string} animalId
- * @param {string | null} version
  */
-const detailHref = (animalId, version) => {
-  const params = filterParams();
-  if (version !== null) {
-    params.set('version', version);
-  }
-  return hrefWith(`#/animals/${encodeURIComponent(animalId)}`, params);
-};
+const editHref = (animalId) =>
+  hrefWithParams(
+    `#/animals/${encodeURIComponent(animalId)}/edit`,
+    animalFilterParams(location.hash),
+  );
 
 /**
  * @returns {HTMLAnchorElement}
  */
 const backLink = () => {
   const link = element('a', 'back-link', '← Back to Animals');
-  link.href = listHref();
+  link.href = animalListHref();
   return link;
 };
 
@@ -221,19 +191,19 @@ const traitChips = (animal) => {
 };
 
 /**
- * The heading row: the animal's name and, on the current version, the
- * "Edit" action that opens the form writing the next version. An old
- * version is read-only, so it gets no action.
+ * The heading row: the animal's name and, on the newest current version,
+ * the "Edit" action that opens the form writing the next version. Any
+ * other version is read-only, so it gets no action.
  *
  * @param {AnimalDetail} animal
- * @param {boolean} isCurrent
+ * @param {boolean} isNewestTip
  */
-const headingRow = (animal, isCurrent) => {
+const headingRow = (animal, isNewestTip) => {
   const header = element('div', 'view-header');
   header.append(element('h1', 'view-title', animal.name));
-  if (isCurrent) {
+  if (isNewestTip) {
     const edit = element('a', 'button', 'Edit');
-    edit.href = `#/animals/${encodeURIComponent(animal.id)}/edit`;
+    edit.href = editHref(animal.id);
     header.append(edit);
   }
   return header;
@@ -254,7 +224,7 @@ const oldVersionNotice = (animal, history) => {
   const notice = element('p', 'version-notice');
   notice.setAttribute('role', 'status');
   const currentLink = element('a', '', 'Show the current version');
-  currentLink.href = detailHref(animal.id, null);
+  currentLink.href = animalDetailHref(animal.id, null);
   notice.append(
     version === undefined
       ? 'You are viewing an older version. '
@@ -267,16 +237,22 @@ const oldVersionNotice = (animal, history) => {
 /**
  * One row of the version list: the moment the version was written, its
  * name when it differs from the version shown, its price, and a "current"
- * badge on the tip. The whole row is a link that shows that version
- * (`?version=<hash>`, or the plain detail for the current one); the row of
- * the version on screen is marked as the current page.
+ * badge on every tip. The whole row is a link that shows that version: the
+ * plain detail for the newest tip, `?version=<hash>` for every other
+ * version, an older tip of an open branch included, so that each row opens
+ * its own version; the row of the version on screen is marked as the
+ * current page.
  *
  * @param {AnimalVersion} version
  * @param {AnimalDetail} shown
+ * @param {string | undefined} newestTipHash
  */
-const versionRow = (version, shown) => {
+const versionRow = (version, shown, newestTipHash) => {
   const link = element('a', 'version-link');
-  link.href = detailHref(shown.id, version.current ? null : version.hash);
+  link.href = animalDetailHref(
+    shown.id,
+    version.hash === newestTipHash ? null : version.hash,
+  );
   if (version.hash === shown.hash) {
     link.setAttribute('aria-current', 'page');
   }
@@ -309,13 +285,16 @@ const versionRow = (version, shown) => {
  *
  * @param {AnimalVersion[]} history
  * @param {AnimalDetail} shown
+ * @param {string | undefined} newestTipHash
  */
-const versionsSection = (history, shown) => {
+const versionsSection = (history, shown, newestTipHash) => {
   const title = element('h2', 'section-title', 'Versions');
   title.id = 'animal-versions-title';
   const list = element('ol', 'version-list');
   list.setAttribute('aria-labelledby', title.id);
-  list.append(...history.map((version) => versionRow(version, shown)));
+  list.append(
+    ...history.map((version) => versionRow(version, shown, newestTipHash)),
+  );
 
   const section = element('section', 'animal-versions');
   section.setAttribute('aria-labelledby', title.id);
@@ -324,20 +303,26 @@ const versionsSection = (history, shown) => {
 };
 
 /**
+ * The detail of one version. The newest tip (the first current entry of
+ * the history, newest first) is the version the detail serves without
+ * `?version=`, so it is the one that may be edited; a hash that happens to
+ * name it reads as the current version, not as an old one.
+ *
  * @param {AnimalDetail} animal
  * @param {AnimalVersion[]} history
- * @param {boolean} isCurrent
  */
-const detailView = (animal, history, isCurrent) => {
+const detailView = (animal, history) => {
+  const newestTipHash = history.find((version) => version.current)?.hash;
+  const isNewestTip = animal.hash === newestTipHash;
   const view = element('section', 'animal-detail-view');
   const traits = traitChips(animal);
   view.append(
-    headingRow(animal, isCurrent),
-    ...(isCurrent ? [] : [oldVersionNotice(animal, history)]),
+    headingRow(animal, isNewestTip),
+    ...(isNewestTip ? [] : [oldVersionNotice(animal, history)]),
     factsBlock(animal),
     ...(traits === null ? [] : [traits]),
     storyParagraphs(animal.backgroundStory),
-    versionsSection(history, animal),
+    versionsSection(history, animal, newestTipHash),
   );
   return view;
 };
@@ -384,7 +369,7 @@ class AnimalDetailElement extends HTMLElement {
             version === null
               ? `There is no animal with id "${id}".`
               : `There is no version "${version}" of the animal "${id}".`,
-            { href: listHref(), text: 'Back to Animals' },
+            { href: animalListHref(), text: 'Back to Animals' },
           ),
         );
         return;
@@ -399,10 +384,7 @@ class AnimalDetailElement extends HTMLElement {
         await fetchJson(`/api/animals/${encodeURIComponent(id)}/history`)
       );
       document.title = `${animal.name} · ${applicationName}`;
-      this.replaceChildren(
-        backLink(),
-        detailView(animal, history, version === null),
-      );
+      this.replaceChildren(backLink(), detailView(animal, history));
     } catch (error) {
       this.replaceChildren(
         backLink(),

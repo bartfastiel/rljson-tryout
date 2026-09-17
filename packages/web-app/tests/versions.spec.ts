@@ -114,7 +114,13 @@ test('shows inline validation messages and does not save an invalid form', async
   await expect(nameField).toHaveValue('Sir Quackington');
 
   await nameField.fill('');
-  await page.getByLabel('Price in euros').fill('-5');
+  await nameField.press('Tab');
+  // Nothing is judged before the first attempt to save: a message that
+  // appeared on leaving a field would move the Save button away from under
+  // the tap that left it.
+  await expect(page.locator('#animal-name-error')).toBeHidden();
+  const price = page.getByLabel('Price in euros');
+  await price.fill('-5');
   await page.getByRole('button', { name: 'Save' }).click();
 
   await expect(page).toHaveURL(/#\/animals\/sir-quackington\/edit$/);
@@ -132,6 +138,50 @@ test('shows inline validation messages and does not save an invalid form', async
   await expect(page.locator('#animal-name-error')).toBeHidden();
   await expect(nameField).not.toHaveAttribute('aria-invalid');
   await expect(page.locator('#animal-price-error')).toBeVisible();
+});
+
+test('keeps the list filter through Edit and Cancel', async ({ page }) => {
+  await page.goto('/#/animals/sir-quackington?species=duck');
+  await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Edit' }).click();
+
+  await expect(page).toHaveURL(
+    /#\/animals\/sir-quackington\/edit\?species=duck$/,
+  );
+  await expect(page.getByRole('link', { name: 'Cancel' })).toHaveAttribute(
+    'href',
+    '#/animals/sir-quackington?species=duck',
+  );
+
+  await page.getByRole('link', { name: 'Cancel' }).click();
+
+  await expect(page).toHaveURL(/#\/animals\/sir-quackington\?species=duck$/);
+  await expect(
+    page.getByRole('link', { name: 'Back to Animals' }),
+  ).toHaveAttribute('href', '#/animals?species=duck');
+});
+
+test('treats the current version addressed by its hash as current', async ({
+  page,
+}) => {
+  const response = await page.request.get(
+    '/api/animals/sir-quackington/history',
+  );
+  const history = (await response.json()) as { hash: string }[];
+  const newestTipHash = history[0]!.hash;
+
+  await page.goto(`/#/animals/sir-quackington?version=${newestTipHash}`);
+
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Sir Quackington' }),
+  ).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
+  await expect(page.getByRole('status')).toHaveCount(0);
+  await expect(versionRows(page).first().getByRole('link')).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
 });
 
 test('shows the traits as toggles and the story in a field that grows', async ({
@@ -201,7 +251,7 @@ test('can be edited and saved with the keyboard alone', async ({
   page,
 }, testInfo) => {
   const animalId = animalFor(testInfo.project.name, 'keyboard');
-  await page.goto(`/#/animals/${animalId}/edit`);
+  await page.goto(`/#/animals/${animalId}/edit?breeder=grandma-ducks-farm`);
   const price = page.getByLabel('Price in euros');
   await expect(price).toBeVisible();
 
@@ -225,7 +275,9 @@ test('can be edited and saved with the keyboard alone', async ({
   await page.keyboard.type('333.33');
   await page.keyboard.press('Enter');
 
-  await expect(page).toHaveURL(new RegExp(`#/animals/${animalId}$`));
+  await expect(page).toHaveURL(
+    new RegExp(`#/animals/${animalId}\\?breeder=grandma-ducks-farm$`),
+  );
   await expect(page.locator('.animal-facts')).toContainText(/333[.,]33/);
   await expect(versionRows(page).first().locator('.version-badge')).toHaveText(
     'current',
