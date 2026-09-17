@@ -72,21 +72,37 @@ pnpm --filter @rljson-tryout/node-service start
 
 Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
 answers `GET /health` with `{ status, name, version, commit, startedAt }`.
-At start the node seeds its rljson store, if it is empty, with three
-Duckburg species, eight Duckburg-flavoured traits, eight Duckburg persons,
-four breeders, five customers, ten Duckburg animals, the `animalTraits`
-junction table derived from the animals' traits, and six invoices, and
-serves them as `GET /api/species`
+At its first start, while every table is still empty, the node seeds its
+rljson store with the size `SEED_SIZE` names: `small` (the
+default) is the hand-written Duckburg seed of three species, eight
+Duckburg-flavoured traits, eight persons, four breeders, five customers,
+ten animals, the `animalTraits` junction table derived from the animals'
+traits, and six invoices; `medium` and `large` add rows from the
+deterministic generator in `packages/domain/src/generator` on top of it
+(`medium`: 10 species, 15 traits, 100 animals, 30 customers, 10 breeders,
+200 invoices with 400 items; `large`: 50 species, 40 traits, 2 000
+animals, 300 customers, 50 breeders, 5 000 invoices with 12 000 items),
+drawn from Duckburg name pools with a seeded random source so that every
+node computes the same hashes for the same size; `none` leaves the tables
+empty. Every generated row gets its InsertHistory row and every generated
+entity its change set, the way the API writes them
+([docs/findings/seed-generator.md](docs/findings/seed-generator.md):
+`large` seeds in about 1.4 seconds). The node serves the data as
+`GET /api/species`
 (`[{ id, hash, name, latinName, description }]`), `GET /api/traits`
 (`[{ id, hash, name, description }]`), `GET /api/breeders`
 (`[{ id, hash, farmName, suppliesSince, person: { id, name, city } | null }]`,
 the supplying person already joined), `GET /api/customers`
 (`[{ id, hash, customerNumber, person: { id, name, city } | null }]`),
-`GET /api/animals` (optionally narrowed with `?species=<id>`,
-`?breeder=<id>`, `?trait=<id>`, or any combination, returning
-`[{ id, hash, name, speciesId, speciesName, breederId, breederFarmName, bornOn, priceCents }]`
+`GET /api/animals` (one page of the current animals, optionally narrowed
+with `?species=<id>`, `?breeder=<id>`, `?trait=<id>`, `?q=<text>` (a
+case-insensitive substring of the name or the species name), or any
+combination, and sliced with `?limit=<1..200>` (default 50) and
+`?offset=<n>` (default 0), returning
+`{ items: [{ id, hash, name, speciesId, speciesName, breederId, breederFarmName, bornOn, priceCents }], total, limit, offset }`
 with the species and breeder already joined but the background story and
-the traits left out so the list stays light), `GET /api/animals/:id`
+the traits left out so the list stays light, and `400` for a `limit` or
+`offset` outside its range), `GET /api/animals/:id`
 (the same fields plus the full `backgroundStory`, `traits: [{ id, name }]`
 and `breeder: { id, farmName, personName, city } | null`, `404` for an
 unknown id; `?version=<hash>` serves that exact version of the animal
@@ -135,8 +151,13 @@ URL of `NODE_URLS` (this node included and flagged `self`) with the name,
 node id and role it reported to this node's poll of its `/status`,
 `reachable` from that server-side poll, `seenInTopology` from discovery
 and `lastSeen`; `tables` holds the row count of every table of the store.
-`/health` and `/status` allow cross-origin reads so that the web app of
-one node can probe every other node. Set `DISCOVERY=disabled` for a
+`GET /api/stats` reports
+`{ nodeName, seedSize, uptimeSeconds, startedAt, rssBytes, tables }`: the
+seed size the node was configured with, its uptime, the resident set size
+of the process in bytes and the same row counts `/status` carries, which
+is how a large seed's cost in memory is observed. `/health`, `/status`
+and `/api/stats` allow cross-origin reads so that the web app of one node
+can probe every other node. Set `DISCOVERY=disabled` for a
 single-node run without sockets; the node then reports `standalone` with
 an id that lives for the process only. The node id of a node with
 discovery persists under `DATA_DIR/identity/<domain>/node-id`.
@@ -161,6 +182,14 @@ features run over both stores, and
 STORAGE=sqlite DATA_DIR=/tmp/petshop pnpm --filter @rljson-tryout/node-service start
 ```
 
+The animals view of the web app searches and pages through the node: a
+search field at the top narrows the list to names and species containing
+the text (the text lives in the hash, `#/animals?q=quack`, so it combines
+with the filter chips and survives a reload), a line says how many of the
+matching animals are shown, and a "Load more" button appends the next
+fifty. The animal picker of the invoice form asks the node for the twenty
+animals matching its search the same way.
+
 The web app shows the environment in the header: this node as a badge,
 every other node of `NODE_URLS` as a link outlined green when discovery
 on this node sees it and red otherwise, with a small marker for the
@@ -170,24 +199,24 @@ seconds.
 
 Environment variables the service understands so far:
 
-| Variable            | Default                        | Meaning                                                                                                                                                                                   |
-| ------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_NAME`         | `node1`                        | Display name, reported by `/health` and `/status`                                                                                                                                         |
-| `HTTP_PORT`         | `8080`                         | Port to listen on, must be an integer 0 to 65535                                                                                                                                          |
-| `LOG_LEVEL`         | `info`                         | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`)                                                                                                                       |
-| `GIT_COMMIT`        | `unknown`                      | Commit shown by `/health`, set by the container build                                                                                                                                     |
-| `WEB_APP_DIRECTORY` | `packages/web-app/public`      | Directory served at `/`; must exist (`/app/public` in the image)                                                                                                                          |
-| `TRAIT_RELATION`    | `multi-reference`              | How the store reads which traits an animal carries: `multi-reference` (`animals.traitsRefs`) or `junction` (the `animalTraits` table, [docs/findings/n-to-m.md](docs/findings/n-to-m.md)) |
-| `RLJSON_DOMAIN`     | `petshop-local`                | rljson network domain; only nodes of the same domain discover each other                                                                                                                  |
-| `HUB_PORT`          | `3000`                         | TCP port of the hub transport and of the probe listener                                                                                                                                   |
-| `BROADCAST_PORT`    | `41234`                        | UDP port of the discovery announcements                                                                                                                                                   |
-| `STORAGE`           | `memory`                       | What backs the store: `memory` (lost on restart) or `sqlite` (`DATA_DIR/petshop.sqlite`, survives restarts); `mssql` follows with slice C4                                                |
-| `SEED_SIZE`         | `small`                        | What an empty store is seeded with at start: `small` (the hand-written pet shop) or `none` (nothing); the generated `medium` and `large` seeds follow with slice C5                       |
-| `DATA_DIR`          | `packages/node-service/data`   | Where the node identity lives (`identity/<domain>/node-id`) and, with `STORAGE=sqlite`, the database file; `/data` in the image                                                           |
-| `PUBLIC_URL`        | `http://localhost:<HTTP_PORT>` | This node's own URL as `/status` reports it and as the other nodes link to it                                                                                                             |
-| `NODE_URLS`         | empty                          | Comma separated public URLs of every node of the environment, this one included, as the header links to them                                                                              |
-| `NODE_STATUS_URLS`  | `NODE_URLS`                    | Comma separated URLs at which this node polls the `/status` of the node at the same position of `NODE_URLS` every three seconds; the in-cluster service URLs in Kubernetes, same length   |
-| `DISCOVERY`         | `enabled`                      | `disabled` turns the broadcast and probe sockets off (unit tests, single-node runs)                                                                                                       |
+| Variable            | Default                        | Meaning                                                                                                                                                                                             |
+| ------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_NAME`         | `node1`                        | Display name, reported by `/health` and `/status`                                                                                                                                                   |
+| `HTTP_PORT`         | `8080`                         | Port to listen on, must be an integer 0 to 65535                                                                                                                                                    |
+| `LOG_LEVEL`         | `info`                         | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`)                                                                                                                                 |
+| `GIT_COMMIT`        | `unknown`                      | Commit shown by `/health`, set by the container build                                                                                                                                               |
+| `WEB_APP_DIRECTORY` | `packages/web-app/public`      | Directory served at `/`; must exist (`/app/public` in the image)                                                                                                                                    |
+| `TRAIT_RELATION`    | `multi-reference`              | How the store reads which traits an animal carries: `multi-reference` (`animals.traitsRefs`) or `junction` (the `animalTraits` table, [docs/findings/n-to-m.md](docs/findings/n-to-m.md))           |
+| `RLJSON_DOMAIN`     | `petshop-local`                | rljson network domain; only nodes of the same domain discover each other                                                                                                                            |
+| `HUB_PORT`          | `3000`                         | TCP port of the hub transport and of the probe listener                                                                                                                                             |
+| `BROADCAST_PORT`    | `41234`                        | UDP port of the discovery announcements                                                                                                                                                             |
+| `STORAGE`           | `memory`                       | What backs the store: `memory` (lost on restart) or `sqlite` (`DATA_DIR/petshop.sqlite`, survives restarts); `mssql` follows with slice C4                                                          |
+| `SEED_SIZE`         | `small`                        | What an empty store is seeded with at the first start: `none`, `small` (the hand-written seed), `medium` or `large` (the hand-written seed plus generated rows); a store that holds rows keeps them |
+| `DATA_DIR`          | `packages/node-service/data`   | Where the node identity lives (`identity/<domain>/node-id`) and, with `STORAGE=sqlite`, the database file; `/data` in the image                                                                     |
+| `PUBLIC_URL`        | `http://localhost:<HTTP_PORT>` | This node's own URL as `/status` reports it and as the other nodes link to it                                                                                                                       |
+| `NODE_URLS`         | empty                          | Comma separated public URLs of every node of the environment, this one included, as the header links to them                                                                                        |
+| `NODE_STATUS_URLS`  | `NODE_URLS`                    | Comma separated URLs at which this node polls the `/status` of the node at the same position of `NODE_URLS` every three seconds; the in-cluster service URLs in Kubernetes, same length             |
+| `DISCOVERY`         | `enabled`                      | `disabled` turns the broadcast and probe sockets off (unit tests, single-node runs)                                                                                                                 |
 
 ### Running three nodes with Docker Compose
 
