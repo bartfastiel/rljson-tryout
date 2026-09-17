@@ -2,9 +2,9 @@ name: Preview sweep
 
 # Budget guard for preview environments: every six hours, destroys any
 # workloads workspace pr-<number> whose pull request is not open any more,
-# which catches what Preview destroy missed (a failed destroy, a pull
-# request closed while the system was down). A preview whose pull request
-# state cannot be read is kept and the run fails, so a GitHub hiccup never
+# which catches what Preview destroy missed (a destroy that failed on a
+# stale state lock or a GitHub outage). A preview whose pull request state
+# cannot be read is kept and the run fails, so a GitHub hiccup never
 # removes a live preview. See docs/operations.md.
 
 on:

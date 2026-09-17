@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Destroys the preview workspaces whose pull requests are no longer open:
 # the safety net behind the preview-destroy workflow for the cases it
-# misses, such as a destroy that failed or a pull request closed while the
-# system was down. Every `pr-<number>` workspace of the workloads stage is
+# misses, such as a destroy that failed on a stale state lock or a GitHub
+# outage. Every `pr-<number>` workspace of the workloads stage is
 # checked against the pull request's state; `OPEN` keeps the preview,
 # `CLOSED` and `MERGED` hand the workspace to destroy-workloads.sh, and a
 # state that cannot be read leaves the workspace alone and fails the run,

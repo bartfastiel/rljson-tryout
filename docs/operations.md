@@ -161,8 +161,8 @@ Three workflows remove previews:
 Both preview workflows run `infra/scripts/destroy-workloads.sh` with the
 workspace names as arguments; a name that does not exist (a pull request
 that never had a preview) is reported and skipped. The sweep is the safety
-net for a `Preview destroy` that failed or never ran, for example when a
-pull request was closed while the system was down. The sweep and `Preview
+net for a `Preview destroy` that failed, for example on a stale state
+lock or a GitHub outage at the moment of the close. The sweep and `Preview
 destroy` are not serialized against each other: when both pick the same
 workspace at the same moment, one fails on the state lock or finds the
 workspace gone, and the next sweep leaves nothing behind. To clean up by
