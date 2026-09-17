@@ -150,47 +150,56 @@ describe('SyncAgent announcing', () => {
     expect(channel.sent).toStrictEqual([changeSet._hash]);
   });
 
-  it('queues again while the node has no channel and announces on the next one', () => {
-    const { store, channels } = agentOverFakes();
+  it('announces everything this process wrote again on the next channel, counting each change set once', () => {
+    const { store, channels, agent } = agentOverFakes();
     const first = new FakeChannel();
     channels.publish(first);
-    store.writeOwnChangeSet('while-connected', []);
+    const connected = store.writeOwnChangeSet('while-connected', []);
     channels.publish(null);
     const offline = store.writeOwnChangeSet('while-offline', []);
 
     const second = new FakeChannel();
     channels.publish(second);
 
-    expect(first.sent).toHaveLength(1);
-    expect(second.sent).toStrictEqual([offline._hash]);
+    expect(first.sent).toStrictEqual([connected._hash]);
+    expect(second.sent).toStrictEqual([connected._hash, offline._hash]);
+    expect(agent.snapshot().announced).toBe(2);
+    expect(agent.snapshot().transfers).toHaveLength(2);
   });
 
-  it('repeats the announcements of the current channel when a peer joins, without counting them again', async () => {
+  it('repeats every change set this process wrote when a peer joins, without counting them again', async () => {
     const { store, channels, agent } = agentOverFakes();
+    const first = new FakeChannel(null);
+    channels.publish(first);
+    const early = store.writeOwnChangeSet('as-earlier-hub', []);
     const channel = new FakeChannel(null);
     channels.publish(channel);
-    const changeSet = store.writeOwnChangeSet('seeded', []);
+    const late = store.writeOwnChangeSet('as-current-hub', []);
 
     channel.peerJoined();
-    await until(() => channel.sent.length === 2);
+    await until(() => channel.sent.length === 4);
 
-    expect(channel.sent).toStrictEqual([changeSet._hash, changeSet._hash]);
-    expect(agent.snapshot().announced).toBe(1);
-    expect(agent.snapshot().transfers).toHaveLength(1);
+    expect(channel.sent).toStrictEqual([
+      early._hash,
+      late._hash,
+      early._hash,
+      late._hash,
+    ]);
+    expect(agent.snapshot().announced).toBe(2);
+    expect(agent.snapshot().transfers).toHaveLength(2);
   });
 
-  it('does not repeat announcements of an earlier channel', async () => {
+  it('does not repeat for a join on a channel it left', async () => {
     const { store, channels } = agentOverFakes();
     const first = new FakeChannel(null);
     channels.publish(first);
     store.writeOwnChangeSet('on-first', []);
-    const second = new FakeChannel(null);
-    channels.publish(second);
+    channels.publish(new FakeChannel(null));
 
-    second.peerJoined();
+    first.peerJoined();
     await settle();
 
-    expect(second.sent).toStrictEqual([]);
+    expect(first.sent).toHaveLength(1);
   });
 
   it('keeps announcing nothing after stop', async () => {

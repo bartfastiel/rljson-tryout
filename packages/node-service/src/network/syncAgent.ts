@@ -187,13 +187,16 @@ const tableCfgsByKey = (): ReadonlyMap<string, TableCfg> => {
  *
  * Outgoing: every change set the store writes on its own account (an
  * invoice issued, an animal edited, the seed) is announced by hash on the
- * channel of the current role; while the node has no channel (before the
- * transport connected, standalone) the hashes queue up and go out, in
- * write order, the moment a channel appears, which is how a node that
- * seeded before it joined still tells the others what it holds. On the
- * hub the announcements of this session are repeated for every client
- * that joins later, because the hub's `Server` forwards an announcement
- * only to the clients connected at that moment.
+ * channel of the current role, and every channel the node gets later
+ * hears everything this process wrote again, in write order: a node that
+ * seeded before it joined still tells the others what it holds, and a
+ * node that announced as a short-lived hub at a cold start (to nobody, or
+ * to clients that left with it) tells its next hub too. On the hub the
+ * announcements are repeated for every client that joins later as well,
+ * because the hub's `Server` forwards an announcement only to the clients
+ * connected at that moment. A repeat costs the receivers one lookup each:
+ * their connectors drop a reference they received before, and the agent
+ * skips a change set it holds.
  *
  * Incoming: for every hash that arrives the agent pulls the change set
  * row through the read cascade of the store, then every row the change
@@ -226,8 +229,9 @@ export class SyncAgent {
   private readonly tableCfgs = tableCfgsByKey();
 
   private channel: AnnouncementChannel | null = null;
-  private readonly unannounced: HashedChangeSetRow[] = [];
-  private announcedOnChannel: string[] = [];
+  /** Everything the store wrote in this process, in write order. */
+  private readonly own: HashedChangeSetRow[] = [];
+  private readonly announcedHashes = new Set<string>();
   private readonly pending = new Map<string, PendingChangeSet>();
   private readonly queue: string[] = [];
   private readonly active = new Map<string, Promise<void>>();
@@ -319,24 +323,31 @@ export class SyncAgent {
   }
 
   /**
-   * Announces a change set the store wrote, or queues it until a channel
-   * exists.
+   * Announces a change set the store wrote on the current channel, or
+   * keeps it for the first channel when the node has none.
    */
   private announce(changeSet: HashedChangeSetRow): void {
-    if (this.channel === null) {
-      this.unannounced.push(changeSet);
-      return;
+    this.own.push(changeSet);
+    if (this.channel !== null) {
+      this.send(this.channel, changeSet);
     }
-    this.send(this.channel, changeSet);
   }
 
+  /**
+   * Sends a change set's hash. The counter and the transfer list record
+   * a change set the first time it goes out; a repeat on a later channel
+   * or for a client that joined is not a new transfer.
+   */
   private send(
     channel: AnnouncementChannel,
     changeSet: HashedChangeSetRow,
   ): void {
     channel.send(changeSet._hash);
+    if (this.announcedHashes.has(changeSet._hash)) {
+      return;
+    }
+    this.announcedHashes.add(changeSet._hash);
     this.counters.announced += 1;
-    this.announcedOnChannel.push(changeSet._hash);
     this.record({
       direction: 'outgoing',
       peerNodeId: channel.peerNodeId,
@@ -358,27 +369,30 @@ export class SyncAgent {
   }
 
   /**
-   * Takes the channel of the current role: listens on it, announces what
-   * queued up while there was none, and on the hub repeats this
-   * session's announcements for every client that joins.
+   * Takes the channel of the current role: listens on it, announces
+   * everything this process wrote so far, and on the hub repeats that for
+   * every client that joins.
    */
   private attach(channel: AnnouncementChannel | null): void {
     this.clearReplays();
     this.channel = channel;
-    this.announcedOnChannel = [];
     if (channel === null) {
       return;
     }
     channel.listen((announcement) => this.receive(announcement));
     channel.onPeerJoined(() => this.scheduleReplays(channel));
-    const queued = this.unannounced.splice(0);
-    for (const changeSet of queued) {
+    const before = this.counters.announced;
+    for (const changeSet of this.own) {
       this.send(channel, changeSet);
     }
-    if (queued.length > 0) {
+    if (this.own.length > 0) {
       this.logger.info(
-        { count: queued.length, peerNodeId: channel.peerNodeId },
-        'announced the change sets written before the node had a channel',
+        {
+          count: this.own.length,
+          firstTime: this.counters.announced - before,
+          peerNodeId: channel.peerNodeId,
+        },
+        'announced the change sets this node wrote',
       );
     }
   }
@@ -402,20 +416,20 @@ export class SyncAgent {
   }
 
   /**
-   * Repeats every announcement of this session on the hub's channel, for
+   * Repeats every change set this process wrote on the hub's channel, for
    * a client that connected after they went out. Every other client drops
    * the repeats as already received; the new one pulls what it lacks.
    */
   private replay(channel: AnnouncementChannel): void {
-    if (this.channel !== channel || this.announcedOnChannel.length === 0) {
+    if (this.channel !== channel || this.own.length === 0) {
       return;
     }
-    for (const changeSetHash of this.announcedOnChannel) {
-      channel.send(changeSetHash);
+    for (const changeSet of this.own) {
+      channel.send(changeSet._hash);
     }
     this.logger.info(
-      { count: this.announcedOnChannel.length },
-      'repeated the announcements of this session for a client that joined',
+      { count: this.own.length },
+      'repeated the announcements of this node for a client that joined',
     );
   }
 
