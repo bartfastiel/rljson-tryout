@@ -48,6 +48,9 @@ provider "kubectl" {
   apply_retry_count      = 15
 }
 
+# The dependency serializes the environment behind the issuers in both
+# directions: on destroy, the ingresses and any open ACME challenge go before
+# cert-manager, so no finalizer is left without its controller.
 module "production" {
   source = "./modules/petshop-environment"
 
@@ -55,8 +58,10 @@ module "production" {
   image            = "${var.image_repository}:${var.image_tag}"
   base_domain      = var.base_domain
   hostname_infix   = ""
-  cluster_issuer   = local.cluster_issuer_names.staging
+  cluster_issuer   = local.cluster_issuer_names.production
   nodes = [
     { name = "node1" },
   ]
+
+  depends_on = [kubectl_manifest.cluster_issuer]
 }

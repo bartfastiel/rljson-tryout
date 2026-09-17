@@ -322,9 +322,9 @@ jobs:
         if: github.event_name == 'push'
         run: terraform apply -input=false -no-color tfplan
 
-      # The staging issuer signs with a certificate authority that no trust
-      # store contains, hence -k; the issuer line proves it is Let's Encrypt
-      # and not Traefik's default certificate, and http must redirect.
+      # curl verifies the certificate against the runner's trust store, so
+      # the poll only succeeds once Let's Encrypt has issued; the issuer line
+      # documents which authority signed, and http must redirect.
       - name: Verify the deployed commit
         if: github.event_name == 'push'
         env:
@@ -335,7 +335,7 @@ jobs:
             health_url="${base_url}/health"
             deadline=$((SECONDS + 300))
             while true; do
-              payload="$(curl -sk --max-time 10 "${health_url}" || true)"
+              payload="$(curl -s --max-time 10 "${health_url}" || true)"
               commit="$(printf '%s' "${payload}" | jq -r '.commit // empty' 2>/dev/null || true)"
               if [ "${commit}" = "${EXPECTED_COMMIT}" ]; then
                 break
