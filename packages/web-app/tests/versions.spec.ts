@@ -39,6 +39,22 @@ const animalFor = (projectName: string, purpose: Purpose) => {
 const versionRows = (page: Page) =>
   page.getByRole('list', { name: 'Versions' }).getByRole('listitem');
 
+/**
+ * A price in euros that differs per attempt of a test (a retry, or a
+ * repeat through `--repeat-each`): an attempt saving the exact content of
+ * the attempt before would write a version with the same row hash, and
+ * the version list then holds two rows for one hash, of which only the
+ * newest links to that hash.
+ *
+ * @param euros the whole euros
+ * @param testInfo the running test, for its retry and repeat indexes
+ */
+const priceForAttempt = (
+  euros: number,
+  testInfo: { retry: number; repeatEachIndex: number },
+) =>
+  `${euros}.${String(10 + testInfo.retry * 10 + testInfo.repeatEachIndex).padStart(2, '0')}`;
+
 test('edits the price through the form and sees it in the detail, the list and the history', async ({
   page,
 }, testInfo) => {
@@ -51,15 +67,17 @@ test('edits the price through the form and sees it in the detail, the list and t
   await expect(page).toHaveURL(new RegExp(`#/animals/${animalId}/edit$`));
   await expect(page).toHaveTitle(`Edit ${name} · Duckburg Pet Shop`);
   await expect(page.getByLabel('Name')).toHaveValue(name);
-  await page.getByLabel('Price in euros').fill('777.77');
+  const price = priceForAttempt(777, testInfo);
+  await page.getByLabel('Price in euros').fill(price);
   await page.getByRole('button', { name: 'Save' }).click();
 
   await expect(page).toHaveURL(new RegExp(`#/animals/${animalId}$`));
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
-  await expect(page.locator('.animal-facts')).toContainText(/777[.,]77/);
+  const priceText = new RegExp(price.replace('.', '[.,]'));
+  await expect(page.locator('.animal-facts')).toContainText(priceText);
   const versions = versionRows(page);
-  expect(await versions.count()).toBeGreaterThanOrEqual(2);
-  await expect(versions.first()).toContainText(/777[.,]77/);
+  await expect(versions.nth(1)).toBeVisible();
+  await expect(versions.first()).toContainText(priceText);
   await expect(versions.first().locator('.version-badge')).toHaveText(
     'current',
   );
@@ -70,19 +88,21 @@ test('edits the price through the form and sees it in the detail, the list and t
 
   const card = cardListItems(page).filter({ hasText: name });
   await expect(card).toHaveCount(1);
-  await expect(card.locator('.animal-price')).toContainText(/777[.,]77/);
+  await expect(card.locator('.animal-price')).toContainText(priceText);
 });
 
 test('shows an older version read-only with a notice and a way back', async ({
   page,
 }, testInfo) => {
   const animalId = animalFor(testInfo.project.name, 'oldVersion');
+  const price = priceForAttempt(555, testInfo);
+  const priceText = new RegExp(price.replace('.', '[.,]'));
   await page.goto(`/#/animals/${animalId}/edit`);
-  await page.getByLabel('Price in euros').fill('555.55');
+  await page.getByLabel('Price in euros').fill(price);
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page).toHaveURL(new RegExp(`#/animals/${animalId}$`));
   const versions = versionRows(page);
-  expect(await versions.count()).toBeGreaterThanOrEqual(2);
+  await expect(versions.nth(1)).toBeVisible();
 
   await versions.nth(1).getByRole('link').click();
 
@@ -93,7 +113,7 @@ test('shows an older version read-only with a notice and a way back', async ({
     'You are viewing the version from',
   );
   await expect(page.getByRole('link', { name: 'Edit' })).toHaveCount(0);
-  await expect(page.locator('.animal-facts')).not.toContainText(/555[.,]55/);
+  await expect(page.locator('.animal-facts')).not.toContainText(priceText);
   await expect(versionRows(page).nth(1).getByRole('link')).toHaveAttribute(
     'aria-current',
     'page',
@@ -102,7 +122,7 @@ test('shows an older version read-only with a notice and a way back', async ({
   await page.getByRole('link', { name: 'Show the current version' }).click();
 
   await expect(page).toHaveURL(new RegExp(`#/animals/${animalId}$`));
-  await expect(page.locator('.animal-facts')).toContainText(/555[.,]55/);
+  await expect(page.locator('.animal-facts')).toContainText(priceText);
   await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
 });
 
@@ -272,13 +292,16 @@ test('can be edited and saved with the keyboard alone', async ({
   }
   await expect(price).toBeFocused();
   await page.keyboard.press('ControlOrMeta+a');
-  await page.keyboard.type('333.33');
+  const typedPrice = priceForAttempt(333, testInfo);
+  await page.keyboard.type(typedPrice);
   await page.keyboard.press('Enter');
 
   await expect(page).toHaveURL(
     new RegExp(`#/animals/${animalId}\\?breeder=grandma-ducks-farm$`),
   );
-  await expect(page.locator('.animal-facts')).toContainText(/333[.,]33/);
+  await expect(page.locator('.animal-facts')).toContainText(
+    new RegExp(typedPrice.replace('.', '[.,]')),
+  );
   await expect(versionRows(page).first().locator('.version-badge')).toHaveText(
     'current',
   );
