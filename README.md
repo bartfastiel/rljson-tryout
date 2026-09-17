@@ -72,23 +72,38 @@ pnpm --filter @rljson-tryout/node-service start
 Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
 answers `GET /health` with `{ status, name, version, commit, startedAt }`.
 At start the node seeds its in-memory rljson store with three Duckburg
-species, eight Duckburg-flavoured traits, six Duckburg persons, four
-breeders, ten Duckburg animals and, derived from the animals' traits, the
-`animalTraits` junction table, and serves them as `GET /api/species`
+species, eight Duckburg-flavoured traits, eight Duckburg persons, four
+breeders, five customers, ten Duckburg animals, the `animalTraits`
+junction table derived from the animals' traits, and six invoices, and
+serves them as `GET /api/species`
 (`[{ id, hash, name, latinName, description }]`), `GET /api/traits`
 (`[{ id, hash, name, description }]`), `GET /api/breeders`
 (`[{ id, hash, farmName, suppliesSince, person: { id, name, city } | null }]`,
-the supplying person already joined), `GET /api/animals` (optionally
-narrowed with `?species=<id>`, `?breeder=<id>`, `?trait=<id>`, or any
-combination, returning
+the supplying person already joined), `GET /api/customers`
+(`[{ id, hash, customerNumber, person: { id, name, city } | null }]`),
+`GET /api/animals` (optionally narrowed with `?species=<id>`,
+`?breeder=<id>`, `?trait=<id>`, or any combination, returning
 `[{ id, hash, name, speciesId, speciesName, breederId, breederFarmName, bornOn, priceCents }]`
 with the species and breeder already joined but the background story and
-the traits left out so the list stays light) and `GET /api/animals/:id`
+the traits left out so the list stays light), `GET /api/animals/:id`
 (the same fields plus the full `backgroundStory`, `traits: [{ id, name }]`
 and `breeder: { id, farmName, personName, city } | null`, `404` for an
-unknown id), and, as the web app, at `http://localhost:8080/`. Use `pnpm
---filter @rljson-tryout/node-service dev` to restart on file changes.
-Stop it with `Ctrl-C`; it closes the server and exits cleanly.
+unknown id), `GET /api/invoices` (newest first,
+`[{ id, hash, invoiceNumber, issuedOn, status, customer: { id, customerNumber, personName } | null, totalCents, itemCount }]`),
+`GET /api/invoices/:id` (the invoice with
+`customer: { id, customerNumber, person } | null`,
+`items: [{ id, hash, animal: { id, name, speciesName } | null, quantity, unitPriceCents, lineTotalCents }]`,
+`totalCents` and `changeSetHash`, the hash of the `changeSets` row that
+wrote it, `404` for an unknown id) and `POST /api/invoices` (body
+`{ customerId, items: [{ animalId, quantity }] }`, answers `201` with the
+invoice as the detail endpoint serves it, or `400` with
+`{ statusCode, error, message }` for an unknown customer or animal, no
+items or a quantity below one; every invoice is written together with its
+items and one change set naming every row, see
+[docs/findings/change-sets.md](docs/findings/change-sets.md)), and, as
+the web app, at `http://localhost:8080/`. Use `pnpm --filter
+@rljson-tryout/node-service dev` to restart on file changes. Stop it with
+`Ctrl-C`; it closes the server and exits cleanly.
 
 Environment variables the service understands so far:
 
