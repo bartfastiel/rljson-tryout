@@ -212,23 +212,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: eu-central-1
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: 1.16.2
-          terraform_wrapper: false
+          working-directory: infra/terraform/cluster
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
 
       - name: Check formatting
         run: terraform fmt -check -recursive
-
-      - name: Initialise
-        run: terraform init -input=false
 
       - name: Validate
         run: terraform validate
@@ -315,26 +306,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: eu-central-1
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: 1.16.2
-          terraform_wrapper: false
+          working-directory: infra/terraform/workloads
+          workspace: production
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
 
       - name: Check formatting
         run: terraform fmt -check -recursive
-
-      - name: Initialise
-        run: terraform init -input=false
-
-      - name: Select the production workspace
-        run: terraform workspace select -or-create production
 
       - name: Validate
         run: terraform validate
