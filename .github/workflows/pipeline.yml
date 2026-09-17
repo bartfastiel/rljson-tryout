@@ -9,11 +9,14 @@ on:
 permissions:
   contents: read
 
+# One run per branch at a time. A run is never cancelled while it is in
+# progress, because both the main run and a pull request run apply
+# Terraform (production, or the preview of the pull request) and a killed
+# apply leaves a stale state lock behind; a superseded run that has not
+# started yet is dropped as usual.
 concurrency:
   group: checks-${{ github.ref }}
-  # A superseded pull request run is cancelled; a run on main is never
-  # interrupted because it may be in the middle of a Terraform apply.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   checks:
@@ -250,19 +253,23 @@ jobs:
         if: github.event_name == 'push'
         run: ../../scripts/verify-kubeconfig.sh
 
+  # Deploys workspace production on main and the preview workspace pr-<n>
+  # of a pull request; the workspace name selects the environment in the
+  # Terraform stage.
   terraform-workloads:
     name: terraform-workloads
     needs: [checks, image, terraform-cluster]
-    # Forks and Dependabot receive no secrets, so they cannot plan.
+    # Forks and Dependabot receive no secrets, so they cannot apply.
     if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    # Applies on main queue up in one group; pull request plans are read-only
-    # and get a group of their own so they never displace an apply.
+    # One group per workspace: applies to production queue up behind each
+    # other, and the preview of a pull request never races its own
+    # preview-destroy run, which shares the group.
     concurrency:
-      group: ${{ github.event_name == 'push' && 'workloads-production' || format('workloads-plan-{0}', github.event.pull_request.number) }}
+      group: ${{ github.event_name == 'push' && 'workloads-production' || format('workloads-pr-{0}', github.event.pull_request.number) }}
       cancel-in-progress: false
     defaults:
       run:
@@ -280,7 +287,7 @@ jobs:
         uses: ./.github/actions/terraform-session
         with:
           working-directory: infra/terraform/workloads
-          workspace: production
+          workspace: ${{ github.event_name == 'push' && 'production' || format('pr-{0}', github.event.pull_request.number) }}
           aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
 
       - name: Check formatting
@@ -289,43 +296,50 @@ jobs:
       - name: Validate
         run: terraform validate
 
-      - name: Plan
-        if: github.event_name == 'pull_request'
-        run: terraform plan -input=false -lock=false -no-color
-
       - name: Plan for apply
-        if: github.event_name == 'push'
         run: terraform plan -input=false -no-color -out=tfplan
 
       - name: Apply
-        if: github.event_name == 'push'
         run: terraform apply -input=false -no-color tfplan
 
       - name: Expose the deployment URLs
         id: deployment
-        if: github.event_name == 'push'
         run: |
-          node_urls="$(terraform output -json node_urls | jq -r 'join(" ")')"
-          apex_url="$(terraform output -raw apex_url)"
-          if [ -z "${node_urls}" ] || [ -z "${apex_url}" ]; then
-            echo "::error::The Terraform outputs node_urls and apex_url must not be empty."
+          urls="$(terraform output -json deployment_urls | jq -r 'join(" ")')"
+          if [ -z "${urls}" ]; then
+            echo "::error::The Terraform output deployment_urls must not be empty."
             exit 1
           fi
-          echo "urls=${node_urls} ${apex_url}" >> "$GITHUB_OUTPUT"
+          echo "urls=${urls}" >> "$GITHUB_OUTPUT"
 
+  # Production must present a certificate the runner trusts; a preview is
+  # signed by the Let's Encrypt staging issuer, which no runner trusts, so
+  # its chain is skipped and the issuer must carry the staging mark instead.
   smoke:
     name: smoke
     needs: [terraform-workloads]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
     env:
       DEPLOYMENT_URLS: ${{ needs.terraform-workloads.outputs.deployment_urls }}
       EXPECTED_COMMIT: ${{ github.sha }}
+      ALLOW_STAGING_CERTIFICATE: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
 
       - name: Verify the deployment
         run: infra/scripts/verify-deployment.sh
+
+      # One comment per pull request, updated on every later deployment.
+      - name: Comment the preview on the pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          PREVIEW_STATUS: deployed
+          DEPLOYED_COMMIT: ${{ github.sha }}
+        run: infra/scripts/post-preview-comment.sh

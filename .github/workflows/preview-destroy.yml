@@ -1,0 +1,64 @@
+name: Preview destroy
+
+# Removes the preview environment of a pull request as soon as it is closed
+# or merged: destroys the workloads workspace pr-<number> (namespace,
+# deployment, service, ingress, certificate) and deletes the workspace, then
+# rewrites the preview comment on the pull request. A push to a reopened
+# pull request creates the preview again. See docs/operations.md.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    name: destroy
+    # Forks and Dependabot never get a preview and their runs have no secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    # The same group as the pipeline's preview apply, so a close during a
+    # deployment waits for the apply instead of racing it.
+    concurrency:
+      group: workloads-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra/terraform/workloads
+    env:
+      # The stage requires these variables and validates them even for a
+      # destroy, which never uses them; the image only has to look like an
+      # image reference.
+      TF_VAR_image: unused.invalid/node-service:unused
+      TF_VAR_letsencrypt_email: ${{ secrets.LETSENCRYPT_EMAIL }}
+      PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Start the Terraform session
+        uses: ./.github/actions/terraform-session
+        with:
+          working-directory: infra/terraform/workloads
+          aws-role-arn: ${{ vars.AWS_ROLE_ARN }}
+
+      # The destroy script reads the cluster's outputs to learn whether the
+      # cluster is still there.
+      - name: Initialise the cluster stage
+        working-directory: infra/terraform/cluster
+        run: terraform init -input=false
+
+      - name: Destroy the preview workspace
+        run: ../../scripts/destroy-workloads.sh "pr-${PULL_REQUEST_NUMBER}"
+
+      - name: Update the preview comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_STATUS: destroyed
+        run: ../../scripts/post-preview-comment.sh

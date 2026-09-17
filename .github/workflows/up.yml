@@ -136,10 +136,9 @@ jobs:
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
-          node_urls="$(terraform output -json node_urls | jq -r 'join(" ")')"
-          apex_url="$(terraform output -raw apex_url)"
-          if [ -z "${node_urls}" ] || [ -z "${apex_url}" ]; then
-            echo "::error::The Terraform outputs node_urls and apex_url must not be empty."
+          urls="$(terraform output -json deployment_urls | jq -r 'join(" ")')"
+          if [ -z "${urls}" ]; then
+            echo "::error::The Terraform output deployment_urls must not be empty."
             exit 1
           fi
-          DEPLOYMENT_URLS="${node_urls} ${apex_url}" ../../scripts/verify-deployment.sh
+          DEPLOYMENT_URLS="${urls}" ../../scripts/verify-deployment.sh
