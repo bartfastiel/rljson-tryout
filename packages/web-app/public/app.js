@@ -59,7 +59,8 @@ const entityView = (tagName, attributeName, id) => {
  */
 const pageFor = (segments) => {
   const [sectionName, entityId] = segments;
-  if (sectionName === 'animals' && entityId !== undefined) {
+  const addressesEntity = segments.length > 1;
+  if (sectionName === 'animals' && addressesEntity) {
     return {
       title: views.animals.title,
       element: entityView('animal-detail', 'animal-id', entityId),
@@ -71,14 +72,13 @@ const pageFor = (segments) => {
       element: document.createElement('invoice-form'),
     };
   }
-  if (sectionName === 'invoices' && entityId !== undefined) {
+  if (sectionName === 'invoices' && addressesEntity) {
     return {
       title: views.invoices.title,
       element: entityView('invoice-detail', 'invoice-id', entityId),
     };
   }
-  const view = views[sectionName];
-  if (view === undefined) {
+  if (!Object.hasOwn(views, sectionName)) {
     return {
       title: 'Page not found',
       element: notFoundView(`There is no page called "${sectionName}".`, {
@@ -87,6 +87,7 @@ const pageFor = (segments) => {
       }),
     };
   }
+  const view = views[sectionName];
   return { title: view.title, element: view.render() };
 };
 
