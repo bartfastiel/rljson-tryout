@@ -10,7 +10,25 @@ import {
 
 const expectedCommit = '8c95897323ad88221e43f88f281d86b6f13520cd';
 const nodeUrl = 'https://node1.example.org';
+const node2Url = 'https://node2.example.org';
+const node3Url = 'https://node3.example.org';
 const apexUrl = 'https://example.org';
+const threeNodeUrls = `${nodeUrl} ${node2Url} ${node3Url}`;
+
+type NodeStatus = {
+  nodeName: string;
+  nodeId: string;
+  role: string;
+  hubAddress: string | null;
+  nodes: {
+    url: string;
+    self: boolean;
+    name: string | null;
+    seenInTopology: boolean;
+  }[];
+};
+
+type StatusByHost = Record<string, NodeStatus>;
 
 type Scenario = {
   deploymentUrls?: string;
@@ -23,21 +41,49 @@ type Scenario = {
   redirect?: string;
   status?: string;
   statusReadyAfter?: number;
+  statusByHost?: StatusByHost;
+  unsettledStatusByHost?: StatusByHost;
+  networkSettledAfter?: number;
   species?: string;
   webApp?: string;
 };
+
+const nodeUrls = [nodeUrl, node2Url, node3Url] as const;
+const nodeNames = ['node1', 'node2', 'node3'] as const;
+
+/**
+ * The `/status` of one node of a three-node environment: `seen` names the
+ * other nodes whose discovery announcements have reached it.
+ */
+const statusOf = (
+  name: (typeof nodeNames)[number],
+  role: string,
+  seen: readonly string[],
+): NodeStatus => ({
+  nodeName: name,
+  nodeId: `id-${name}`,
+  role,
+  hubAddress: '10.42.0.12:3000',
+  nodes: nodeNames.map((other, index) => ({
+    url: nodeUrls[index],
+    self: other === name,
+    name: other === name || seen.includes(other) ? other : null,
+    seenInTopology: other === name || seen.includes(other),
+  })),
+});
+
+/** Every node sees the two others, node2 is the hub. */
+const settledNetwork = (): StatusByHost => ({
+  'node1.example.org': statusOf('node1', 'client', ['node2', 'node3']),
+  'node2.example.org': statusOf('node2', 'hub', ['node1', 'node3']),
+  'node3.example.org': statusOf('node3', 'client', ['node1', 'node2']),
+});
 
 let temporaryDirectory: string;
 
 function runScript(scenario: Scenario): Outcome {
   const stateDirectory = join(temporaryDirectory, 'state');
   mkdirSync(stateDirectory, { recursive: true });
-
-  // The fake redirect names the health URL of the host being asked.
-  const redirect = (scenario.redirect ?? '301 __HEALTH_URL__').replace(
-    '__HEALTH_URL__',
-    `${(scenario.deploymentUrls ?? nodeUrl).split(' ')[0]}/health`,
-  );
 
   return runShellScript({
     scriptName: 'verify-deployment.sh',
@@ -51,11 +97,21 @@ function runScript(scenario: Scenario): Outcome {
       FAKE_ISSUER_READY_AFTER: String(scenario.issuerReadyAfter ?? 0),
       FAKE_ISSUER:
         scenario.issuer ?? "issuer=C = US, O = Let's Encrypt, CN = YR2",
-      FAKE_REDIRECT: redirect,
+      // The fake redirect names the health URL of the host being asked.
+      FAKE_REDIRECT: scenario.redirect ?? '301 __HEALTH_URL__',
       FAKE_STATUS_READY_AFTER: String(scenario.statusReadyAfter ?? 0),
       FAKE_STATUS:
         scenario.status ??
         '{"nodeName":"node1","nodeId":"id-node1","role":"standalone","hubAddress":null}',
+      FAKE_STATUS_BY_HOST:
+        scenario.statusByHost === undefined
+          ? undefined
+          : JSON.stringify(scenario.statusByHost),
+      FAKE_UNSETTLED_STATUS_BY_HOST:
+        scenario.unsettledStatusByHost === undefined
+          ? undefined
+          : JSON.stringify(scenario.unsettledStatusByHost),
+      FAKE_NETWORK_SETTLED_AFTER: String(scenario.networkSettledAfter ?? 0),
       FAKE_SPECIES: scenario.species ?? '[{"id":"a"},{"id":"b"},{"id":"c"}]',
       FAKE_WEB_APP: scenario.webApp ?? '200 text/html; charset=utf-8',
       DEPLOYMENT_URLS: scenario.deploymentUrls,
@@ -313,6 +369,124 @@ describe('verify-deployment.sh', () => {
     expect(outcome.output).toContain(
       `::error::${nodeUrl}/ does not serve the web app, got: 404 application/json; charset=utf-8`,
     );
+  });
+
+  // Every run of the script spawns a shell and a few jq processes per URL,
+  // which is slow on Windows; the three-node scenarios need more than the
+  // default five seconds.
+  describe('with three or more URLs', { timeout: 30_000 }, () => {
+    it('passes once every node sees every other node and exactly one is the hub, and prints the roles', () => {
+      const outcome = runScript({
+        deploymentUrls: threeNodeUrls,
+        statusByHost: settledNetwork(),
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(outcome.output).toContain(
+        'network settled with the roles: node1 client, node2 hub, node3 client',
+      );
+      expect(outcome.output).toContain('node1 sees node2, node3');
+      expect(outcome.output).toContain('node2 sees node1, node3');
+      expect(outcome.output).toContain('node3 sees node1, node2');
+      expect(outcome.calls).not.toContain('sleep 10');
+      expect(
+        outcome.calls.filter((call) => call.endsWith(`${node3Url}/status`)),
+      ).toHaveLength(2);
+    });
+
+    it('waits out the second hub of a cold start', () => {
+      const outcome = runScript({
+        deploymentUrls: threeNodeUrls,
+        // node1 missed node2's first announcement and elected itself too.
+        unsettledStatusByHost: {
+          'node1.example.org': statusOf('node1', 'hub', ['node3']),
+          'node2.example.org': statusOf('node2', 'hub', ['node1', 'node3']),
+          'node3.example.org': statusOf('node3', 'client', ['node1', 'node2']),
+        },
+        statusByHost: settledNetwork(),
+        networkSettledAfter: 2,
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(outcome.calls.filter((call) => call === 'sleep 10')).toHaveLength(
+        1,
+      );
+      expect(outcome.output).toContain(
+        'network settled with the roles: node1 client, node2 hub, node3 client',
+      );
+    });
+
+    it('treats the apex host as the node it routes to', () => {
+      const outcome = runScript({
+        deploymentUrls: `${threeNodeUrls} ${apexUrl}`,
+        statusByHost: {
+          ...settledNetwork(),
+          'example.org': statusOf('node1', 'client', ['node2', 'node3']),
+        },
+      });
+
+      expect(outcome.status, outcome.output).toBe(0);
+      expect(outcome.output).toContain(
+        'network settled with the roles: node1 client, node2 hub, node3 client',
+      );
+    });
+
+    it('fails when two nodes keep claiming the hub', () => {
+      const outcome = runScript({
+        deploymentUrls: threeNodeUrls,
+        statusByHost: {
+          'node1.example.org': statusOf('node1', 'hub', ['node2', 'node3']),
+          'node2.example.org': statusOf('node2', 'hub', ['node1', 'node3']),
+          'node3.example.org': statusOf('node3', 'client', ['node1', 'node2']),
+        },
+        timeoutSeconds: 0,
+      });
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.output).toContain(
+        '::error::The 3 URLs did not settle into one network with exactly one hub and every node seen by every other node within 0 seconds. Last roles: node1 hub, node2 hub, node3 client',
+      );
+    });
+
+    it('fails when a node never sees another node in the topology', () => {
+      const outcome = runScript({
+        deploymentUrls: threeNodeUrls,
+        statusByHost: {
+          ...settledNetwork(),
+          'node1.example.org': statusOf('node1', 'client', ['node2']),
+        },
+        timeoutSeconds: 0,
+      });
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.output).toContain(
+        'Last roles: node1 client, node2 hub, node3 client',
+      );
+      expect(outcome.output).not.toContain('network settled');
+    });
+
+    it('fails when the URLs all answer as the same node', () => {
+      const outcome = runScript({
+        deploymentUrls: threeNodeUrls,
+        timeoutSeconds: 0,
+      });
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.output).toContain(
+        'did not settle into one network with exactly one hub and every node seen by every other node within 0 seconds. Last roles: node1 standalone',
+      );
+    });
+  });
+
+  it('keeps the single-node check with fewer than three URLs', () => {
+    const outcome = runScript({ deploymentUrls: `${nodeUrl} ${apexUrl}` });
+
+    expect(outcome.status, outcome.output).toBe(0);
+    expect(outcome.output).toContain(`${apexUrl}/ serves the web app`);
+    expect(outcome.output).not.toContain('network settled');
+    expect(
+      outcome.calls.filter((call) => call.endsWith(`${nodeUrl}/status`)),
+    ).toHaveLength(1);
   });
 
   it('refuses to run without the deployment URLs', () => {

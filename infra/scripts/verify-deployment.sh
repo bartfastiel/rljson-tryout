@@ -10,11 +10,15 @@ set -euo pipefail
 # whose chain no runner trusts: with ALLOW_STAGING_CERTIFICATE=true the
 # https probes skip the chain check and the issuer must carry the
 # `(STAGING)` mark instead, so a preview can never quietly consume the
-# production rate limit.
+# production rate limit. With three or more URLs the nodes behind them
+# form one rljson network, and the script additionally waits until every
+# node lists every other node as seen in the discovery topology and exactly
+# one of them is the hub; a single URL (a preview) keeps the per-node check.
 #   DEPLOYMENT_URLS            space separated https base URLs, no trailing slash
 #   EXPECTED_COMMIT            the commit /health has to report
 #   ALLOW_STAGING_CERTIFICATE  true for previews, default false
-#   VERIFY_TIMEOUT_SECONDS     how long to wait per URL for that commit, default 300
+#   VERIFY_TIMEOUT_SECONDS     how long to wait per URL for that commit, and for the
+#                              network to settle, default 300
 
 : "${DEPLOYMENT_URLS:?DEPLOYMENT_URLS must list the https base URLs to verify}"
 : "${EXPECTED_COMMIT:?EXPECTED_COMMIT must name the commit /health has to report}"
@@ -145,3 +149,52 @@ for base_url in "${urls[@]}"; do
       ;;
   esac
 done
+
+# With three or more URLs the nodes behind them form one rljson network.
+# The apex host is an alias of the first node, so the statuses are grouped
+# by node id before the roles are counted: the network has settled when at
+# least two distinct nodes answer, every one of them lists every node of
+# the environment as seen in the discovery topology, exactly one is the
+# hub and the others are clients. A cold start needs one broadcast
+# interval to agree on the hub and a rollout brings the nodes up one after
+# the other, so the network is polled as patiently as the commit.
+if [ "${#urls[@]}" -lt 3 ]; then
+  exit 0
+fi
+
+network_statuses() {
+  for base_url in "${urls[@]}"; do
+    probe "${base_url}/status" 2> /dev/null || true
+    echo
+  done | jq -cs '[.[] | select(type == "object" and .nodeId != null)] | reduce .[] as $status ([]; if any(.[]; .nodeId == $status.nodeId) then . else . + [$status] end)' 2> /dev/null || echo '[]'
+}
+
+network_summary() {
+  jq -c '
+    length as $count
+    | {
+        settled: (
+          $count >= 2
+          and ([.[] | select(.role == "hub")] | length) == 1
+          and all(.[]; .role == "hub" or .role == "client")
+          and all(.[]; ((.nodes // []) | length) == $count and all((.nodes // [])[]; .self or .seenInTopology))
+        ),
+        roles: (map("\(.nodeName) \(.role)") | join(", ")),
+        views: map("\(.nodeName) sees " + ([(.nodes // [])[] | select(.self | not) | "\(.name // .url)\(if .seenInTopology then "" else " (not in topology)" end)"] | join(", ")))
+      }'
+}
+
+deadline=$((SECONDS + timeout_seconds))
+while true; do
+  summary="$(network_statuses | network_summary)"
+  roles="$(printf '%s' "${summary}" | jq -r '.roles')"
+  if [ "$(printf '%s' "${summary}" | jq -r '.settled')" = "true" ]; then
+    break
+  fi
+  if ((SECONDS >= deadline)); then
+    fail "The ${#urls[@]} URLs did not settle into one network with exactly one hub and every node seen by every other node within ${timeout_seconds} seconds. Last roles: ${roles:-none}"
+  fi
+  sleep 10
+done
+echo "network settled with the roles: ${roles}"
+printf '%s' "${summary}" | jq -r '.views[]'

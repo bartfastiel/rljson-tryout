@@ -25,6 +25,13 @@ restart`, and ran the Gherkin feature `features/network.feature` through
 - Kubernetes: the same image is deployed with `hostNetwork` left off, so
   the broadcast socket binds inside the pod's own network namespace on the
   flannel bridge of the single k3s node (roadmap 3.3, plan decision D2).
+- Slice C3 (pull request #35): three pods of one domain on that bridge,
+  first as the preview of the pull request (namespace `pr-35`, three
+  memory nodes, staging certificates) with a temporary kubeconfig from the
+  cluster state to read the pod logs, `kubectl top` and `/proc/net/udp`,
+  then as production (`node1` and `node2` over SQLite, `node3` in memory),
+  while production's own node1 shared the bridge with the preview during
+  the first test.
 
 ## What happened
 
@@ -142,7 +149,7 @@ second of downtime):
   node must either keep a record of the hub it was, or the others must
   re-elect when a peer's `startedAt` changes.
 
-Kubernetes (single node in production so far):
+Kubernetes, one node (slice D1):
 
 - `DATA_DIR=/data` needs a volume because the pod runs with a read-only
   root filesystem; an `emptyDir` with `fsGroup: 1000` is enough for the
@@ -164,9 +171,58 @@ Kubernetes (single node in production so far):
   layer state, and `formedBy` only turns to `broadcast` once a peer was
   discovered that way.
 
-Timings measured in this slice: see above (0.1 s self-election of the
-earliest node, 5.0 s to full agreement, probe latency under 1.3 ms,
-containers healthy 11.3 s after `compose up`).
+Kubernetes, three pods on the flannel bridge (slice C3):
+
+- The UDP broadcast to `255.255.255.255:41234` reaches the other pods.
+  Three pods of namespace `pr-35` (10.42.0.67 to 10.42.0.69, all on the
+  one k3s node) logged `peer joined` for both others and every hub change
+  carried `formedBy: broadcast`; nothing else was configured, no
+  `hostNetwork`, no multicast, no static hub list. The roadmap's plan B
+  (the static hub fallback of `@rljson/network`) was therefore not
+  implemented.
+- The cold start repeated the compose measurement to the millisecond
+  class: the three pods started within 104 ms of each other; node3 (the
+  earliest `startedAt`) heard node2's self-test packet 86 ms after its own
+  start and elected itself; node2 heard node1 but had missed node3's first
+  packet (its socket was not bound yet), elected itself as a second hub
+  and bound the hub port; node1, last to start, heard nobody for one
+  interval and stayed `unassigned`. 4.9 s after the start node3's periodic
+  announcement reached both: node2 logged `Hub changed: 09e800bc →
+8beb38b3`, stepped down to `client` and released the hub port, node1
+  became a client of node3 in the same second. All three agreed 5.0 s
+  after the first `discovery started`, again bounded by the 5 000 ms
+  broadcast interval. Probe round trips between pods were 0.63 to 0.83 ms.
+- Production's node1 (namespace `petshop`, domain `petshop-production`,
+  10.42.0.66) sat on the same bridge throughout and received the same
+  packets; it logged no `peer joined` and stayed `standalone`, so the
+  `domain` field alone keeps the environments apart, as planned.
+- The directory of a preview cannot poll the public hosts: Node's `fetch`
+  trusts only the bundled root certificates, not the Let's Encrypt
+  staging chain, so every other node would have stayed unreachable with
+  `seenInTopology: false` although discovery had found it (the open point
+  of D1). Since C3 every pod carries `NODE_STATUS_URLS`,
+  the ClusterIP service URLs (`http://<node>.<namespace>.svc.cluster.local`)
+  at the same positions as `NODE_URLS`, and the directory polls those:
+  `node reachable` for both others was logged with the service URL 3 s
+  after the start, in the second poll round, because a ClusterIP service
+  only forwards to a pod once its readiness probe has passed (the first
+  round ran while the other pods were still starting). The public URL
+  stays the key of every directory entry and the link the header shows.
+- The smoke job's `verify-deployment.sh` saw the three preview hosts
+  settle at once (`network settled with the roles: node1 client, node2
+client, node3 hub`, every node seeing the two others), 29 s after the
+  Terraform apply ended, staging certificates included.
+- Memory: a memory node used 35 MiB and the SQLite node1 27 MiB at rest
+  (`kubectl top`), against requests of 128 MiB and limits of 512 MiB per
+  pod from slice A9. Three nodes therefore reserve 300m CPU and 384 MiB
+  and may grow to 1.5 CPU and 1.5 GiB; the whole k3s node (system pods,
+  Traefik, cert-manager, four pet shop pods) used 1.2 GiB of its 8 GiB
+  during the test, which leaves room for the SQL Server of slice C4
+  (`MSSQL_MEMORY_LIMIT_MB=1536`) and the large seeds of C5 and D8.
+
+Timings measured in D1 and C3: 0.1 s self-election of the earliest node,
+5.0 s to full agreement in compose and in k3s alike, probe latency under
+1.3 ms, containers healthy 11.3 s after `compose up`.
 
 ## What it means for rljson users
 
@@ -179,10 +235,18 @@ containers healthy 11.3 s after `compose up`).
   starts its hub transport on `role-changed` has to cope with being
   demoted right after.
 - Announcements carry ids and IP addresses only. Anything user-facing
-  (names, URLs) needs a side channel; `/status` polling over the public
-  URLs works but costs one HTTP request per node and interval, and in a
-  preview environment with staging certificates the server-side poll will
-  need the in-cluster URLs (slice C3).
+  (names, URLs) needs a side channel; `/status` polling works but costs
+  one HTTP request per node and interval, and the poll address is not
+  the link address: inside Kubernetes the poll goes to the ClusterIP
+  service (no TLS, no dependency on the public certificate), the link to
+  the public host (`NODE_STATUS_URLS` next to `NODE_URLS` since C3).
+- One k3s node with flannel delivers UDP broadcasts between pods without
+  any configuration, and the `domain` field of the announcements is enough
+  to keep several environments on that bridge apart. A second server
+  (slice E5) changes this: flannel's VXLAN overlay is not expected to
+  carry a broadcast frame to the pods of another host, so that is where
+  the static hub fallback or a cloud discovery of `@rljson/network` will
+  have to be tried.
 - A persistent identity on a node that restarts quickly is not enough for
   the others to notice the restart; `startedAt` changes but nobody
   re-reads it. Until that is fixed upstream, a restarting hub should stay

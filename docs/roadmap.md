@@ -126,23 +126,24 @@ README describes it.
 
 ### 2.4 Node configuration (environment variables)
 
-| Variable            | Values                                      | Meaning                                                                                                                                                            |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NODE_NAME`         | `node1` …                                   | Display name, also used for the hostname                                                                                                                           |
-| `STORAGE`           | `memory` (default), `sqlite`, `mssql`       | Which `Io` implementation backs the node: `IoMem`, `IoSqliteNode` over `DATA_DIR/petshop.sqlite` (slice C1), `IoMssql` (slice C4); any other value fails the start |
-| `DATA_DIR`          | path                                        | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                            |
-| `MSSQL_CONNECTION`  | connection string                           | Only for `STORAGE=mssql`                                                                                                                                           |
-| `HTTP_PORT`         | default `8080`                              |                                                                                                                                                                    |
-| `HUB_PORT`          | default `3000`                              |                                                                                                                                                                    |
-| `BROADCAST_PORT`    | default `41234`                             |                                                                                                                                                                    |
-| `RLJSON_DOMAIN`     | string, default `petshop-local`             | Network domain for peer discovery                                                                                                                                  |
-| `SEED_SIZE`         | `none`, `small`, `medium`, `large`          | Seed imported at first start when the store is empty                                                                                                               |
-| `PUBLIC_URL`        | URL, default `http://localhost:<HTTP_PORT>` | This node's own URL, shown in `/status` and used for links                                                                                                         |
-| `NODE_URLS`         | comma separated URLs, default empty         | Public URLs of every node of the environment, this one included; `/status` of each is polled to correlate node ids with URLs and names (slice D1)                  |
-| `DISCOVERY`         | `enabled` (default), `disabled`             | `disabled` opens no broadcast or probe socket: unit tests and single-node runs; the node then reports `standalone` with a per-process id                           |
-| `LOG_LEVEL`         | `info`                                      |                                                                                                                                                                    |
-| `WEB_APP_DIRECTORY` | path                                        | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                             |
-| `TRAIT_RELATION`    | `multi-reference`, `junction`               | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference`          |
+| Variable            | Values                                       | Meaning                                                                                                                                                                                    |
+| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NODE_NAME`         | `node1` …                                    | Display name, also used for the hostname                                                                                                                                                   |
+| `STORAGE`           | `memory` (default), `sqlite`, `mssql`        | Which `Io` implementation backs the node: `IoMem`, `IoSqliteNode` over `DATA_DIR/petshop.sqlite` (slice C1), `IoMssql` (slice C4); any other value fails the start                         |
+| `DATA_DIR`          | path                                         | Where SQLite file, blobs and node identity live (`/data` in Kubernetes)                                                                                                                    |
+| `MSSQL_CONNECTION`  | connection string                            | Only for `STORAGE=mssql`                                                                                                                                                                   |
+| `HTTP_PORT`         | default `8080`                               |                                                                                                                                                                                            |
+| `HUB_PORT`          | default `3000`                               |                                                                                                                                                                                            |
+| `BROADCAST_PORT`    | default `41234`                              |                                                                                                                                                                                            |
+| `RLJSON_DOMAIN`     | string, default `petshop-local`              | Network domain for peer discovery                                                                                                                                                          |
+| `SEED_SIZE`         | `none`, `small` (default), `medium`, `large` | Seed imported at first start when the store is empty: `small` is the hand-written pet shop, `none` leaves it empty (slice C3); `medium` and `large` arrive with C5                         |
+| `PUBLIC_URL`        | URL, default `http://localhost:<HTTP_PORT>`  | This node's own URL, shown in `/status` and used for links                                                                                                                                 |
+| `NODE_URLS`         | comma separated URLs, default empty          | Public URLs of every node of the environment, this one included; the link list of the header and of `/status` (slice D1)                                                                   |
+| `NODE_STATUS_URLS`  | comma separated URLs, default `NODE_URLS`    | Where the `/status` of the `NODE_URLS` entry at the same position is polled; the ClusterIP service URLs in Kubernetes, because Node's `fetch` rejects a preview's staging chain (slice C3) |
+| `DISCOVERY`         | `enabled` (default), `disabled`              | `disabled` opens no broadcast or probe socket: unit tests and single-node runs; the node then reports `standalone` with a per-process id                                                   |
+| `LOG_LEVEL`         | `info`                                       |                                                                                                                                                                                            |
+| `WEB_APP_DIRECTORY` | path                                         | Directory served at `/`, default `packages/web-app/public`, `/app/public` in the image                                                                                                     |
+| `TRAIT_RELATION`    | `multi-reference`, `junction`                | Which `TraitRelation` implementation `PetShopStore` reads the animal-trait n-to-m relation through (`docs/findings/n-to-m.md`); default `multi-reference`                                  |
 
 ### 2.5 HTTP contract of a node
 
@@ -409,10 +410,11 @@ cluster, `up.yml` brings both back (see `docs/operations.md`).
   (true in production, false in previews).
 - Module variables: `environment_name`, `image` (the full reference the
   `image` job pushed), `base_domain`, `hostname_infix`, `cluster_issuer`,
-  `enable_apex_ingress`, `nodes`; later slices add `enable_mssql`,
-  `seed_size`, `rljson_domain`. The root module chooses them from the
-  workspace name and takes `image`, `base_domain` and `letsencrypt_email`
-  (for the issuers) as its own variables.
+  `enable_apex_ingress`, `nodes` (name and storage per node),
+  `rljson_domain`, `seed_size` (one value for every node of the
+  environment); slice C4 adds `enable_mssql`. The root module chooses them
+  from the workspace name and takes `image`, `base_domain` and
+  `letsencrypt_email` (for the issuers) as its own variables.
 
 ## 5. Slices
 
@@ -875,7 +877,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       restarts (relevant for D7).
 - [ ] **C2 Blobs on disk.** Depends on: C1. `BsFs` under `DATA_DIR/blobs`
       for the sqlite node. Done when species images survive a redeploy.
-- [ ] **C3 Second and third node.** Depends on: C1. node2 (`sqlite` for
+- [x] **C3 Second and third node.** Depends on: C1. node2 (`sqlite` for
       now) and node3 (`memory`) deployed with their own hostnames and seeds,
       each still independent; the Terraform module passes every node's URL
       to every node's container as the comma separated configuration
@@ -891,7 +893,29 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       pulled-forward D1, with the outline driven by the discovery topology
       and the browser probe as the secondary marker; C3 adds node2 and
       node3 to the module (the `nodes` list of `environment.tf`) and proves
-      the bar and the hub election on the three production hosts.
+      the bar and the hub election on the three production hosts. Outcome:
+      production runs `node1` (`sqlite`), `node2` (`sqlite`) and `node3`
+      (`memory`), each with its own Service, Ingress and Let's Encrypt
+      certificate, the apex host still on node1, every pod with
+      `SEED_SIZE=small` (every node seeds the same pet shop for now, see
+      D3) and `NODE_STATUS_URLS`, the ClusterIP service URLs at the same
+      positions as `NODE_URLS`, which the `NodeDirectory` polls instead of
+      the public hosts, because Node's `fetch` rejects the staging chain of
+      a preview (the open point of D1); `NODE_URLS` stays the public link
+      list of the header and of `/status`. `verify-deployment.sh` waits,
+      with three or more URLs, until every node lists every other node as
+      seen in the discovery topology and exactly one node is the hub
+      (statuses grouped by node id, since the apex host is node1 again),
+      and prints the roles; a preview with one URL keeps the per-node
+      check. The UDP broadcast of a pod reaches the other pods on the
+      flannel bridge of k3s, so the static hub fallback of `@rljson/network`
+      was not needed (`docs/findings/network-discovery.md`, verified on the
+      preview of pull request #35, which ran three memory nodes for that
+      purpose, and in production by the smoke job of the merge). The
+      compose file gives the nodes the host-side URLs as
+      `NODE_URLS` and the container names as `NODE_STATUS_URLS`, so the
+      header links open from a browser on the host. Previews keep one
+      memory node.
 - [ ] **C4 SQL Server store.** Depends on: C3. `STORAGE=mssql` with
       `IoMssql`, SQL Server `StatefulSet` in production, node2 switched to it,
       CI runs the domain suite against SQL Server as a service container,
@@ -923,7 +947,8 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       three-node agreement follows automatically once C3 deploys node2 and
       node3 (the module already passes `RLJSON_DOMAIN`, `HUB_PORT`,
       `BROADCAST_PORT`, `DATA_DIR`, `PUBLIC_URL` and `NODE_URLS` to every
-      pod, so a single node reports `standalone` today). The node bar and
+      pod, so a single node reports `standalone` today; since C3 the three
+      production nodes agree on one hub over the flannel bridge). The node bar and
       the C3 header bar landed together here: `NODE_URLS` and the
       cross-origin `/health` are in this slice, so C3 only adds the nodes.
       The web app polls `/status` every five seconds instead of listening
@@ -950,7 +975,12 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       announce every change set, pull incoming change sets and their items,
       emit `sync` events. Gherkin: "a customer created on node1 is listed on
       node2 and node3 within five seconds". Done when an invoice issued on the
-      phone against node3 appears on node1.
+      phone against node3 appears on node1. Seeding: since C3 every node
+      seeds the same `small` pet shop into its own store (`SEED_SIZE=small`
+      on every pod); once change sets synchronise, only the hub or the
+      first node seeds and the others start with `SEED_SIZE=none` and
+      receive the seed over the network, otherwise every node would
+      announce the same rows.
 - [ ] **D3b Transfer indicators.** Depends on: D3, B13. Per partner node in
       the node bar an upstream and a downstream icon; when this node
       receives data from that partner the upstream icon activates

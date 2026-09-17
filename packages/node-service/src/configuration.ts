@@ -45,8 +45,21 @@ export type StorageKind = 'memory' | 'sqlite';
 const storageKinds: readonly StorageKind[] = ['memory', 'sqlite'];
 
 /**
+ * Which seed the node imports at its first start while its store is empty
+ * (`SEED_SIZE` in roadmap section 2.4): `small` is the hand-written pet
+ * shop of `@rljson-tryout/domain`, `none` leaves the store empty for a node
+ * that is meant to receive its data from the network. The generated
+ * `medium` and `large` seeds arrive with slice C5.
+ */
+export type SeedSize = 'none' | 'small';
+
+const seedSizes: readonly SeedSize[] = ['none', 'small'];
+
+/**
  * The subset of the node configuration (see roadmap section 2.4) that this
- * package uses so far.
+ * package uses so far. `nodeStatusUrls` is index-aligned with `nodeUrls`:
+ * the entry at the same position is where this node polls the `/status` of
+ * that node, while `nodeUrls` stays the public link list.
  */
 export type Configuration = Readonly<{
   nodeName: string;
@@ -55,6 +68,7 @@ export type Configuration = Readonly<{
   gitCommit: string;
   webAppDirectory: string;
   storage: StorageKind;
+  seedSize: SeedSize;
   traitRelationMode: TraitRelationMode;
   rljsonDomain: string;
   hubPort: number;
@@ -62,6 +76,7 @@ export type Configuration = Readonly<{
   dataDirectory: string;
   publicUrl: string;
   nodeUrls: readonly string[];
+  nodeStatusUrls: readonly string[];
   discovery: DiscoveryMode;
 }>;
 
@@ -144,14 +159,43 @@ const readUrl = (variableName: string, value: string): string => {
 const readPublicUrl = (value: string | undefined, httpPort: number): string =>
   readUrl('PUBLIC_URL', value ?? `http://localhost:${httpPort}`);
 
-const readNodeUrls = (value: string | undefined): readonly string[] =>
+const readUrlList = (
+  variableName: string,
+  value: string | undefined,
+): readonly string[] =>
   Object.freeze(
     (value ?? '')
       .split(',')
       .map((entry) => entry.trim())
       .filter((entry) => entry !== '')
-      .map((entry) => readUrl('NODE_URLS', entry)),
+      .map((entry) => readUrl(variableName, entry)),
   );
+
+/**
+ * Where the `/status` of every `NODE_URLS` entry is polled from this
+ * process: by default the public URL itself, in Kubernetes the in-cluster
+ * service URL of the same node, because a preview's public certificate
+ * comes from the Let's Encrypt staging issuer, which Node's `fetch` rejects
+ * (`docs/findings/network-discovery.md`). Index-aligned with `NODE_URLS`,
+ * so both lists must have the same length.
+ */
+const readNodeStatusUrls = (
+  value: string | undefined,
+  nodeUrls: readonly string[],
+): readonly string[] => {
+  if (value === undefined) {
+    return nodeUrls;
+  }
+
+  const statusUrls = readUrlList('NODE_STATUS_URLS', value);
+  if (statusUrls.length !== nodeUrls.length) {
+    throw new Error(
+      `NODE_STATUS_URLS must list one URL per NODE_URLS entry in the same order, got ${statusUrls.length} for ${nodeUrls.length}`,
+    );
+  }
+
+  return statusUrls;
+};
 
 const readRljsonDomain = (value: string | undefined): string => {
   if (value === undefined) {
@@ -191,6 +235,20 @@ const readStorageKind = (value: string | undefined): StorageKind => {
   }
 
   return value as StorageKind;
+};
+
+const readSeedSize = (value: string | undefined): SeedSize => {
+  if (value === undefined) {
+    return 'small';
+  }
+
+  if (!seedSizes.includes(value as SeedSize)) {
+    throw new Error(
+      `SEED_SIZE must be one of ${seedSizes.join(', ')}, got "${value}"`,
+    );
+  }
+
+  return value as SeedSize;
 };
 
 const readLogLevel = (value: string | undefined): LogLevel => {
@@ -238,6 +296,7 @@ export const readConfiguration = (
   environment: NodeJS.ProcessEnv = process.env,
 ): Configuration => {
   const httpPort = readPort('HTTP_PORT', environment.HTTP_PORT, 8080);
+  const nodeUrls = readUrlList('NODE_URLS', environment.NODE_URLS);
 
   return Object.freeze({
     nodeName: environment.NODE_NAME ?? 'node1',
@@ -246,6 +305,7 @@ export const readConfiguration = (
     gitCommit: environment.GIT_COMMIT ?? 'unknown',
     webAppDirectory: readWebAppDirectory(environment.WEB_APP_DIRECTORY),
     storage: readStorageKind(environment.STORAGE),
+    seedSize: readSeedSize(environment.SEED_SIZE),
     traitRelationMode: readTraitRelationMode(environment.TRAIT_RELATION),
     rljsonDomain: readRljsonDomain(environment.RLJSON_DOMAIN),
     hubPort: readPort('HUB_PORT', environment.HUB_PORT, 3000),
@@ -256,7 +316,8 @@ export const readConfiguration = (
     ),
     dataDirectory: resolve(environment.DATA_DIR ?? defaultDataDirectory),
     publicUrl: readPublicUrl(environment.PUBLIC_URL, httpPort),
-    nodeUrls: readNodeUrls(environment.NODE_URLS),
+    nodeUrls,
+    nodeStatusUrls: readNodeStatusUrls(environment.NODE_STATUS_URLS, nodeUrls),
     discovery: readDiscoveryMode(environment.DISCOVERY),
   });
 };

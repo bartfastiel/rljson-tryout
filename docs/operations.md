@@ -48,14 +48,14 @@ branch or with any confirmation other than `down`.
 Expected sequence and durations (measured on the pipeline; the first real
 `Down` and `Up` cycle refines them):
 
-| Job         | Step                                                     | Duration                                                                                                      |
-| ----------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `confirm`   | Checks the branch and the input                          | seconds                                                                                                       |
-| `workloads` | Checkout, AWS role, Terraform, `init` of both stages     | about 30 seconds                                                                                              |
-| `workloads` | Probes the Kubernetes API server                         | seconds                                                                                                       |
-| `workloads` | `terraform destroy` per workspace, previews first        | one to two minutes for `production` (eight resources; the Helm uninstall and the namespace deletion dominate) |
-| `cluster`   | Checkout, AWS role, Terraform, `init`                    | about 20 seconds                                                                                              |
-| `cluster`   | `terraform destroy`: server, firewall, SSH key, key pair | about 30 seconds                                                                                              |
+| Job         | Step                                                     | Duration                                                                                                         |
+| ----------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `confirm`   | Checks the branch and the input                          | seconds                                                                                                          |
+| `workloads` | Checkout, AWS role, Terraform, `init` of both stages     | about 30 seconds                                                                                                 |
+| `workloads` | Probes the Kubernetes API server                         | seconds                                                                                                          |
+| `workloads` | `terraform destroy` per workspace, previews first        | one to two minutes for `production` (fourteen resources; the Helm uninstall and the namespace deletion dominate) |
+| `cluster`   | Checkout, AWS role, Terraform, `init`                    | about 20 seconds                                                                                                 |
+| `cluster`   | `terraform destroy`: server, firewall, SSH key, key pair | about 30 seconds                                                                                                 |
 
 A `Down` on a system with production only takes four to five minutes. The
 run's summary page lists every workspace with the number of resources it
@@ -100,16 +100,17 @@ landed, so start `Up` only when the last pipeline run on `main` is green.
 The first job `preflight` fails within seconds, before any server exists,
 when the run was started from another branch or the image is missing.
 
-| Job         | Step                                                                                              | Duration                                                               |
-| ----------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `preflight` | Checks the branch and that the image of the commit exists in GHCR                                 | seconds                                                                |
-| `cluster`   | Checkout, AWS role, Terraform, `init`                                                             | about 20 seconds                                                       |
-| `cluster`   | `terraform apply`: key pair, SSH key, firewall, server                                            | server created after about 15 seconds                                  |
-| `cluster`   | Still `apply`: SSH hand-off waits for cloud-init, k3s and a `Ready` node                          | one to three minutes                                                   |
-| `cluster`   | Waits for the API server, verifies the kubeconfig with `kubectl`                                  | about 20 seconds                                                       |
-| `workloads` | Checkout, AWS role, Terraform, `init`, workspace `production`                                     | about 30 seconds                                                       |
-| `workloads` | `terraform apply`: cert-manager, issuers, namespace, deployment, service, ingresses               | one to two minutes, the rollout waits for the image pull and readiness |
-| `workloads` | Smoke checks: `/health` reports the commit over trusted https, issuer, redirect, species, web app | up to two minutes, the certificate is ordered when the ingress appears |
+| Job         | Step                                                                                              | Duration                                                                  |
+| ----------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `preflight` | Checks the branch and that the image of the commit exists in GHCR                                 | seconds                                                                   |
+| `cluster`   | Checkout, AWS role, Terraform, `init`                                                             | about 20 seconds                                                          |
+| `cluster`   | `terraform apply`: key pair, SSH key, firewall, server                                            | server created after about 15 seconds                                     |
+| `cluster`   | Still `apply`: SSH hand-off waits for cloud-init, k3s and a `Ready` node                          | one to three minutes                                                      |
+| `cluster`   | Waits for the API server, verifies the kubeconfig with `kubectl`                                  | about 20 seconds                                                          |
+| `workloads` | Checkout, AWS role, Terraform, `init`, workspace `production`                                     | about 30 seconds                                                          |
+| `workloads` | `terraform apply`: cert-manager, issuers, namespace, three workloads, services, ingresses         | one to two minutes, the rollouts wait for the image pull and readiness    |
+| `workloads` | Smoke checks: `/health` reports the commit over trusted https, issuer, redirect, species, web app | up to two minutes, the certificates are ordered when the ingresses appear |
+| `workloads` | Still smoke: the three nodes see each other in the discovery topology and agree on one hub        | seconds once all three pods run; one broadcast interval (5 s) to agree    |
 
 An `Up` takes five to eight minutes. Preview environments are not
 recreated; they come back with the next push to their pull request.
@@ -131,10 +132,10 @@ GitHub and skips the deployment when the pull request was closed while
 the run was in its earlier jobs; `smoke` is skipped with it. The
 workspace name selects the environment in `infra/terraform/workloads`:
 
-| Workspace     | Namespace     | Hosts                                            | Certificates             |
-| ------------- | ------------- | ------------------------------------------------ | ------------------------ |
-| `production`  | `petshop`     | `node1.rljson-tryout…` and the apex host         | `letsencrypt-production` |
-| `pr-<number>` | `pr-<number>` | `node1-pr-<number>.rljson-tryout…`, no apex host | `letsencrypt-staging`    |
+| Workspace     | Namespace     | Hosts                                                        | Certificates             |
+| ------------- | ------------- | ------------------------------------------------------------ | ------------------------ |
+| `production`  | `petshop`     | `node1.rljson-tryout…`, `node2…`, `node3…` and the apex host | `letsencrypt-production` |
+| `pr-<number>` | `pr-<number>` | `node1-pr-<number>.rljson-tryout…`, no apex host             | `letsencrypt-staging`    |
 
 Any other workspace name fails the plan with a message that names the two
 forms. Pull requests from forks and from Dependabot get no preview: their
@@ -204,9 +205,14 @@ Lost with a `Down`:
 
 - Everything on the server: the k3s cluster, its certificate authority (the
   kubeconfig changes with every `Up`), all in-cluster data. The SQLite
-  file and the node identity of node1 live on a `local-path` volume of the
-  server's disk (slice C1); they survive pod restarts and redeploys but
-  not a `Down`, after which node1 seeds itself again with a fresh node id.
+  file and the node identity of node1 and node2 live on one `local-path`
+  volume claim each (`data-node1-0`, `data-node2-0` in namespace
+  `petshop`), directories on the server's disk (slice C1); they survive
+  pod restarts and redeploys but not a `Down`: the destroy deletes the
+  namespace with the claims and the cluster with the disk, and after the
+  next `Up` both StatefulSets get fresh, empty claims, seed themselves
+  again and take fresh node ids. node3 keeps nothing on purpose (memory
+  store, `emptyDir`): it seeds itself again on every pod replacement.
 - The generated SSH key pair. `Up` creates a new one.
 - The Let's Encrypt account and certificates of cert-manager. Every `Up`
   registers a new account and orders the certificates again. The limit

@@ -71,6 +71,16 @@ variable "nodes" {
   }
 }
 
+variable "seed_size" {
+  description = "Seed every node imports at its first start while its store is empty (SEED_SIZE): small is the hand-written pet shop, none leaves the store empty. Every node of the environment seeds the same size."
+  type        = string
+
+  validation {
+    condition     = contains(["none", "small"], var.seed_size)
+    error_message = "The seed size must be none or small."
+  }
+}
+
 variable "rljson_domain" {
   description = "rljson network domain the nodes of this environment discover each other in (RLJSON_DOMAIN); production and previews share the pod network and are kept apart by this value alone."
   type        = string
