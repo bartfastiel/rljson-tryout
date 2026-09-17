@@ -36,8 +36,6 @@ locals {
     rljson_domain       = "petshop-${terraform.workspace}"
     nodes = [
       { name = "node1", storage = "memory" },
-      { name = "node2", storage = "memory" },
-      { name = "node3", storage = "memory" },
     ]
   }
 }
