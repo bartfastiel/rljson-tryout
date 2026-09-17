@@ -30,9 +30,11 @@ other nodes.
 
 ## Status
 
-Bootstrapped. Implementation follows [docs/roadmap.md](docs/roadmap.md)
-slice by slice; the reasoning behind the architecture is in
-[docs/plan.md](docs/plan.md).
+The system is live at [https://node1.rljson-tryout.wer-ist-daniel-schwarz.de](https://node1.rljson-tryout.wer-ist-daniel-schwarz.de) with a production Let's Encrypt certificate.
+Phase A (walking skeleton to production) is complete; phase B (the domain on one node) is in progress.
+Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
+Every pull request deploys its own preview with a staging certificate.
+The manual `Up` and `Down` workflows switch the whole system off and on.
 
 ## Principles
 
