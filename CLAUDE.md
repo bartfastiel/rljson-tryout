@@ -18,8 +18,8 @@ the first unticked slice whose dependencies are merged.
 - Nothing is configured on the server by hand. Terraform, cloud-init and
   Kubernetes manifests are the only way to change infrastructure.
 - Secrets never enter the repository, logs or pull request comments. Names
-  in use: secrets `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY`;
-  variables `AWS_ROLE_ARN`, `LETSENCRYPT_EMAIL`.
+  in use: secrets `HCLOUD_TOKEN`, `SONAR_TOKEN`, `ANTHROPIC_API_KEY`,
+  `LETSENCRYPT_EMAIL`; variables `AWS_ROLE_ARN`.
 - Pin `@rljson/*` packages exactly; upgrade only in a dedicated pull request.
 - When something is unclear, write the assumption into the pull request and
   continue. Record what you learn about rljson in `docs/findings/`.
