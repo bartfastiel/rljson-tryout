@@ -2,6 +2,9 @@
 import './components/animal-detail.js';
 import './components/animals-list.js';
 import './components/breeders-list.js';
+import './components/invoice-detail.js';
+import './components/invoice-form.js';
+import './components/invoices-list.js';
 import './components/species-list.js';
 import { fetchJson } from './api.js';
 import { requiredElement } from './dom.js';
@@ -25,6 +28,67 @@ const views = {
     title: 'Breeders',
     render: () => document.createElement('breeders-list'),
   },
+  invoices: {
+    title: 'Invoices',
+    render: () => document.createElement('invoices-list'),
+  },
+};
+
+/**
+ * Creates the element of a view that shows one entity, handing it the id
+ * from the hash through the given attribute.
+ *
+ * @param {string} tagName
+ * @param {string} attributeName
+ * @param {string} id
+ */
+const entityView = (tagName, attributeName, id) => {
+  const view = document.createElement(tagName);
+  view.setAttribute(attributeName, id);
+  return view;
+};
+
+/**
+ * The page a hash's path segments select: a title for the tab and the
+ * element to show. A section's second segment addresses one entity
+ * (`#/animals/<id>`, `#/invoices/<id>`), except `#/invoices/new`, which is
+ * the form for a new invoice. An unknown section gets the not-found page.
+ *
+ * @param {string[]} segments
+ * @returns {{ title: string, element: HTMLElement }}
+ */
+const pageFor = (segments) => {
+  const [sectionName, entityId] = segments;
+  const addressesEntity = segments.length > 1;
+  if (sectionName === 'animals' && addressesEntity) {
+    return {
+      title: views.animals.title,
+      element: entityView('animal-detail', 'animal-id', entityId),
+    };
+  }
+  if (sectionName === 'invoices' && entityId === 'new') {
+    return {
+      title: 'New invoice',
+      element: document.createElement('invoice-form'),
+    };
+  }
+  if (sectionName === 'invoices' && addressesEntity) {
+    return {
+      title: views.invoices.title,
+      element: entityView('invoice-detail', 'invoice-id', entityId),
+    };
+  }
+  if (!Object.hasOwn(views, sectionName)) {
+    return {
+      title: 'Page not found',
+      element: notFoundView(`There is no page called "${sectionName}".`, {
+        href: `#/${defaultViewName}`,
+        text: `Back to ${views[defaultViewName].title}`,
+      }),
+    };
+  }
+  const view = views[sectionName];
+  return { title: view.title, element: view.render() };
 };
 
 const main = requiredElement('main');
@@ -40,12 +104,8 @@ const render = () => {
   }
 
   const sectionName = segments[0];
-  const isAnimalDetail = sectionName === 'animals' && segments.length > 1;
-  const view = isAnimalDetail ? undefined : views[sectionName];
-
-  document.title = isAnimalDetail
-    ? `${views.animals.title} · ${applicationName}`
-    : `${view?.title ?? 'Page not found'} · ${applicationName}`;
+  const page = pageFor(segments);
+  document.title = `${page.title} · ${applicationName}`;
   for (const link of navigationLinks) {
     if (link.dataset.view === sectionName) {
       link.setAttribute('aria-current', 'page');
@@ -53,22 +113,7 @@ const render = () => {
       link.removeAttribute('aria-current');
     }
   }
-
-  if (isAnimalDetail) {
-    const detail = document.createElement('animal-detail');
-    detail.setAttribute('animal-id', segments[1]);
-    main.replaceChildren(detail);
-    return;
-  }
-
-  main.replaceChildren(
-    view
-      ? view.render()
-      : notFoundView(`There is no page called "${sectionName}".`, {
-          href: `#/${defaultViewName}`,
-          text: `Back to ${views[defaultViewName].title}`,
-        }),
-  );
+  main.replaceChildren(page.element);
 };
 
 const showNodeName = async () => {

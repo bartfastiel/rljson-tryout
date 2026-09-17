@@ -44,14 +44,30 @@ const personRows: readonly PersonRow[] = [
     city: 'Duckburg',
     email: 'john.rockerduck@duckburg.example',
   },
+  {
+    id: 'scrooge-mcduck',
+    name: 'Scrooge McDuck',
+    street: 'Killmotor Hill 1',
+    city: 'Duckburg',
+    email: 'scrooge.mcduck@duckburg.example',
+  },
+  {
+    id: 'donald-duck',
+    name: 'Donald Duck',
+    street: 'Webfoot Walk 1313',
+    city: 'Duckburg',
+    email: 'donald.duck@duckburg.example',
+  },
 ];
 
 /**
- * The six Duckburg persons every node starts with. `persons` is shared by
- * `breeders` (this slice, B7) and, later, `customers` (slice B8): some of
- * these six are referenced as a breeder's own person by `breedersSeed`,
- * some (Gladstone Gander, Fethry Duck) are seeded here without a role yet,
- * ready for slice B8 to reference them as customers. The rows are hashed
+ * The eight Duckburg persons every node starts with. `persons` is shared by
+ * `breeders` (slice B7) and `customers` (slice B8): four of these are
+ * referenced as a breeder's own person by `breedersSeed`, five as a
+ * customer's person by `customersSeed`, and Grandma Duck is both, which is
+ * what lets a breeder be a customer without a second person row. The two
+ * persons added last (Scrooge McDuck, Donald Duck) come after the six from
+ * slice B7 so that the earlier rows keep their hashes. The rows are hashed
  * here so that every node computes the same `_hash` for the same content,
  * matching the pattern of `speciesSeed`.
  */

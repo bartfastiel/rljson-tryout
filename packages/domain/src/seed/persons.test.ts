@@ -51,6 +51,8 @@ describe('personsSeed', () => {
       ['daisy-duck', 'x0eOnSMXNFIVxmH4MvF5xn'],
       ['fethry-duck', 'f0HNDUjhA__YoZpZfVOYMO'],
       ['john-d-rockerduck', 'Fukm0QxMPwwAhxctrshrgv'],
+      ['scrooge-mcduck', 'xGry0kc_Vjlw1uYwnScQyA'],
+      ['donald-duck', 'VRuQ9SFYbACKNjTgJlQNpP'],
     ]);
   });
 

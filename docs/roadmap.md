@@ -722,12 +722,29 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       `personRef` does not resolve, the same dangling-reference tolerance
       `speciesName` already has (`docs/findings/db-basics.md`, "Joining a
       reference").
-- [ ] **B8 Customers and invoices.** Depends on: B7. Tables `customers`,
+- [x] **B8 Customers and invoices.** Depends on: B7. Tables `customers`,
       `invoices`, `invoiceItems`, `changeSets` (3.4), `POST /api/invoices`
       writing all rows plus one change set, `GET /api/invoices`, view
       `invoices` and component `invoice-form` (pick customer, add animals,
       submit), Gherkin feature "Scrooge buys Donald the duck". Done when an
       invoice issued on the phone shows up in the list with its items.
+      Deviation: `@rljson/db` 0.0.42 has no controller for a `buffets`
+      table, so `Db.insert` and `Db.get` throw on `changeSets`; the store
+      writes a change set and its InsertHistory row through `Core.import`
+      (the call `Db` uses for its own history rows) and reads change sets
+      through `Io.readRows`, everything else stays on `Db`
+      (`docs/findings/change-sets.md`). A change set names every row the
+      operation wrote, the InsertHistory rows included, so a peer can
+      reproduce the operation and its place in the version DAG from the
+      change set alone. `GET /api/customers` and `GET /api/invoices/:id`
+      from the section 2.5 table are delivered here too, the detail with a
+      `changeSetHash` field. Invoice numbers are `<year>-<sequence>` from
+      the count of invoices on the node, unique per node only; the seed
+      issues six invoices through the same code path as the API so the
+      change set discipline holds for seed data, and Scrooge McDuck and
+      Donald Duck join the persons seed as customers. Quantities are
+      adjusted with a −/+ stepper per line rather than a number field, and
+      stepping a line below one removes it.
 - [ ] **B9 Versions of an entity.** Depends on: B8. `PUT /api/animals/:id`,
       `GET /api/animals/:id/history`, version list in the detail view, the
       "current version" rule from 2.6 implemented once in `domain` and used by

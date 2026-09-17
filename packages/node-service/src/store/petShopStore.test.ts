@@ -40,14 +40,16 @@ describe('PetShopStore', () => {
     await store.close();
   });
 
-  it('lists no species, no traits, no breeders and no animals before it is seeded', async () => {
+  it('lists no species, no traits, no breeders, no customers, no animals and no invoices before it is seeded', async () => {
     expect(await store.listSpecies()).toStrictEqual([]);
     expect(await store.listTraits()).toStrictEqual([]);
     expect(await store.listBreeders()).toStrictEqual([]);
+    expect(await store.listCustomers()).toStrictEqual([]);
     expect(await store.listAnimals()).toStrictEqual([]);
+    expect(await store.listInvoices()).toStrictEqual([]);
   });
 
-  it('seeds the domain species, traits, persons, breeders and animals into an empty store', async () => {
+  it('seeds the domain species, traits, persons, breeders, customers, animals and invoices into an empty store', async () => {
     const seeded = await store.seedIfEmpty();
 
     const expectedAnimalTraits = animalsSeed.reduce(
@@ -58,15 +60,19 @@ describe('PetShopStore', () => {
     expect(seeded).toStrictEqual({
       speciesSeeded: 3,
       traitsSeeded: 8,
-      personsSeeded: 6,
+      personsSeeded: 8,
       breedersSeeded: 4,
+      customersSeeded: 5,
       animalsSeeded: 10,
       animalTraitsSeeded: expectedAnimalTraits,
+      invoicesSeeded: 6,
     });
     expect(await store.listSpecies()).toHaveLength(3);
     expect(await store.listTraits()).toHaveLength(8);
     expect(await store.listBreeders()).toHaveLength(4);
+    expect(await store.listCustomers()).toHaveLength(5);
     expect(await store.listAnimals()).toHaveLength(10);
+    expect(await store.listInvoices()).toHaveLength(6);
   });
 
   it('seeds only once: a second call inserts nothing', async () => {
@@ -79,13 +85,17 @@ describe('PetShopStore', () => {
       traitsSeeded: 0,
       personsSeeded: 0,
       breedersSeeded: 0,
+      customersSeeded: 0,
       animalsSeeded: 0,
       animalTraitsSeeded: 0,
+      invoicesSeeded: 0,
     });
     expect(await store.listSpecies()).toHaveLength(3);
     expect(await store.listTraits()).toHaveLength(8);
     expect(await store.listBreeders()).toHaveLength(4);
+    expect(await store.listCustomers()).toHaveLength(5);
     expect(await store.listAnimals()).toHaveLength(10);
+    expect(await store.listInvoices()).toHaveLength(6);
   });
 
   it('lists the species ordered by id', async () => {
