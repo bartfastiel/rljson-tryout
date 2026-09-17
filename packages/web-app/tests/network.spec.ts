@@ -4,6 +4,7 @@ import {
   boundingBoxOf,
   expectNoHorizontalScroll,
   mainNavigation,
+  viewportOf,
 } from './support.ts';
 
 const node2Url = 'https://node2.example.test';
@@ -178,8 +179,11 @@ test.describe('with three nodes in the environment', () => {
       const box = await boundingBoxOf(link);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
+    // The active badge stays in view even when the bar has to scroll.
     const badge = await boundingBoxOf(bar.locator('.node-badge-active'));
     expect(badge.height).toBeGreaterThanOrEqual(44);
+    expect(badge.x).toBeGreaterThanOrEqual(0);
+    expect(badge.x + badge.width).toBeLessThanOrEqual(viewportOf(page).width);
   });
 
   test('lists this node and every node of the environment on the network view', async ({

@@ -153,15 +153,26 @@ a {
  * badge comes first and therefore always stays in view.
  */
 .node-bar {
+  /* Positioned so that the visually hidden labels inside the links are
+     clipped with the bar instead of sticking out of the sticky header. */
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   align-items: center;
-  justify-content: flex-end;
   gap: var(--space-2);
   min-width: 0;
   height: 100%;
   overflow-x: auto;
   scrollbar-width: thin;
+}
+
+/*
+ * Right-aligned while there is room; `justify-content: flex-end` would
+ * push an overflowing bar's start, the active badge, into the unscrollable
+ * side, whereas an auto margin collapses to zero once the bar overflows.
+ */
+.node-bar > :first-child {
+  margin-left: auto;
 }
 
 .node-badge,
