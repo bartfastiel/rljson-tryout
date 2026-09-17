@@ -12,10 +12,19 @@ import {
 } from '../view-helpers.js';
 
 /**
+ * One trait as `GET /api/animals/:id` lists it on `traits`: just enough to
+ * show a chip and link back to the filtered list.
+ *
+ * @typedef {object} AnimalTrait
+ * @property {string} id
+ * @property {string} name
+ */
+
+/**
  * One animal as `GET /api/animals/:id` returns it: the fields the detail
- * view needs, with its species joined and the full background story.
- * `speciesId` and `speciesName` are `null` for the unreachable case of a
- * dangling `speciesRef` (see `PetShopStore.getAnimal`).
+ * view needs, with its species joined, its traits resolved and the full
+ * background story. `speciesId` and `speciesName` are `null` for the
+ * unreachable case of a dangling `speciesRef` (see `PetShopStore.getAnimal`).
  *
  * @typedef {object} AnimalDetail
  * @property {string} id
@@ -26,19 +35,30 @@ import {
  * @property {string} bornOn
  * @property {number} priceCents
  * @property {string} backgroundStory
+ * @property {AnimalTrait[]} traits
  */
 
 /**
  * The href of the list a "back" link should return to: the filtered list
- * the detail was opened from, when this view's own hash carries a `species`
- * query parameter (the animal card that links here puts it there, see
- * `animals-list.js`), the full list otherwise.
+ * the detail was opened from, carrying along whichever of `species` and
+ * `trait` this view's own hash query holds (the animal card that links here
+ * puts them there, see `animals-list.js`), the full list when neither is
+ * present.
  */
 const listHref = () => {
-  const speciesId = hashQuery(location.hash).get('species');
-  return speciesId === null
-    ? '#/animals'
-    : `#/animals?species=${encodeURIComponent(speciesId)}`;
+  const query = hashQuery(location.hash);
+  const speciesId = query.get('species');
+  const traitId = query.get('trait');
+
+  const params = new URLSearchParams();
+  if (speciesId !== null) {
+    params.set('species', speciesId);
+  }
+  if (traitId !== null) {
+    params.set('trait', traitId);
+  }
+  const queryString = params.toString();
+  return queryString === '' ? '#/animals' : `#/animals?${queryString}`;
 };
 
 /**
@@ -98,13 +118,43 @@ const factsBlock = (animal) => {
 };
 
 /**
+ * The animal's traits as a row of chips, each linking to the animals list
+ * filtered to that one trait (`#/animals?trait=<id>`) rather than combining
+ * with whatever filter this detail happened to be opened from, so tapping a
+ * trait always shows every animal that shares it. `null` when the animal
+ * carries no trait, so `detailView` can leave the section out entirely.
+ *
+ * @param {AnimalDetail} animal
+ */
+const traitChips = (animal) => {
+  if (animal.traits.length === 0) {
+    return null;
+  }
+
+  const list = element('ul', 'animal-traits');
+  list.setAttribute('aria-label', 'Traits');
+  list.append(
+    ...animal.traits.map((trait) => {
+      const chip = element('a', 'chip', trait.name);
+      chip.href = `#/animals?trait=${encodeURIComponent(trait.id)}`;
+      const item = element('li', '');
+      item.append(chip);
+      return item;
+    }),
+  );
+  return list;
+};
+
+/**
  * @param {AnimalDetail} animal
  */
 const detailView = (animal) => {
   const view = element('section', 'animal-detail-view');
+  const traits = traitChips(animal);
   view.append(
     element('h1', 'view-title', animal.name),
     factsBlock(animal),
+    ...(traits === null ? [] : [traits]),
     storyParagraphs(animal.backgroundStory),
   );
   return view;

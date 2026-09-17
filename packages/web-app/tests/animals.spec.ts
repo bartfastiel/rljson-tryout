@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 
-import { cardListItems, speciesFilterChips } from './support.ts';
+import {
+  cardListItems,
+  speciesFilterChips,
+  traitFilterChips,
+} from './support.ts';
 
 test('lists the ten animals with species name, birth date and price', async ({
   page,
@@ -75,6 +79,96 @@ test('returns to the full list through the All chip', async ({ page }) => {
 
   await expect(page).toHaveURL(/#\/animals$/);
   await expect(cardListItems(page)).toHaveCount(10);
+});
+
+test('shows the trait filter with an entry per seeded trait', async ({
+  page,
+}) => {
+  await page.goto('/#/animals');
+
+  const chips = traitFilterChips(page);
+  await expect(chips).toHaveCount(10);
+  // Exact match: a loose substring match on "All" also matches trait names
+  // that merely contain the letters in sequence, such as "Chronically
+  // unlucky".
+  await expect(chips.filter({ hasText: /^All$/ })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+});
+
+test('filtering by a trait chip narrows the list and updates the hash', async ({
+  page,
+}) => {
+  await page.goto('/#/animals');
+  await expect(cardListItems(page)).toHaveCount(10);
+
+  await traitFilterChips(page)
+    .filter({ hasText: 'Has a competitive streak' })
+    .click();
+
+  await expect(page).toHaveURL(/#\/animals\?trait=competitive-streak$/);
+  const filtered = cardListItems(page);
+  await expect(filtered).not.toHaveCount(0);
+  await expect(filtered).not.toHaveCount(10);
+  await expect(
+    traitFilterChips(page).filter({ hasText: 'Has a competitive streak' }),
+  ).toHaveAttribute('aria-current', 'page');
+});
+
+test('combining a species and a trait filter narrows further', async ({
+  page,
+}) => {
+  await page.goto('/#/animals?species=chicken');
+  await expect(cardListItems(page)).not.toHaveCount(0);
+
+  await traitFilterChips(page)
+    .filter({ hasText: 'Has a competitive streak' })
+    .click();
+
+  await expect(page).toHaveURL(
+    /#\/animals\?species=chicken&trait=competitive-streak$/,
+  );
+  const filtered = cardListItems(page);
+  await expect(filtered).toHaveCount(1);
+  await expect(filtered.locator('.animal-name')).toHaveText(
+    'Henrietta the Egg Champion',
+  );
+  await expect(
+    speciesFilterChips(page).filter({ hasText: 'Chicken' }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(
+    traitFilterChips(page).filter({ hasText: 'Has a competitive streak' }),
+  ).toHaveAttribute('aria-current', 'page');
+});
+
+test('a deep link with a species and a trait query restores both selections', async ({
+  page,
+}) => {
+  await page.goto('/#/animals?species=duck&trait=escapes-any-enclosure');
+
+  await expect(
+    speciesFilterChips(page).filter({ hasText: 'Duck' }),
+  ).toHaveAttribute('aria-current', 'page');
+  await expect(
+    traitFilterChips(page).filter({ hasText: 'Escapes any enclosure' }),
+  ).toHaveAttribute('aria-current', 'page');
+  const cards = cardListItems(page);
+  await expect(cards).not.toHaveCount(0);
+  for (const card of await cards.all()) {
+    await expect(card.locator('.animal-species')).toHaveText('Duck');
+  }
+});
+
+test('the All trait chip resets only the trait filter', async ({ page }) => {
+  await page.goto('/#/animals?species=chicken&trait=competitive-streak');
+
+  await traitFilterChips(page).filter({ hasText: /^All$/ }).click();
+
+  await expect(page).toHaveURL(/#\/animals\?species=chicken$/);
+  await expect(
+    speciesFilterChips(page).filter({ hasText: 'Chicken' }),
+  ).toHaveAttribute('aria-current', 'page');
 });
 
 test('shows an error with a retry button when the node answers 500', async ({

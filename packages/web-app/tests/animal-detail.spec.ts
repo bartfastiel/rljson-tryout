@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-import { cardListItems, speciesFilterChips } from './support.ts';
+import {
+  animalDetailTraitChips,
+  cardListItems,
+  speciesFilterChips,
+  traitFilterChips,
+} from './support.ts';
 
 test("a card links to the animal's detail page", async ({ page }) => {
   await page.goto('/#/animals');
@@ -58,6 +63,29 @@ test('links the species fact to the filtered animals list', async ({
   for (const card of await cards.all()) {
     await expect(card.locator('.animal-species')).toHaveText('Duck');
   }
+});
+
+test('shows trait chips and tapping one filters the animals list', async ({
+  page,
+}) => {
+  await page.goto('/#/animals/sir-quackington');
+
+  const chips = animalDetailTraitChips(page);
+  await expect(chips).toHaveCount(4);
+  const loyalChip = chips.filter({ hasText: 'Fiercely loyal' });
+  await expect(loyalChip).toBeVisible();
+  const box = await loyalChip.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+
+  await loyalChip.click();
+
+  await expect(page).toHaveURL(/#\/animals\?trait=fiercely-loyal$/);
+  const cards = cardListItems(page);
+  await expect(cards).not.toHaveCount(0);
+  await expect(
+    traitFilterChips(page).filter({ hasText: 'Fiercely loyal' }),
+  ).toHaveAttribute('aria-current', 'page');
 });
 
 test('shows the not-found view for an unknown animal id', async ({ page }) => {
