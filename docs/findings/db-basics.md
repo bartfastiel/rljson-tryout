@@ -233,6 +233,56 @@ Validation:
   response (roadmap section 2.5) for payload size on the wire, not because
   the store or the hash is slow.
 
+## Multi-references
+
+- `@rljson/rljson` 0.0.81, while building slice B5's `animals.traitsRefs`
+  column: how rljson declares and validates a `jsonArray` column that holds
+  many `_hash` references into another table, rather than the single
+  `string` hash a column such as `animals.speciesRef` holds. Read
+  `node_modules/@rljson/rljson/dist/content/table-cfg.d.ts` (`ColumnCfg`) and
+  `node_modules/@rljson/rljson/dist/rljson.js` (`BaseValidator._refsNotFound`,
+  `_dataDoesNotMatchColumnConfig`) and ran a throwaway script inserting a
+  `traits` table plus an `animals` table with a `traitsRefs` column against
+  `BaseValidator`.
+- Declaration: `ColumnCfg.ref` is independent of `ColumnCfg.type`. A
+  single-valued reference column is `{ key, type: 'string', ref: { tableKey,
+type } }`; a multi-valued one is the same `ref` shape on a column typed
+  `jsonArray` instead: `{ key: 'traitsRefs', type: 'jsonArray', ref: {
+tableKey: 'traits', type: 'components' } }`. Nothing in `ColumnCfg` or in
+  `throwOnInvalidTableCfg` restricts which `type` a `ref` may sit on; the
+  `type` in `ref` names the _content type_ of the target table, exactly as
+  the "Joining a reference" finding above already established for a
+  single-valued reference.
+- Validation: `BaseValidator._refsNotFound` (the same check that rejects a
+  dangling `speciesRef`) already treats an array-valued column
+  transparently: `const targetRefs = Array.isArray(row[columnKey]) ?
+row[columnKey] : [row[columnKey]]` wraps a non-array value in a one-element
+  array and then resolves every element in `targetRefs` against the target
+  table with the same loop, in the same call, that resolves a single-valued
+  `ref` column. A `traitsRefs` array with one dangling hash among otherwise
+  valid ones is rejected with one `refsNotFound.missingRefs` entry per
+  dangling element (`sourceKey: 'traitsRefs'`, `targetItemHash: <the
+dangling hash>`), which was this slice's acceptance criterion; rljson
+  needed no help from a domain-level validation helper for this case, unlike
+  the `id`/`_referenceColumns` bug the "Filtering by id" finding below
+  documents for a different code path entirely (`Db.get` with a `where`
+  clause, not `Validate`).
+- `_dataDoesNotMatchColumnConfig` (`jsonValueMatchesType` in
+  `node_modules/@rljson/json/dist/json.js`) only confirms that a `jsonArray`
+  column's value is an array at all; it never looks at the type of the
+  array's own elements. An element of the wrong type (a number, a boolean)
+  therefore passes this check silently. It is still rejected in practice,
+  though, and by the same mechanism as a dangling hash: `_refsNotFound`
+  looks every element up as a hash against the target table regardless of
+  its JavaScript type, and a number or a boolean can never equal a string
+  hash a real row was inserted with, so it is reported as a broken reference
+  (`refsNotFound`) rather than as a type mismatch
+  (`dataDoesNotMatchColumnConfig`). This is a side effect of how reference
+  resolution works, not a deliberate per-element type check, and the domain
+  test suite documents the distinction precisely where it matters
+  (`packages/domain/src/seed/animals.test.ts`, "is rejected by the validator
+  when a traitsRefs entry has the wrong type").
+
 ## Candidates for upstream issues
 
 - `Db.insert` returns one `InsertHistoryRow` per inserted row but persists
@@ -268,3 +318,14 @@ Validation:
   `db.get(Route.fromFlat('animals'), { bornOn: '<value>' })` (finds the row)
   against `db.get(Route.fromFlat('animals'), { id: '<value>' })` or
   `{ name: '<value>' }` (finds nothing), see "Filtering by id" above.
+- `BaseValidator._dataDoesNotMatchColumnConfig` checks that a `jsonArray`
+  column's value is an array but never checks the type of its elements, so
+  `{ traitsRefs: [42, true] }` against a `jsonArray` column passes this
+  check. In this project's schema every dangling or wrongly typed element
+  still gets rejected as a side effect of `_refsNotFound` resolving each
+  element as a hash (see "Multi-references" above), but a `jsonArray`
+  column without a `ref` has no such safety net and would accept an array of
+  any element type silently. Reproduction: a `TableCfg` with a plain
+  (non-`ref`) `jsonArray` column, a row whose value for that column is `[1,
+'two', {}]`; `validateRljsonAgainstTableCfg`/`_dataDoesNotMatchColumnConfig`
+  report no error.

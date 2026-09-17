@@ -12,8 +12,10 @@ import {
  * version this animal belonged to at the time this row was written.
  * `backgroundStory` is free-form English text of any length; slice B4 is
  * what proves a multi-thousand-character value round-trips through the
- * store and the HTTP API unchanged. This table has no traits yet; that
- * column arrives in slice B5.
+ * store and the HTTP API unchanged. `traitsRefs` holds the `_hash` of every
+ * `traits` row this animal carries at the time this row was written: a
+ * `jsonArray` multi-reference (`docs/findings/db-basics.md`,
+ * "Multi-references").
  */
 export type AnimalRow = {
   id: string;
@@ -22,6 +24,7 @@ export type AnimalRow = {
   bornOn: string;
   priceCents: number;
   backgroundStory: string;
+  traitsRefs: string[];
 };
 
 /**
@@ -37,11 +40,13 @@ const stringColumn = (
 ): ColumnCfg => ({ key, type: 'string', titleLong, titleShort });
 
 /**
- * The `animals` table from roadmap section 2.6, without `breederRef` and
- * `traitsRefs` yet. It is a root table: it has no parent and `id` is the
- * stable identity of an animal across versions. `speciesRef` is a reference
- * column: the rljson validator resolves it against the `species` table and
- * reports a dangling value as a broken reference.
+ * The `animals` table from roadmap section 2.6, without `breederRef` yet.
+ * It is a root table: it has no parent and `id` is the stable identity of
+ * an animal across versions. `speciesRef` and `traitsRefs` are reference
+ * columns: the rljson validator resolves each against its target table and
+ * reports a dangling value as a broken reference, one element at a time for
+ * the `jsonArray` column `traitsRefs`
+ * (`docs/findings/db-basics.md`, "Multi-references").
  */
 export const animalsTableCfg: TableCfg = {
   key: 'animals',
@@ -68,6 +73,13 @@ export const animalsTableCfg: TableCfg = {
       titleShort: 'Price',
     },
     stringColumn('backgroundStory', 'Background story', 'Story'),
+    {
+      key: 'traitsRefs',
+      type: 'jsonArray',
+      titleLong: 'Trait references',
+      titleShort: 'Traits',
+      ref: { tableKey: 'traits', type: 'components' },
+    },
   ],
 };
 
