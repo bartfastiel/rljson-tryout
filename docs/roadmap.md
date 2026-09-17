@@ -649,7 +649,7 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       incidentally also rejects an element of the wrong JSON type (a number
       or a boolean can never equal a stored hash), which `dataDoesNotMatchColumnConfig`
       on its own would not catch, since it only checks that the column as a
-      whole is an array. The seed holds nine Duckburg-flavoured traits, not
+      whole is an array. The seed holds eight Duckburg-flavoured traits, not
       a fixed count the roadmap left open, and every animal gets one to four
       of them chosen to fit its existing `backgroundStory`. `GET /api/traits`
       is a new endpoint the roadmap's original section 2.5 table did not

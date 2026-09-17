@@ -87,7 +87,7 @@ test('shows the trait filter with an entry per seeded trait', async ({
   await page.goto('/#/animals');
 
   const chips = traitFilterChips(page);
-  await expect(chips).toHaveCount(10);
+  await expect(chips).toHaveCount(9);
   // Exact match: a loose substring match on "All" also matches trait names
   // that merely contain the letters in sequence, such as "Chronically
   // unlucky".
@@ -145,13 +145,13 @@ test('combining a species and a trait filter narrows further', async ({
 test('a deep link with a species and a trait query restores both selections', async ({
   page,
 }) => {
-  await page.goto('/#/animals?species=duck&trait=escapes-any-enclosure');
+  await page.goto('/#/animals?species=duck&trait=competitive-streak');
 
   await expect(
     speciesFilterChips(page).filter({ hasText: 'Duck' }),
   ).toHaveAttribute('aria-current', 'page');
   await expect(
-    traitFilterChips(page).filter({ hasText: 'Escapes any enclosure' }),
+    traitFilterChips(page).filter({ hasText: 'Has a competitive streak' }),
   ).toHaveAttribute('aria-current', 'page');
   const cards = cardListItems(page);
   await expect(cards).not.toHaveCount(0);

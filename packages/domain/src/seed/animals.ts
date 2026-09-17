@@ -66,11 +66,7 @@ const animalRows: readonly AnimalRow[] = [
     priceCents: 45000,
     backgroundStory:
       "Quackmore Junior was hatched two coops down from Scrooge McDuck's money bin, and the clang of falling dimes was the first sound he ever heard, which the family insists explains his lifelong talent for landing on his feet with a loud metallic thud. He spent his egg money, all four cents of it, on a magnifying glass, convinced that with enough patience he could find one coin Scrooge had personally misplaced and earn a finder's fee. He never found it, but he did find Donald the Third asleep in the money bin's shadow during a game of hide and seek, and the two have been swimming rivals ever since, each insisting he can dive to the bottom of the bin faster than the other, a race neither has ever actually been permitted to attempt. Quackmore now keeps his own savings in a jam jar under a loose floorboard, which he considers a modest but entirely dignified homage.",
-    traitsRefs: traitsRefsFor([
-      'hoards-shiny-objects',
-      'escapes-any-enclosure',
-      'competitive-streak',
-    ]),
+    traitsRefs: traitsRefsFor(['hoards-shiny-objects', 'competitive-streak']),
   },
   {
     id: 'donald-the-third',
@@ -80,11 +76,7 @@ const animalRows: readonly AnimalRow[] = [
     priceCents: 52000,
     backgroundStory:
       "Donald the Third is named, with a perfectly straight face, after a duck none of his breeders can definitively prove is related to the famous sailor-suited Donald Duck of downtown Duckburg, though the resemblance in temper is uncanny. He inherited a single, ancient sailor cap from an aunt who swore it was authentic, and he wears it only on days when he feels lucky, which the shop's staff have learned to read as an early storm warning. His finest hour came during a swimming race against Quackmore Junior through the storm drains behind the money bin, a contest that ended in a tie only because both ducks got equally and thoroughly stuck in the same grate. He is, by his own account, undefeated, and by everyone else's account, still stuck rather often.",
-    traitsRefs: traitsRefsFor([
-      'chronically-unlucky',
-      'escapes-any-enclosure',
-      'competitive-streak',
-    ]),
+    traitsRefs: traitsRefsFor(['chronically-unlucky', 'competitive-streak']),
   },
   {
     id: 'daphne-duck',
@@ -138,10 +130,7 @@ const animalRows: readonly AnimalRow[] = [
     priceCents: 55000,
     backgroundStory:
       "Pepper the Poodle spent her first months on Grandma Duck's farm, where she developed a lifelong conviction that every problem can be solved with a fresh-baked pie and a firm talking-to, an outlook the shop's other animals find either soothing or faintly alarming depending on the day. She insists on grooming herself to competition standard even though no competition has ever actually been announced, and treats every customer visit as an audition for a title only she believes exists. Her closest friend in the shop is Henrietta the Egg Champion, whom she met over a disputed batch of farm-fresh eggs and has considered a kindred spirit ever since, mostly because Henrietta is the only other animal willing to discuss ribbon placements at any length whatsoever.",
-    traitsRefs: traitsRefsFor([
-      'competitive-streak',
-      'surprisingly-well-mannered',
-    ]),
+    traitsRefs: traitsRefsFor(['competitive-streak']),
   },
   {
     id: 'clara-cluck-junior',
@@ -177,14 +166,14 @@ const animalRows: readonly AnimalRow[] = [
 
 /**
  * Ten Duckburg pets every node starts with, each referencing one of the
- * three seeded species by its `_hash` and one to four of the nine seeded
+ * three seeded species by its `_hash` and one to four of the eight seeded
  * traits by their `_hash`es, chosen to be consistent with the animal's own
- * `backgroundStory` (Quackmore Junior's jam-jar savings and storm-drain
- * races give him "hoards shiny objects", "escapes any enclosure" and "has a
- * competitive streak"; Sir Quackington's mentoring, keepsake and vigilance
- * give him all four of "surprisingly well-mannered", "quietly sentimental",
- * "fiercely loyal" and "keen senses"; and so on for the rest). Every
- * animal's `backgroundStory` cross-references at least one Duckburg regular
+ * `backgroundStory` (Quackmore Junior's jam-jar savings and swimming rivalry
+ * give him "hoards shiny objects" and "has a competitive streak"; Sir
+ * Quackington's mentoring, keepsake and vigilance give him all four of
+ * "surprisingly well-mannered", "quietly sentimental", "fiercely loyal" and
+ * "keen senses"; and so on for the rest). Every animal's `backgroundStory`
+ * cross-references at least one Duckburg regular
  * (Scrooge McDuck, Donald Duck, Gyro Gearloose, the Beagle Boys, Magica De
  * Spell or Grandma Duck) and at least one other seeded animal; Sir
  * Quackington's story is the hand-written multi-paragraph outlier of

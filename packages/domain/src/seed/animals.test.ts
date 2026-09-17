@@ -94,13 +94,13 @@ describe('animalsSeed', () => {
 
   it('has stable hashes so every node computes the same row identity', () => {
     expect(animalsSeed.map((row) => [row.id, row._hash])).toStrictEqual([
-      ['quackmore-junior', 'UTRZvMtThFpV0fN0rT3JJg'],
-      ['donald-the-third', 'UasrtSDCUYnmRTIIrLBSAR'],
+      ['quackmore-junior', 'v4Ul9QMcLMs-6qIed0xpKm'],
+      ['donald-the-third', 'QUL1cQ6343lM2_0wJWQ9qs'],
       ['daphne-duck', 'g-TZPnqomCtltXDPlbf1uV'],
       ['sir-quackington', 'UXvLUGWJCFBtgVodNciRCa'],
       ['bowser-the-guard-dog', 'WUeB7ZWkQFN9H-VhRaGwv7'],
       ['nosey-the-bloodhound', 'Zpip4Yi-pKgOOmiwjBP5ph'],
-      ['pepper-the-poodle', 'TsYFL52G5C96XVDIfSBMkS'],
+      ['pepper-the-poodle', 'TpIV70HbGvBGF0VDc4L4Gx'],
       ['clara-cluck-junior', 'IBmVaFO325a3TfQ7YjbNiY'],
       ['gadget-the-inventor', 'bFxMulCfFrybBOsFuimRnk'],
       ['henrietta-the-egg-champion', 'rT48w8at5UbnAQrkH4OoTl'],
@@ -188,7 +188,7 @@ describe('animalsSeed', () => {
     const document = animalsDocument([
       {
         ...rmhsh(firstAnimal),
-        traitsRefs: [firstAnimal.traitsRefs[0], 42],
+        traitsRefs: [firstAnimal.traitsRefs[0], 42, true],
       },
     ]);
 
@@ -199,6 +199,7 @@ describe('animalsSeed', () => {
     expect(errors.base.refsNotFound).toMatchObject({
       missingRefs: [
         { sourceTable: 'animals', targetTable: 'traits', targetItemHash: 42 },
+        { sourceTable: 'animals', targetTable: 'traits', targetItemHash: true },
       ],
     });
   });

@@ -46,7 +46,6 @@ describe('traitsSeed', () => {
       ['hoards-shiny-objects', 'd-VfTlCpCSxZ4Ecmx9Fp9L'],
       ['chronically-unlucky', 'TLDk4RmTPAup6NtZkijMUH'],
       ['inventive', 'bllVCHqDjfaYgPi9Ehhi1E'],
-      ['escapes-any-enclosure', 'NXq3Vx51rv-sqoRBZO7qBL'],
       ['fiercely-loyal', 'hgiz65QVYD0ARvN_gcBdes'],
       ['keen-senses', 'obuVGZnw3UOZpSfXYWAUi2'],
       ['competitive-streak', 'gzP2bVKgk8kJVhUjXRvVgq'],

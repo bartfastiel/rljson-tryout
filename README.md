@@ -70,7 +70,7 @@ pnpm --filter @rljson-tryout/node-service start
 Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
 answers `GET /health` with `{ status, name, version, commit, startedAt }`.
 At start the node seeds its in-memory rljson store with three Duckburg
-species, nine Duckburg-flavoured traits and ten Duckburg animals and serves
+species, eight Duckburg-flavoured traits and ten Duckburg animals and serves
 them as `GET /api/species` (`[{ id, hash, name, latinName, description }]`),
 `GET /api/traits` (`[{ id, hash, name, description }]`), `GET /api/animals`
 (optionally narrowed with `?species=<id>`, `?trait=<id>`, or both, returning

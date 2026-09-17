@@ -48,7 +48,7 @@ describe('GET /api/traits', () => {
     expect(response.json()).toStrictEqual([]);
   });
 
-  it('lists the nine seeded traits in the documented shape', async () => {
+  it('lists the eight seeded traits in the documented shape', async () => {
     await store.seedIfEmpty();
 
     const response = await server.inject({
@@ -59,7 +59,7 @@ describe('GET /api/traits', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toMatch(/^application\/json/);
     const traits = response.json<Record<string, string>[]>();
-    expect(traits).toHaveLength(9);
+    expect(traits).toHaveLength(8);
     for (const entry of traits) {
       expect(Object.keys(entry).sort()).toStrictEqual([
         'description',

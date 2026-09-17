@@ -48,11 +48,11 @@ describe('PetShopStore', () => {
 
     expect(seeded).toStrictEqual({
       speciesSeeded: 3,
-      traitsSeeded: 9,
+      traitsSeeded: 8,
       animalsSeeded: 10,
     });
     expect(await store.listSpecies()).toHaveLength(3);
-    expect(await store.listTraits()).toHaveLength(9);
+    expect(await store.listTraits()).toHaveLength(8);
     expect(await store.listAnimals()).toHaveLength(10);
   });
 
@@ -67,7 +67,7 @@ describe('PetShopStore', () => {
       animalsSeeded: 0,
     });
     expect(await store.listSpecies()).toHaveLength(3);
-    expect(await store.listTraits()).toHaveLength(9);
+    expect(await store.listTraits()).toHaveLength(8);
     expect(await store.listAnimals()).toHaveLength(10);
   });
 
@@ -112,7 +112,7 @@ describe('PetShopStore', () => {
 
       const ids = traits.map((trait) => trait.id);
       expect(ids).toStrictEqual([...ids].sort());
-      expect(ids).toHaveLength(9);
+      expect(ids).toHaveLength(8);
 
       const byId = (id: string) => traits.find((trait) => trait.id === id);
       for (const seedRow of traitsSeed) {

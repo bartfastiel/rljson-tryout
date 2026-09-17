@@ -24,12 +24,6 @@ const traitRows: readonly TraitRow[] = [
       'always works.',
   },
   {
-    id: 'escapes-any-enclosure',
-    name: 'Escapes any enclosure',
-    description:
-      'No pen, fence or storm drain grate has ever proven entirely secure.',
-  },
-  {
     id: 'fiercely-loyal',
     name: 'Fiercely loyal',
     description:
@@ -64,7 +58,7 @@ const traitRows: readonly TraitRow[] = [
 ];
 
 /**
- * The nine Duckburg-flavoured traits every node starts with. The rows are
+ * The eight Duckburg-flavoured traits every node starts with. The rows are
  * hashed here so that every node computes the same `_hash` for the same
  * content, matching the pattern of `speciesSeed`.
  */
