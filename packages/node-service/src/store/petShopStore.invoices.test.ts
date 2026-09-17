@@ -1,11 +1,4 @@
-import {
-  BaseValidator,
-  Route,
-  Validate,
-  type InsertHistoryRow,
-  type Rljson,
-  type TableCfg,
-} from '@rljson/rljson';
+import { Route, type InsertHistoryRow, type Rljson } from '@rljson/rljson';
 import {
   animalsSeed,
   customersSeed,
@@ -18,6 +11,10 @@ import {
 } from '@rljson-tryout/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  validatableDocument,
+  validationErrors,
+} from '../testing/storeDocument.ts';
 import {
   storageKinds,
   testStore,
@@ -63,50 +60,6 @@ const personNameOf = (customerId: string): string => {
   const person = personsSeed.find((row) => row._hash === customer?.personRef);
   expect(person).toBeDefined();
   return person!.name;
-};
-
-/**
- * The store's whole content as a document the rljson `BaseValidator`
- * accepts as input. The InsertHistory tables stay in the document (a
- * change set's items point into them), but their table configurations are
- * left out: `createInsertHistoryTableCfg` produces configurations rljson's
- * own validator rejects (`tableCfgHasRootHeadSharedError`, and a
- * `<table>Ref` column pointing at a `<table>MultiEdits` table that does
- * not exist), which would stop the validator before it reaches the
- * reference and buffet checks this test is after
- * (`docs/findings/change-sets.md`).
- */
-const validatableDocument = (dump: Rljson): Rljson => {
-  const isInsertHistory = (key: string) => key.endsWith('InsertHistory');
-  const document: Rljson = {};
-  for (const [key, table] of Object.entries(dump)) {
-    if (key === '_hash') {
-      continue;
-    }
-    if (key === 'tableCfgs') {
-      const configurations = table._data as TableCfg[];
-      document.tableCfgs = hashed({
-        _type: 'tableCfgs',
-        _data: configurations.filter(
-          (configuration) => !isInsertHistory(configuration.key),
-        ),
-      });
-    } else if (isInsertHistory(key)) {
-      document[key] = hashed({
-        _type: 'insertHistory',
-        _data: table._data as InsertHistoryRow<string>[],
-      });
-    } else {
-      document[key] = table;
-    }
-  }
-  return document;
-};
-
-const validationErrors = async (document: Rljson) => {
-  const validate = new Validate();
-  validate.addValidator(new BaseValidator());
-  return validate.run(document);
 };
 
 const dataDirectories = useTemporaryDataDirectories();

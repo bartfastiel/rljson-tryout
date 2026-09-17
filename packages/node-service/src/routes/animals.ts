@@ -3,9 +3,11 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import {
   AnimalValidationError,
+  defaultPageRequest,
   type AnimalDetail,
+  type AnimalPage,
   type AnimalVersion,
-  type AnimalWithSpecies,
+  type PageRequest,
   type PetShopStore,
 } from '../store/petShopStore.ts';
 
@@ -13,7 +15,17 @@ type AnimalsQuery = {
   species?: string;
   breeder?: string;
   trait?: string;
+  q?: string;
+  limit?: string;
+  offset?: string;
 };
+
+/**
+ * The most rows one page of `GET /api/animals` may hold (roadmap section
+ * 2.5); a larger `limit` is refused rather than clamped, so a client never
+ * gets fewer rows than it believes it asked for.
+ */
+export const maximumPageLimit = 200;
 
 type AnimalParams = {
   id: string;
@@ -37,6 +49,60 @@ const notFound = (reply: FastifyReply, message: string): ErrorBody => {
   reply.code(404);
   return { statusCode: 404, error: 'Not Found', message };
 };
+
+/**
+ * Thrown while reading the page of a list query when `limit` or `offset`
+ * is not a whole number in its range; the route answers `400` with the
+ * message.
+ */
+class PageQueryError extends Error {}
+
+const readWholeNumber = (
+  name: string,
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number => {
+  if (value === undefined) {
+    return fallback;
+  }
+  const number = Number(value);
+  if (
+    value.trim() === '' ||
+    !Number.isInteger(number) ||
+    number < minimum ||
+    number > maximum
+  ) {
+    throw new PageQueryError(
+      `${name} must be a whole number from ${minimum} to ${maximum}, got "${value}".`,
+    );
+  }
+  return number;
+};
+
+/**
+ * The page a list query asks for: `limit` from 1 to `maximumPageLimit`,
+ * default 50, and `offset` from 0, default 0. Query values arrive as
+ * strings and are read here rather than through a schema, because the
+ * server's validator runs without type coercion (`server.ts`).
+ */
+const readPageRequest = (query: AnimalsQuery): PageRequest => ({
+  limit: readWholeNumber(
+    'limit',
+    query.limit,
+    defaultPageRequest.limit,
+    1,
+    maximumPageLimit,
+  ),
+  offset: readWholeNumber(
+    'offset',
+    query.offset,
+    defaultPageRequest.offset,
+    0,
+    Number.MAX_SAFE_INTEGER,
+  ),
+});
 
 /**
  * The JSON schema Fastify checks `PUT /api/animals/:id` bodies against
@@ -66,10 +132,14 @@ const updateAnimalBodySchema = {
 
 /**
  * Registers the animal endpoints of roadmap section 2.5: `GET /api/animals`,
- * the list of current animal versions with their species and breeder joined
- * (`hash` is the row's `_hash`, the identity of this exact version),
- * optionally narrowed with `?species=<id>`, `?breeder=<id>`, `?trait=<id>`
- * or any combination; `GET /api/animals/:id`, the current version of one
+ * one page of the current animal versions with their species and breeder
+ * joined (`hash` is the row's `_hash`, the identity of this exact version)
+ * as `{ items, total, limit, offset }`, optionally narrowed with
+ * `?species=<id>`, `?breeder=<id>`, `?trait=<id>`, `?q=<text>` (a
+ * case-insensitive substring of the name or the species name) or any
+ * combination, and sliced with `?limit=<1..200>` (default 50) and
+ * `?offset=<n>` (default 0), a value outside those ranges answering `400`;
+ * `GET /api/animals/:id`, the current version of one
  * animal with its species and breeder joined, its traits resolved and its
  * full `backgroundStory`, or with `?version=<hash>` that exact version of
  * the animal; `GET /api/animals/:id/history`, every version of the animal
@@ -89,12 +159,32 @@ export const registerAnimalsRoutes = (
 ): void => {
   server.get<{ Querystring: AnimalsQuery }>(
     '/api/animals',
-    async (request): Promise<AnimalWithSpecies[]> =>
-      store.listAnimals({
-        speciesId: request.query.species,
-        breederId: request.query.breeder,
-        traitId: request.query.trait,
-      }),
+    async (request, reply): Promise<AnimalPage | ErrorBody> => {
+      let page: PageRequest;
+      try {
+        page = readPageRequest(request.query);
+      } catch (error) {
+        if (error instanceof PageQueryError) {
+          reply.code(400);
+          return {
+            statusCode: 400,
+            error: 'Bad Request',
+            message: error.message,
+          };
+        }
+        throw error;
+      }
+
+      return store.listAnimals(
+        {
+          speciesId: request.query.species,
+          breederId: request.query.breeder,
+          traitId: request.query.trait,
+          query: request.query.q,
+        },
+        page,
+      );
+    },
   );
 
   server.get<{ Params: AnimalParams; Querystring: AnimalDetailQuery }>(

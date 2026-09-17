@@ -1,10 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import {
+  addAnimalToInvoice,
   boundingBoxOf,
   cardListItems,
   expectNoHorizontalScroll,
   mainNavigation,
+  pickerList,
+  pickerRows,
+  searchPicker,
 } from './support.ts';
 
 const seededInvoiceNumbers = [
@@ -40,7 +44,7 @@ test('lists the seeded invoices newest first with customer, date, status badge a
   const cards = cardListItems(page);
   await expect(cards.first()).toBeVisible();
   const numbers = await cards.locator('.invoice-number').allInnerTexts();
-  expect(numbers.slice(-6)).toStrictEqual(seededInvoiceNumbers);
+  expect(numbers).toEqual(expect.arrayContaining(seededInvoiceNumbers));
   expect([...numbers].sort().reverse()).toStrictEqual(numbers);
 
   const cancelled = cards.filter({ hasText: '2026-0004' });
@@ -126,11 +130,8 @@ test('issues an invoice through the form and finds it in the list with its items
     label: 'Scrooge McDuck (C-0001)',
   });
 
-  await page.getByLabel('Search animals').fill('donald');
-  const pickerRows = page
-    .getByRole('list', { name: 'Animals to add' })
-    .getByRole('listitem');
-  await expect(pickerRows).toHaveCount(1);
+  await searchPicker(page, 'donald');
+  await expect(pickerRows(page)).toHaveCount(1);
   await page.getByRole('button', { name: 'Add Donald the Third' }).click();
 
   const lines = page
@@ -139,8 +140,13 @@ test('issues an invoice through the form and finds it in the list with its items
   await expect(lines).toHaveCount(1);
   await expect(lines.first().locator('.stepper-value')).toHaveText('1');
 
-  await page.getByLabel('Search animals').fill('chicken');
-  await expect(pickerRows).toHaveCount(3);
+  await searchPicker(page, 'chicken');
+  await expect(
+    pickerRows(page).filter({ hasText: 'Henrietta the Egg Champion' }),
+  ).toHaveCount(1);
+  for (const row of await pickerRows(page).all()) {
+    await expect(row.locator('.animal-picker-meta')).toContainText('Chicken');
+  }
   await page
     .getByRole('button', { name: 'Add Henrietta the Egg Champion' })
     .click();
@@ -191,7 +197,7 @@ test('removes a line when its quantity is stepped below one', async ({
   page,
 }) => {
   await page.goto('/#/invoices/new');
-  await page.getByRole('button', { name: 'Add Daphne Duck' }).click();
+  await addAnimalToInvoice(page, 'Daphne Duck');
   const lines = page
     .getByRole('list', { name: 'Invoice items' })
     .getByRole('listitem');
@@ -202,9 +208,9 @@ test('removes a line when its quantity is stepped below one', async ({
     .click();
 
   await expect(lines).toHaveCount(0);
-  await expect(page.getByRole('status')).toHaveText(
-    'No items yet. Add an animal from the list above.',
-  );
+  await expect(
+    page.getByRole('region', { name: 'Items' }).getByRole('status'),
+  ).toHaveText('No items yet. Add an animal from the list above.');
   await expect(page.locator('.invoice-total-amount')).toContainText(/0/);
 });
 
@@ -225,14 +231,14 @@ test("shows the node's message inline when the invoice is refused", async ({
     page.getByRole('button', { name: 'Issue invoice' }),
   ).toBeEnabled();
 
-  await page.getByRole('button', { name: 'Add Daphne Duck' }).click();
+  await addAnimalToInvoice(page, 'Daphne Duck');
 
   await expect(alert).toHaveCount(0);
 });
 
 test('refuses to submit before a customer is chosen', async ({ page }) => {
   await page.goto('/#/invoices/new');
-  await page.getByRole('button', { name: 'Add Daphne Duck' }).click();
+  await addAnimalToInvoice(page, 'Daphne Duck');
 
   await page.getByRole('button', { name: 'Issue invoice' }).click();
 
@@ -253,6 +259,8 @@ test('can be filled in and submitted with the keyboard alone', async ({
 
   await page.getByLabel('Search animals').focus();
   await page.keyboard.type('Quackmore');
+  await expect(pickerList(page)).toHaveAttribute('data-search', 'Quackmore');
+  await expect(pickerRows(page)).toHaveCount(1);
   await page.keyboard.press('Tab');
   const addQuackmore = page.getByRole('button', {
     name: 'Add Quackmore Junior',
@@ -297,7 +305,7 @@ test('gives every control of the form a target of at least 44 pixels', async ({
   page,
 }) => {
   await page.goto('/#/invoices/new');
-  await page.getByRole('button', { name: 'Add Daphne Duck' }).click();
+  await addAnimalToInvoice(page, 'Daphne Duck');
 
   const customerBox = await boundingBoxOf(page.getByLabel('Customer'));
   expect(customerBox.height).toBeGreaterThanOrEqual(44);

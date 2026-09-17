@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
 
-import { cardListItems } from './support.ts';
+import { cardListItems, listedCount } from './support.ts';
 
-test('lists the three species of the node as cards', async ({ page }) => {
+test('lists every species of the node as a card', async ({ page }) => {
   await page.goto('/#/species');
 
   const cards = cardListItems(page);
-  await expect(cards).toHaveCount(3);
+  await expect(cards).toHaveCount(await listedCount(page, '/api/species'));
   for (const name of ['Chicken', 'Dog', 'Duck']) {
     await expect(page.getByRole('heading', { level: 2, name })).toBeVisible();
   }
@@ -56,7 +56,9 @@ test('shows an error with a retry button when the node answers 500', async ({
   nodeIsBroken = false;
   await alert.getByRole('button', { name: 'Retry' }).click();
 
-  await expect(cardListItems(page)).toHaveCount(3);
+  await expect(cardListItems(page)).toHaveCount(
+    await listedCount(page, '/api/species'),
+  );
   await expect(alert).toHaveCount(0);
 });
 

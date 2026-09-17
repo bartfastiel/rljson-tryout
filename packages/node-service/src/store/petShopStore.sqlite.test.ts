@@ -168,6 +168,7 @@ describe('PetShopStore over the sqlite store', () => {
     const secondSeeded = await second.seedIfEmpty();
 
     expect(secondSeeded).toStrictEqual({
+      seedSize: 'small',
       speciesSeeded: 0,
       traitsSeeded: 0,
       personsSeeded: 0,
@@ -176,6 +177,7 @@ describe('PetShopStore over the sqlite store', () => {
       animalsSeeded: 0,
       animalTraitsSeeded: 0,
       invoicesSeeded: 0,
+      changeSetsSeeded: 0,
     });
     expect(await second.tableRowCounts()).toStrictEqual(countsBefore);
     expect(await second.getInvoice(issued.id)).toStrictEqual(issued);

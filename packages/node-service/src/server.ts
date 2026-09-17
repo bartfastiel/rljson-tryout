@@ -13,6 +13,7 @@ import { registerBreedersRoutes } from './routes/breeders.ts';
 import { registerCustomersRoutes } from './routes/customers.ts';
 import { registerInvoicesRoutes } from './routes/invoices.ts';
 import { registerSpeciesRoutes } from './routes/species.ts';
+import { registerStatsRoute } from './routes/stats.ts';
 import { registerStatusRoute } from './routes/status.ts';
 import { registerTraitsRoutes } from './routes/traits.ts';
 import type { PetShopStore } from './store/petShopStore.ts';
@@ -64,7 +65,7 @@ export const buildServer = ({
     ajv: { customOptions: { coerceTypes: false } },
   });
   const version = readPackageVersion();
-  const startedAt = new Date().toISOString();
+  const startedAt = new Date();
 
   // Browsers on other nodes probe this route, so it allows cross-origin
   // reads, like `/status` does.
@@ -75,7 +76,7 @@ export const buildServer = ({
       name: configuration.nodeName,
       version,
       commit: configuration.gitCommit,
-      startedAt,
+      startedAt: startedAt.toISOString(),
     };
   });
 
@@ -85,6 +86,7 @@ export const buildServer = ({
     orchestrator,
     directory,
   });
+  registerStatsRoute(server, { configuration, store, startedAt });
   registerSpeciesRoutes(server, store);
   registerTraitsRoutes(server, store);
   registerBreedersRoutes(server, store);

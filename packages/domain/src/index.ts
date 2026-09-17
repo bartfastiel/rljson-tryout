@@ -15,6 +15,20 @@ export {
   type EntityVersion,
   type VersionHistoryRow,
 } from './entityVersions.ts';
+export {
+  generatedSeedFor,
+  seedChangeSetId,
+  type GeneratedSeed,
+} from './generator/generateSeed.ts';
+export {
+  isSeedSize,
+  seedPlans,
+  seedSizes,
+  type GeneratedCounts,
+  type SeedPlan,
+  type SeedSize,
+} from './generator/seedSizes.ts';
+export { storyLength } from './generator/stories.ts';
 export { hashed } from './hashing.ts';
 export {
   invoiceId,

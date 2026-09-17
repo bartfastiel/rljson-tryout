@@ -156,6 +156,7 @@ describe('GET /status', () => {
         },
       ],
       storage: 'memory',
+      seedSize: 'small',
       tables: expect.objectContaining({
         species: 3,
         speciesInsertHistory: 3,

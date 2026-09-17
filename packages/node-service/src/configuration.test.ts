@@ -51,7 +51,7 @@ describe('readConfiguration', () => {
       GIT_COMMIT: 'abc1234',
       WEB_APP_DIRECTORY: temporaryDirectory,
       STORAGE: 'sqlite',
-      SEED_SIZE: 'none',
+      SEED_SIZE: 'large',
       TRAIT_RELATION: 'junction',
       RLJSON_DOMAIN: 'petshop-compose',
       HUB_PORT: '3100',
@@ -71,7 +71,7 @@ describe('readConfiguration', () => {
       gitCommit: 'abc1234',
       webAppDirectory: temporaryDirectory,
       storage: 'sqlite',
-      seedSize: 'none',
+      seedSize: 'large',
       traitRelationMode: 'junction',
       rljsonDomain: 'petshop-compose',
       hubPort: 3100,
@@ -152,17 +152,6 @@ describe('readConfiguration', () => {
 
   it('defaults the seed size to small', () => {
     expect(readConfiguration({}).seedSize).toBe('small');
-  });
-
-  it('accepts both seed sizes that exist so far', () => {
-    expect(readConfiguration({ SEED_SIZE: 'none' }).seedSize).toBe('none');
-    expect(readConfiguration({ SEED_SIZE: 'small' }).seedSize).toBe('small');
-  });
-
-  it('throws a clear error for a seed size that does not exist yet', () => {
-    expect(() => readConfiguration({ SEED_SIZE: 'large' })).toThrow(
-      'SEED_SIZE must be one of none, small, got "large"',
-    );
   });
 
   it('defaults the trait relation mode to multi-reference', () => {
@@ -327,6 +316,15 @@ describe('readConfiguration', () => {
     );
     expect(() => readConfiguration({ DISCOVERY: 'off' })).toThrow(
       /DISCOVERY must be one of enabled, disabled/,
+    );
+  });
+
+  it('accepts every seed size and rejects anything else', () => {
+    for (const size of ['none', 'small', 'medium', 'large'] as const) {
+      expect(readConfiguration({ SEED_SIZE: size }).seedSize).toBe(size);
+    }
+    expect(() => readConfiguration({ SEED_SIZE: 'huge' })).toThrow(
+      /SEED_SIZE must be one of none, small, medium, large/,
     );
   });
 });

@@ -1,7 +1,7 @@
 // @ts-check
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
-import { hashQuery } from '../hash-route.js';
+import { hashQuery, hrefWithParams } from '../hash-route.js';
 import {
   dateFormat,
   errorState,
@@ -29,6 +29,17 @@ import {
  */
 
 /**
+ * One page of animals as `GET /api/animals` returns it: the rows of the
+ * requested slice and how many rows the filter matches in total.
+ *
+ * @typedef {object} AnimalPage
+ * @property {Animal[]} items
+ * @property {number} total
+ * @property {number} limit
+ * @property {number} offset
+ */
+
+/**
  * The subset of `GET /api/species` the filter chips need.
  *
  * @typedef {object} FilterSpecies
@@ -52,46 +63,56 @@ import {
  * @property {string} farmName
  */
 
+/**
+ * The species, breeder, trait and search text the hash query selects,
+ * `null` for a parameter that is absent. The hash is the single source of
+ * truth for every one of them, which is what makes
+ * `#/animals?species=duck&breeder=<id>&trait=<id>&q=quack` shareable,
+ * restorable and what "back" from a detail returns to.
+ *
+ * @typedef {object} Selection
+ * @property {string | null} speciesId
+ * @property {string | null} breederId
+ * @property {string | null} traitId
+ * @property {string | null} query
+ */
+
+/**
+ * How many animals one page holds, the node's default page size, and how
+ * long the search field waits after the last keystroke before it asks the
+ * node, long enough to skip the intermediate letters of a word typed at a
+ * normal pace and short enough not to feel like a delay.
+ */
+const pageSize = 50;
+const searchDebounceMilliseconds = 300;
+
+const countFormat = new Intl.NumberFormat(undefined);
+
 const viewTitle = () => element('h1', 'view-title', 'Animals');
 
 /**
- * The species id the `species` hash query parameter selects, or `null` when
- * the species filter shows every animal. The hash is the single source of
- * truth for every filter, which is what makes
- * `#/animals?species=duck&breeder=<id>&trait=<id>` shareable and
- * restorable.
- *
- * @returns {string | null}
+ * @returns {Selection}
  */
-const selectedSpeciesId = () => hashQuery(location.hash).get('species');
+const selectionFromHash = () => {
+  const query = hashQuery(location.hash);
+  const search = query.get('q');
+  return {
+    speciesId: query.get('species'),
+    breederId: query.get('breeder'),
+    traitId: query.get('trait'),
+    query: search === null || search.trim() === '' ? null : search,
+  };
+};
 
 /**
- * The breeder id the `breeder` hash query parameter selects, or `null` when
- * the breeder filter shows every animal.
+ * The hash query parameters of a selection, omitting what is `null`, so
+ * the fully unfiltered selection produces the bare `#/animals` hash. Shared
+ * by every href this view builds and by the search field, so the four
+ * parameters always combine the same way.
  *
- * @returns {string | null}
+ * @param {Selection} selection
  */
-const selectedBreederId = () => hashQuery(location.hash).get('breeder');
-
-/**
- * The trait id the `trait` hash query parameter selects, or `null` when the
- * trait filter shows every animal.
- *
- * @returns {string | null}
- */
-const selectedTraitId = () => hashQuery(location.hash).get('trait');
-
-/**
- * The `species`, `breeder` and `trait` query string for the given
- * selection, without a leading `?`, omitting a parameter that is `null`.
- * Shared by every href this view builds, so the three filters always
- * combine the same way.
- *
- * @param {string | null} speciesId
- * @param {string | null} breederId
- * @param {string | null} traitId
- */
-const filterQueryParams = (speciesId, breederId, traitId) => {
+const selectionParams = ({ speciesId, breederId, traitId, query }) => {
   const params = new URLSearchParams();
   if (speciesId !== null) {
     params.set('species', speciesId);
@@ -102,28 +123,38 @@ const filterQueryParams = (speciesId, breederId, traitId) => {
   if (traitId !== null) {
     params.set('trait', traitId);
   }
-  return params.toString();
+  if (query !== null) {
+    params.set('q', query);
+  }
+  return params;
 };
 
 /**
- * The `#/animals` or `#/animals/<id>` href for the given species, breeder
- * and trait selection. `null` omits that parameter, so the fully unfiltered
- * selection produces the bare `#/animals` hash.
+ * The `#/animals` or `#/animals/<id>` href for a selection.
  *
- * @param {{
- *   speciesId: string | null,
- *   breederId: string | null,
- *   traitId: string | null,
- *   animalId?: string,
- * }} selection
+ * @param {Selection} selection
+ * @param {string} [animalId]
  */
-const animalsHref = ({ speciesId, breederId, traitId, animalId }) => {
-  const query = filterQueryParams(speciesId, breederId, traitId);
-  const path =
+const animalsHref = (selection, animalId) =>
+  hrefWithParams(
     animalId === undefined
       ? '#/animals'
-      : `#/animals/${encodeURIComponent(animalId)}`;
-  return query === '' ? path : `${path}?${query}`;
+      : `#/animals/${encodeURIComponent(animalId)}`,
+    selectionParams(selection),
+  );
+
+/**
+ * The `/api/animals` path for a selection and a page: the same parameter
+ * names the hash uses, plus `limit` and `offset`.
+ *
+ * @param {Selection} selection
+ * @param {number} offset
+ */
+const animalsApiPath = (selection, offset) => {
+  const params = selectionParams(selection);
+  params.set('limit', String(pageSize));
+  params.set('offset', String(offset));
+  return `/api/animals?${params.toString()}`;
 };
 
 /**
@@ -131,10 +162,10 @@ const animalsHref = ({ speciesId, breederId, traitId, animalId }) => {
  * "All" chip and one chip per option, each a link into the hash query so
  * the selection is a normal navigation and stays shareable. The species and
  * trait rows share this builder; each passes its own hrefs so that
- * selecting a chip in one row keeps the other rows' selection, per the
- * "All resets each group" rule. The compact breeder summary
- * (`breederSummary`) reuses the same builder with exactly two chips instead
- * of one per breeder.
+ * selecting a chip in one row keeps the other rows' selection and the
+ * search text, per the "All resets each group" rule. The compact breeder
+ * summary (`breederSummary`) reuses the same builder with exactly two chips
+ * instead of one per breeder.
  *
  * @param {{
  *   groupLabel: string,
@@ -163,55 +194,47 @@ const chipFilterRow = ({ groupLabel, ariaLabel, chips }) => {
 
 /**
  * @param {FilterSpecies[]} species
+ * @param {Selection} selection
  */
-const speciesFilter = (species) => {
-  const selectedSpecies = selectedSpeciesId();
-  const breederId = selectedBreederId();
-  const traitId = selectedTraitId();
-
-  return chipFilterRow({
+const speciesFilter = (species, selection) =>
+  chipFilterRow({
     groupLabel: 'Species',
     ariaLabel: 'Filter by species',
     chips: [
       {
         name: 'All',
-        selected: selectedSpecies === null,
-        href: animalsHref({ speciesId: null, breederId, traitId }),
+        selected: selection.speciesId === null,
+        href: animalsHref({ ...selection, speciesId: null }),
       },
       ...species.map((entry) => ({
         name: entry.name,
-        selected: selectedSpecies === entry.id,
-        href: animalsHref({ speciesId: entry.id, breederId, traitId }),
+        selected: selection.speciesId === entry.id,
+        href: animalsHref({ ...selection, speciesId: entry.id }),
       })),
     ],
   });
-};
 
 /**
  * @param {FilterTrait[]} traits
+ * @param {Selection} selection
  */
-const traitFilter = (traits) => {
-  const speciesId = selectedSpeciesId();
-  const breederId = selectedBreederId();
-  const selectedTrait = selectedTraitId();
-
-  return chipFilterRow({
+const traitFilter = (traits, selection) =>
+  chipFilterRow({
     groupLabel: 'Traits',
     ariaLabel: 'Filter by traits',
     chips: [
       {
         name: 'All',
-        selected: selectedTrait === null,
-        href: animalsHref({ speciesId, breederId, traitId: null }),
+        selected: selection.traitId === null,
+        href: animalsHref({ ...selection, traitId: null }),
       },
       ...traits.map((entry) => ({
         name: entry.name,
-        selected: selectedTrait === entry.id,
-        href: animalsHref({ speciesId, breederId, traitId: entry.id }),
+        selected: selection.traitId === entry.id,
+        href: animalsHref({ ...selection, traitId: entry.id }),
       })),
     ],
   });
-};
 
 /**
  * The compact breeder filter summary: a single line with the active
@@ -226,29 +249,27 @@ const traitFilter = (traits) => {
  * out entirely.
  *
  * @param {FilterBreeder[]} breeders
+ * @param {Selection} selection
  */
-const breederSummary = (breeders) => {
-  const breederId = selectedBreederId();
-  if (breederId === null) {
+const breederSummary = (breeders, selection) => {
+  if (selection.breederId === null) {
     return null;
   }
-  const speciesId = selectedSpeciesId();
-  const traitId = selectedTraitId();
-  const breeder = breeders.find((entry) => entry.id === breederId);
+  const breeder = breeders.find((entry) => entry.id === selection.breederId);
 
   return chipFilterRow({
     groupLabel: 'Breeder',
     ariaLabel: 'Filter by breeder',
     chips: [
       {
-        name: breeder?.farmName ?? breederId,
+        name: breeder?.farmName ?? selection.breederId,
         selected: true,
-        href: animalsHref({ speciesId, breederId, traitId }),
+        href: animalsHref(selection),
       },
       {
         name: 'All',
         selected: false,
-        href: animalsHref({ speciesId, breederId: null, traitId }),
+        href: animalsHref({ ...selection, breederId: null }),
       },
     ],
   });
@@ -258,38 +279,24 @@ const breederSummary = (breeders) => {
  * @param {FilterSpecies[]} species
  * @param {FilterTrait[]} traits
  * @param {FilterBreeder[]} breeders
+ * @param {Selection} selection
  */
-const animalFilters = (species, traits, breeders) => {
+const animalFilters = (species, traits, breeders, selection) => {
   const container = element('div', 'animal-filters');
-  const breederFilterSummary = breederSummary(breeders);
+  const breederFilterSummary = breederSummary(breeders, selection);
   container.append(
-    speciesFilter(species),
-    traitFilter(traits),
+    speciesFilter(species, selection),
+    traitFilter(traits, selection),
     ...(breederFilterSummary === null ? [] : [breederFilterSummary]),
   );
   return container;
 };
 
 /**
- * The href of an animal's detail page, carrying the currently selected
- * species, breeder and trait filters along so that `animal-detail.js` can
- * send a "back" link to the filtered list the card was clicked from, not
- * the full list.
- *
- * @param {string} animalId
- */
-const animalDetailHref = (animalId) =>
-  animalsHref({
-    speciesId: selectedSpeciesId(),
-    breederId: selectedBreederId(),
-    traitId: selectedTraitId(),
-    animalId,
-  });
-
-/**
  * @param {Animal} animal
+ * @param {Selection} selection
  */
-const animalCard = (animal) => {
+const animalCard = (animal, selection) => {
   const meta = element('p', 'animal-meta');
   meta.append(
     element('span', 'animal-species', animal.speciesName ?? 'Unknown species'),
@@ -300,10 +307,11 @@ const animalCard = (animal) => {
     ),
   );
 
-  // The whole card is one link to the animal's detail page, so a tap
-  // anywhere on it reaches the detail view with a single, large target.
+  // The whole card is one link to the animal's detail page, carrying the
+  // selection along so that the detail can link back to this very list;
+  // a tap anywhere on it reaches the detail view with a single target.
   const card = element('a', 'card animal-card');
-  card.href = animalDetailHref(animal.id);
+  card.href = animalsHref(selection, animal.id);
   card.append(
     element('h2', 'animal-name', animal.name),
     meta,
@@ -316,57 +324,137 @@ const animalCard = (animal) => {
 };
 
 /**
- * @param {Animal[]} animals
+ * The search field at the top of the list, 44 pixels tall like every other
+ * control, with a visually hidden label for screen readers and the
+ * placeholder as the visible hint. `onSearch` runs with the trimmed text
+ * once typing pauses for `searchDebounceMilliseconds`, and immediately
+ * when the field is cleared or submitted with Enter.
+ *
+ * @param {string} initialValue
+ * @param {(text: string) => void} onSearch
  */
-const animalCards = (animals) => {
-  if (animals.length === 0) {
-    return statusMessage('No animals match this filter.');
-  }
-  const list = element('ul', 'card-list');
-  list.setAttribute('role', 'list');
-  list.append(...animals.map(animalCard));
-  return list;
+const searchField = (initialValue, onSearch) => {
+  const label = element('label', 'visually-hidden', 'Search animals');
+  label.htmlFor = 'animal-search';
+
+  const input = element('input', 'text-input search-input');
+  input.type = 'search';
+  input.id = 'animal-search';
+  input.autocomplete = 'off';
+  input.placeholder = 'Search by name or species';
+  input.value = initialValue;
+
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let pending;
+  let lastSearched = initialValue.trim();
+  const search = () => {
+    clearTimeout(pending);
+    pending = undefined;
+    const text = input.value.trim();
+    if (text !== lastSearched) {
+      lastSearched = text;
+      onSearch(text);
+    }
+  };
+  input.addEventListener('input', () => {
+    clearTimeout(pending);
+    if (input.value.trim() === '') {
+      search();
+    } else {
+      pending = setTimeout(search, searchDebounceMilliseconds);
+    }
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      search();
+    }
+  });
+
+  const field = element('div', 'search-field');
+  field.setAttribute('role', 'search');
+  field.append(label, input);
+  return field;
 };
 
 /**
- * Lists the animals of this node as cards, with a species filter, a trait
- * filter and, while a breeder is selected, a compact breeder filter summary
- * above them, all reading from and writing to the hash query so they
- * combine and stay shareable
- * (`#/animals?species=duck&breeder=<id>&trait=<id>`). Fetches
+ * The line above the cards that says how many of the matching animals are
+ * on the page: "50 of 2,000 animals" (in the viewer's number format),
+ * updated as pages are loaded.
+ *
+ * @param {number} shown
+ * @param {number} total
+ */
+const countLine = (shown, total) => {
+  const line = element(
+    'p',
+    'animal-count',
+    `${countFormat.format(shown)} of ${countFormat.format(total)} animals`,
+  );
+  line.setAttribute('role', 'status');
+  return line;
+};
+
+/**
+ * Lists the animals of this node as cards, with a search field, a species
+ * filter, a trait filter and, while a breeder is selected, a compact
+ * breeder filter summary above them, all reading from and writing to the
+ * hash query so they combine and stay shareable
+ * (`#/animals?species=duck&breeder=<id>&trait=<id>&q=quack`). Fetches
  * `/api/species`, `/api/traits` and `/api/breeders` for the filters and
- * `/api/animals`, narrowed to whatever the hash query selects, when it
- * enters the document; a hash change replaces this element with a fresh
- * instance (see `app.js`), which re-reads the query and refetches. Shows a
- * loading, an empty or an error state with a retry button until every list
- * is there.
+ * the first page of `/api/animals`, narrowed to whatever the hash query
+ * selects, when it enters the document; a "Load more" button appends the
+ * next page while the node holds more matching animals than are shown.
+ * Typing into the search field rewrites the hash's `q` without a
+ * navigation (`history.replaceState`), so the field keeps its focus, and
+ * reloads only the cards; a filter chip is a navigation that replaces
+ * this element with a fresh instance (see `app.js`), which re-reads the
+ * whole query, search text included. Shows a loading, an empty or an
+ * error state with a retry button until the lists are there.
  */
 class AnimalsList extends HTMLElement {
+  /** @type {Selection} */
+  selection = selectionFromHash();
+
+  /** @type {{ species: FilterSpecies[], traits: FilterTrait[], breeders: FilterBreeder[] }} */
+  filterOptions = { species: [], traits: [], breeders: [] };
+
+  /** @type {HTMLElement} */
+  filters = element('div', 'animal-filters');
+
+  /** @type {Animal[]} */
+  loaded = [];
+
+  total = 0;
+
+  results = element('div', 'animal-results');
+
   connectedCallback() {
     void this.load();
   }
 
   async load() {
     this.setAttribute('aria-busy', 'true');
+    this.selection = selectionFromHash();
     this.replaceChildren(viewTitle(), statusMessage('Loading animals…'));
     try {
-      const speciesId = selectedSpeciesId();
-      const breederId = selectedBreederId();
-      const traitId = selectedTraitId();
-      const query = filterQueryParams(speciesId, breederId, traitId);
-      const animalsPath =
-        query === '' ? '/api/animals' : `/api/animals?${query}`;
-      const [species, traits, breeders, animals] = await Promise.all([
+      const [species, traits, breeders, page] = await Promise.all([
         /** @type {Promise<FilterSpecies[]>} */ (fetchJson('/api/species')),
         /** @type {Promise<FilterTrait[]>} */ (fetchJson('/api/traits')),
         /** @type {Promise<FilterBreeder[]>} */ (fetchJson('/api/breeders')),
-        /** @type {Promise<Animal[]>} */ (fetchJson(animalsPath)),
+        /** @type {Promise<AnimalPage>} */ (
+          fetchJson(animalsApiPath(this.selection, 0))
+        ),
       ]);
+      this.filterOptions = { species, traits, breeders };
+      this.filters = this.buildFilters();
       this.replaceChildren(
         viewTitle(),
-        animalFilters(species, traits, breeders),
-        animalCards(animals),
+        searchField(this.selection.query ?? '', (text) => this.search(text)),
+        this.filters,
+        this.results,
       );
+      this.showPage(page, []);
     } catch (error) {
       this.replaceChildren(
         viewTitle(),
@@ -379,6 +467,99 @@ class AnimalsList extends HTMLElement {
     } finally {
       this.removeAttribute('aria-busy');
     }
+  }
+
+  buildFilters() {
+    const { species, traits, breeders } = this.filterOptions;
+    return animalFilters(species, traits, breeders, this.selection);
+  }
+
+  /**
+   * Applies a new search text: writes it into the hash without a
+   * navigation, rebuilds the filter chips so their hrefs carry the text,
+   * and reloads the cards from the first page.
+   *
+   * @param {string} text
+   */
+  search(text) {
+    this.selection = { ...this.selection, query: text === '' ? null : text };
+    history.replaceState(null, '', animalsHref(this.selection));
+    const filters = this.buildFilters();
+    this.filters.replaceWith(filters);
+    this.filters = filters;
+    void this.loadPage(0);
+  }
+
+  /**
+   * Fetches one page of the current selection and shows it: the first page
+   * replaces the cards, a later page appends to them.
+   *
+   * @param {number} offset
+   */
+  async loadPage(offset) {
+    const selection = this.selection;
+    this.results.setAttribute('aria-busy', 'true');
+    if (offset === 0) {
+      this.results.replaceChildren(statusMessage('Loading animals…'));
+    }
+    try {
+      const page = /** @type {AnimalPage} */ (
+        await fetchJson(animalsApiPath(selection, offset))
+      );
+      if (selection !== this.selection) {
+        return;
+      }
+      this.showPage(page, offset === 0 ? [] : this.loaded);
+    } catch (error) {
+      if (selection !== this.selection) {
+        return;
+      }
+      this.results.replaceChildren(
+        errorState(
+          'Could not load the animals.',
+          error,
+          () => void this.loadPage(offset),
+        ),
+      );
+    } finally {
+      this.results.removeAttribute('aria-busy');
+    }
+  }
+
+  /**
+   * Renders the cards of the animals loaded so far plus the new page, the
+   * count line and, while more remain, the "Load more" button.
+   *
+   * @param {AnimalPage} page
+   * @param {Animal[]} before
+   */
+  showPage(page, before) {
+    this.loaded = [...before, ...page.items];
+    this.total = page.total;
+    if (this.loaded.length === 0) {
+      this.results.replaceChildren(
+        statusMessage('No animals match this filter.'),
+      );
+      return;
+    }
+    const list = element('ul', 'card-list');
+    list.setAttribute('role', 'list');
+    list.append(
+      ...this.loaded.map((animal) => animalCard(animal, this.selection)),
+    );
+    /** @type {HTMLElement[]} */
+    const children = [countLine(this.loaded.length, this.total), list];
+    if (this.loaded.length < this.total) {
+      const more = element('button', 'button button-secondary load-more');
+      more.type = 'button';
+      more.textContent = 'Load more';
+      more.addEventListener('click', () => {
+        more.disabled = true;
+        void this.loadPage(this.loaded.length);
+      });
+      children.push(more);
+    }
+    this.results.replaceChildren(...children);
   }
 }
 

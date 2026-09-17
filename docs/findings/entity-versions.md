@@ -136,6 +136,13 @@ Behaviour decisions the rule makes, each covered by a unit test:
 - A cycle in `previous` (impossible from honest writes, possible from a
   hostile peer) leaves the newest version as the single tip instead of
   making the entity disappear.
+- Versions are ordered by their depth in the `previous` chain before the
+  `timeId` decides (added in slice B10): two versions written within one
+  millisecond share a timestamp and the unique part of a `timeId` is
+  random, so `timeId` order alone put an older version first once the
+  store's writes got fast enough (`docs/findings/seed-generator.md`).
+  Depth is deterministic for a chain; tips of equal depth, and versions on
+  a cycle, still fall back to the `timeId`.
 
 What `PetShopStore.updateAnimal` writes, in this order, all named by one
 change set (`update-animal-<id>-<new timeId>`): the new `animals` row

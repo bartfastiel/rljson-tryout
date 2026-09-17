@@ -66,7 +66,8 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           Then(
             'every returned animal carries the trait "competitive-streak"',
             async () => {
-              const animals = response.json<AnimalListEntry[]>();
+              const animals = response.json<{ items: AnimalListEntry[] }>()
+                .items;
               expect(animals.length).toBeGreaterThan(0);
 
               for (const animal of animals) {
@@ -85,7 +86,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           );
 
           And('not every seeded animal is returned', () => {
-            const animals = response.json<AnimalListEntry[]>();
+            const animals = response.json<{ items: AnimalListEntry[] }>().items;
             expect(animals.length).toBeLessThan(10);
           });
         },
@@ -149,7 +150,8 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           Then(
             'exactly the animal "henrietta-the-egg-champion" is returned',
             () => {
-              const animals = response.json<AnimalListEntry[]>();
+              const animals = response.json<{ items: AnimalListEntry[] }>()
+                .items;
               expect(animals.map((animal) => animal.id)).toStrictEqual([
                 'henrietta-the-egg-champion',
               ]);
@@ -181,8 +183,13 @@ describe.each(storageKinds)('over the %s store', (storage) => {
             },
           );
 
-          Then('the response is an empty list', () => {
-            expect(response.json()).toStrictEqual([]);
+          Then('the response is an empty page', () => {
+            expect(response.json()).toStrictEqual({
+              items: [],
+              total: 0,
+              limit: 50,
+              offset: 0,
+            });
           });
         },
       );
@@ -217,7 +224,8 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           Then(
             'every returned animal carries the trait "competitive-streak"',
             async () => {
-              const animals = response.json<AnimalListEntry[]>();
+              const animals = response.json<{ items: AnimalListEntry[] }>()
+                .items;
               expect(animals.length).toBeGreaterThan(0);
 
               for (const animal of animals) {
@@ -236,7 +244,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
           );
 
           And('not every seeded animal is returned', () => {
-            const animals = response.json<AnimalListEntry[]>();
+            const animals = response.json<{ items: AnimalListEntry[] }>().items;
             expect(animals.length).toBeLessThan(10);
           });
         },

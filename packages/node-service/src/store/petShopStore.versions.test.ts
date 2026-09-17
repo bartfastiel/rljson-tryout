@@ -154,7 +154,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         it('makes the list show the new price and keeps one entry per animal', async () => {
           await store.updateAnimal('donald-the-third', { priceCents: 61000 });
 
-          const animals = await store.listAnimals();
+          const animals = (await store.listAnimals()).items;
 
           expect(animals).toHaveLength(animalsSeed.length);
           expect(
@@ -282,7 +282,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
 
           expect(updated.traits).toStrictEqual([]);
           expect(
-            await store.listAnimals({ traitId: 'fiercely-loyal' }),
+            (await store.listAnimals({ traitId: 'fiercely-loyal' })).items,
           ).not.toEqual(
             expect.arrayContaining([
               expect.objectContaining({ id: 'sir-quackington' }),
@@ -604,8 +604,10 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       const donald = await store.getAnimal('donald-the-third');
       expect(donald?.speciesId).toBe('duck');
       expect(donald?.speciesName).toBe('Duck');
-      expect(await store.listAnimals({ speciesId: 'duck' })).toHaveLength(
-        (await store.listAnimals()).filter(
+      expect(
+        (await store.listAnimals({ speciesId: 'duck' })).items,
+      ).toHaveLength(
+        (await store.listAnimals()).items.filter(
           (animal) => animal.speciesId === 'duck',
         ).length,
       );
@@ -630,7 +632,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         'Loyal',
       );
       expect(
-        await store.listAnimals({ traitId: 'fiercely-loyal' }),
+        (await store.listAnimals({ traitId: 'fiercely-loyal' })).items,
       ).toHaveLength(carriersBefore);
     });
 
@@ -710,7 +712,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
       await insertVersion('animals', left, baseTimeId);
       await insertVersion('animals', right, baseTimeId);
 
-      const animals = await store.listAnimals();
+      const animals = (await store.listAnimals()).items;
       const history = (await store.getAnimalHistory('donald-the-third'))!;
 
       expect(
@@ -770,7 +772,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         { validate: false },
       );
 
-      const animals = await store.listAnimals();
+      const animals = (await store.listAnimals()).items;
 
       expect(animals.find((animal) => animal.id === 'ghost')).toBeUndefined();
       expect(await store.getAnimal('ghost')).toBeUndefined();

@@ -131,7 +131,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         );
 
         Then('every returned animal was bred by "Grandma Duck\'s Farm"', () => {
-          const animals = response.json<AnimalListEntry[]>();
+          const animals = response.json<{ items: AnimalListEntry[] }>().items;
           expect(animals.length).toBeGreaterThan(0);
 
           for (const animal of animals) {
@@ -141,7 +141,7 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         });
 
         And('not every seeded animal is returned', () => {
-          const animals = response.json<AnimalListEntry[]>();
+          const animals = response.json<{ items: AnimalListEntry[] }>().items;
           expect(animals.length).toBeLessThan(10);
         });
       },
