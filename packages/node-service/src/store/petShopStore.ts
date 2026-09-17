@@ -105,7 +105,7 @@ const historyTableKeyOf = (tableKey: string): string =>
  * `isSafeWhereValue`.
  */
 const isSafeTimeId = (value: string): boolean =>
-  /^[0-9]+:[A-Za-z0-9_-]{4}$/u.test(value);
+  /^\d+:[A-Za-z0-9_-]{4}$/u.test(value);
 
 /**
  * Every domain table of roadmap section 2.6 with its InsertHistory
@@ -1148,12 +1148,14 @@ export class PetShopStore {
   ): Promise<ChangeSetItem[]> {
     const historyTableKey = historyTableKeyOf(tableCfg.key);
     const historyRow: InsertHistoryRow<string> = {
-      ...{ [`${tableCfg.key}Ref` as `${string}Ref`]: row._hash },
       timeId: rowTimeId,
       route: Route.fromFlat(tableCfg.key).flat,
       origin: seedOrigin,
       previous: [],
     };
+    // The reference column is named after the table (`animalsRef`), a key
+    // the type only knows as a pattern.
+    (historyRow as Record<string, unknown>)[`${tableCfg.key}Ref`] = row._hash;
     await this.db.core.import(
       { [tableCfg.key]: { _type: 'components', _data: [row] } },
       { validate: false },

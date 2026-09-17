@@ -354,7 +354,7 @@ export class SyncAgent {
     this.clearReplays();
     this.channel = null;
     this.queue.length = 0;
-    await Promise.allSettled([...this.active.values()]);
+    await Promise.allSettled(this.active.values());
   }
 
   snapshot(): SyncSnapshot {

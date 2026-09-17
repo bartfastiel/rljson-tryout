@@ -417,11 +417,11 @@ describe('the store primitives of the synchronisation', () => {
 
     expect(pulled).toMatchObject({ _hash: generatedAnimal.hash });
     expect(await small.hasLocalRow('animals', generatedAnimal.hash)).toBe(true);
-    expect(await small.pullRow('animals', 'NoSuchHash0123456789ab')).toBe(
-      undefined,
-    );
-    expect(await small.pullRow('nobody', generatedAnimal.hash)).toBe(undefined);
-    expect(await small.pullRow('animals', 'a b')).toBe(undefined);
+    expect(
+      await small.pullRow('animals', 'NoSuchHash0123456789ab'),
+    ).toBeUndefined();
+    expect(await small.pullRow('nobody', generatedAnimal.hash)).toBeUndefined();
+    expect(await small.pullRow('animals', 'a b')).toBeUndefined();
     expect(await small.hasLocalRow('nobody', generatedAnimal.hash)).toBe(false);
   });
 
@@ -452,11 +452,11 @@ describe('the store primitives of the synchronisation', () => {
     expect(await small.hasLocalHistoryRow('animals', version!.timeId)).toBe(
       true,
     );
-    expect(await small.pullHistoryRow('animals', '1:nope')).toBe(undefined);
-    expect(await small.pullHistoryRow('animals', 'not a timeId')).toBe(
-      undefined,
-    );
-    expect(await small.pullHistoryRow('nobody', '1:abcd')).toBe(undefined);
+    expect(await small.pullHistoryRow('animals', '1:nope')).toBeUndefined();
+    expect(
+      await small.pullHistoryRow('animals', 'not a timeId'),
+    ).toBeUndefined();
+    expect(await small.pullHistoryRow('nobody', '1:abcd')).toBeUndefined();
     expect(await small.hasLocalHistoryRow('animals', 'not a timeId')).toBe(
       false,
     );
