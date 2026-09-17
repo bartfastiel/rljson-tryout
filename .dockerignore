@@ -9,5 +9,6 @@ infra
 .github
 *.md
 test-results
+packages/node-service/data
 playwright-report
 .env*

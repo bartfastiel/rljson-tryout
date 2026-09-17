@@ -213,6 +213,12 @@ Lost with a `Down`:
   next `Up` both StatefulSets get fresh, empty claims, seed themselves
   again and take fresh node ids. node3 keeps nothing on purpose (memory
   store, `emptyDir`): it seeds itself again on every pod replacement.
+  A claim is retained when its StatefulSet is deleted or replaced (a
+  StatefulSet of the same name adopts it again with the data intact), so
+  switching a node away from `sqlite` for good leaves its claim and
+  directory on the server until someone deletes the claim with
+  `kubectl delete pvc -n petshop data-<node>-0` or the namespace goes
+  with a `Down`.
 - The generated SSH key pair. `Up` creates a new one.
 - The Let's Encrypt account and certificates of cert-manager. Every `Up`
   registers a new account and orders the certificates again. The limit

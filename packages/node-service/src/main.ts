@@ -9,45 +9,49 @@ import { PetShopStore } from './store/petShopStore.ts';
 
 const configuration = readConfiguration();
 const logger = pino({ level: configuration.logLevel });
-const store = new PetShopStore(
-  createIo(configuration, logger.child({ component: 'storage' })),
-  { traitRelationMode: configuration.traitRelationMode },
-);
-const orchestrator = new RoleOrchestrator(
-  configuration,
-  logger.child({ component: 'orchestrator' }),
-);
-const directory = new NodeDirectory(
-  configuration,
-  logger.child({ component: 'directory' }),
-);
-const server = buildServer({
-  configuration,
-  store,
-  orchestrator,
-  directory,
-  logger,
-});
 
-const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-  server.log.info({ signal }, 'shutting down');
-
-  try {
-    directory.stop();
-    await server.close();
-    await orchestrator.stop();
-    await store.close();
-    process.exit(0);
-  } catch (error) {
-    server.log.error(error, 'error while shutting down');
-    process.exit(1);
-  }
-};
-
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
-process.on('SIGINT', () => void shutdown('SIGINT'));
-
+// Everything from creating the store on runs inside one try, so that a
+// DATA_DIR that cannot be created fails the start with the same log line
+// as a store or a port that cannot be opened.
 try {
+  const store = new PetShopStore(
+    createIo(configuration, logger.child({ component: 'storage' })),
+    { traitRelationMode: configuration.traitRelationMode },
+  );
+  const orchestrator = new RoleOrchestrator(
+    configuration,
+    logger.child({ component: 'orchestrator' }),
+  );
+  const directory = new NodeDirectory(
+    configuration,
+    logger.child({ component: 'directory' }),
+  );
+  const server = buildServer({
+    configuration,
+    store,
+    orchestrator,
+    directory,
+    logger,
+  });
+
+  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
+    server.log.info({ signal }, 'shutting down');
+
+    try {
+      directory.stop();
+      await server.close();
+      await orchestrator.stop();
+      await store.close();
+      process.exit(0);
+    } catch (error) {
+      server.log.error(error, 'error while shutting down');
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+
   await store.initialize();
   if (configuration.seedSize === 'none') {
     server.log.info('pet shop store ready, not seeded (SEED_SIZE is none)');
@@ -67,6 +71,6 @@ try {
   await orchestrator.start();
   await directory.start();
 } catch (error) {
-  server.log.error(error, 'failed to start the server');
+  logger.error(error, 'failed to start the server');
   process.exit(1);
 }

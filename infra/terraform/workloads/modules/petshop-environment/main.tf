@@ -244,9 +244,19 @@ resource "kubernetes_stateful_set_v1" "node" {
       type = "RollingUpdate"
     }
 
-    # The claim outlives the pod and the StatefulSet: k3s's local-path
-    # provisioner keeps the directory on the server until the claim is
-    # deleted with the namespace.
+    # The claim outlives the pod and the StatefulSet, on purpose: a
+    # StatefulSet of the same name (a replacement, or the node switched
+    # away from and back to sqlite) adopts the claim and finds its data
+    # again, and only deleting the namespace (`Down`) removes it. The
+    # price is a claim `data-<node>-0` left behind when a sqlite node is
+    # removed for good (docs/operations.md).
+    persistent_volume_claim_retention_policy {
+      when_deleted = "Retain"
+      when_scaled  = "Retain"
+    }
+
+    # k3s's local-path provisioner keeps the directory on the server until
+    # the claim is deleted.
     volume_claim_template {
       metadata {
         name      = "data"
