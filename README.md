@@ -56,6 +56,11 @@ Node 24 runs the TypeScript sources directly (type stripping); there is no
 build step in the monorepo. Per-package scripts live in
 `packages/*/package.json`.
 
+The web app lives in `packages/web-app/public` as plain HTML, CSS and
+JavaScript modules and is served by the node service at `/`. Its Playwright
+tests run with `pnpm --filter @rljson-tryout/web-app test:e2e` (once per
+machine: `pnpm --filter @rljson-tryout/web-app exec playwright install chromium`).
+
 ### Running the node service
 
 ```sh
@@ -65,19 +70,21 @@ pnpm --filter @rljson-tryout/node-service start
 Starts the Fastify server on `0.0.0.0:8080` (override with `HTTP_PORT`) and
 answers `GET /health` with `{ status, name, version, commit }`. At start the
 node seeds its in-memory rljson store with three Duckburg species and serves
-them as `GET /api/species` (`[{ id, hash, name, latinName, description }]`).
+them as `GET /api/species` (`[{ id, hash, name, latinName, description }]`)
+and, as the web app, at `http://localhost:8080/`.
 Use `pnpm --filter @rljson-tryout/node-service dev` to restart on file
 changes.
 Stop it with `Ctrl-C`; it closes the server and exits cleanly.
 
 Environment variables the service understands so far:
 
-| Variable     | Default   | Meaning                                                             |
-| ------------ | --------- | ------------------------------------------------------------------- |
-| `NODE_NAME`  | `node1`   | Display name, reported by `/health`                                 |
-| `HTTP_PORT`  | `8080`    | Port to listen on, must be an integer 0 to 65535                    |
-| `LOG_LEVEL`  | `info`    | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`) |
-| `GIT_COMMIT` | `unknown` | Commit shown by `/health`, set by the container build               |
+| Variable            | Default                   | Meaning                                                             |
+| ------------------- | ------------------------- | ------------------------------------------------------------------- |
+| `NODE_NAME`         | `node1`                   | Display name, reported by `/health`                                 |
+| `HTTP_PORT`         | `8080`                    | Port to listen on, must be an integer 0 to 65535                    |
+| `LOG_LEVEL`         | `info`                    | Pino log level (`fatal`, `error`, `warn`, `info`, `debug`, `trace`) |
+| `GIT_COMMIT`        | `unknown`                 | Commit shown by `/health`, set by the container build               |
+| `WEB_APP_DIRECTORY` | `packages/web-app/public` | Directory served at `/`; must exist (`/app/public` in the image)    |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch, pull request and
 commit conventions.
