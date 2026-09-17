@@ -386,7 +386,7 @@ export class PetShopStore {
       ] as ComponentsTable<HashedTraitRow>;
       const animalTraitsTable = animalTraitsContainer[
         animalTraitsTableCfg.key
-      ] as ComponentsTable<HashedAnimalTraitRow> | undefined;
+      ] as ComponentsTable<HashedAnimalTraitRow>;
 
       return {
         animalsTable,
@@ -395,7 +395,7 @@ export class PetShopStore {
         personsTable,
         traitsTable,
         traitRelation: new JunctionTraitRelation(
-          animalTraitsTable?._data ?? [],
+          animalTraitsTable._data,
           traitsTable._data,
         ),
       };
@@ -538,8 +538,13 @@ export class PetShopStore {
    * `TraitRelation`, simply does not match.
    */
   async listAnimals(filter: AnimalFilter = {}): Promise<AnimalWithSpecies[]> {
-    const { animalsTable, speciesTable, breedersTable, traitsTable, traitRelation } =
-      await this.readAnimalTables();
+    const {
+      animalsTable,
+      speciesTable,
+      breedersTable,
+      traitsTable,
+      traitRelation,
+    } = await this.readAnimalTables();
     const speciesByHash = new Map(
       speciesTable._data.map((species) => [species._hash, species]),
     );

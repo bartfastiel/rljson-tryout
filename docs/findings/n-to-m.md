@@ -44,12 +44,12 @@
 
 - `MultiReferenceTraitRelation` needs nothing beyond `animals` itself:
   `traitsRefs` already carries every animal's trait hashes, so
-  `PetShopStore.readAnimalTables` performs three `Db.get` calls in this mode
-  (`animals`, `species`, `traits`) for both `listAnimals` and `getAnimal`,
-  exactly as slice B5 left them.
+  `PetShopStore.readAnimalTables` performs five `Db.get` calls in this mode
+  (`animals`, `species`, `breeders`, `persons`, `traits`, the last three
+  added by slice B7's breeder join) for both `listAnimals` and `getAnimal`.
 - `JunctionTraitRelation` needs `animalTraits` in addition, since the
   relation is not on `animals` at all in this mode: `readAnimalTables`
-  performs a fourth `Db.get` call (`animalTraits`) alongside the same three.
+  performs a sixth `Db.get` call (`animalTraits`) alongside the same five.
   The extra call is unconditional per request, not per animal or per trait:
   both `listAnimals` and `getAnimal` still read every table once in full and
   join in JavaScript, the same fallback pattern established in slice B3 for
@@ -74,7 +74,7 @@
   column such as `animalTraits.animalRef` and `animalTraits.traitRef`
   both are.
 - Net result: `multi-reference` costs one `Db.get` call less per request in
-  this store's read pattern (three against four), at the cost of one
+  this store's read pattern (five against six), at the cost of one
   reference indirection during validation (see below) and of every animal
   row carrying its own trait list.
 
