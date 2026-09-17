@@ -93,6 +93,7 @@ describe('MultiReferenceTraitRelation and JunctionTraitRelation', () => {
         id: 'animal-id',
         name: 'Animal',
         speciesRef: 'species-hash',
+        breederRef: 'breeder-hash',
         bornOn: '2020-01-01',
         priceCents: 100,
         backgroundStory: 'A short story.',
