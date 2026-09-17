@@ -165,7 +165,7 @@ const depthsOf = <Row extends EntityRow>(
       }
       depths.set(
         version.history.timeId,
-        1 + Math.max(0, ...previous.map((timeId) => depths.get(timeId)!)),
+        1 + Math.max(0, ...previous.map((timeId) => depths.get(timeId) ?? 0)),
       );
       resolvedAny = true;
       return false;
