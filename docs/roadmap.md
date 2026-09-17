@@ -147,25 +147,25 @@ All responses are JSON unless noted. Identifiers: `id` is the stable
 identity of an entity across versions (rljson slice id), `hash` is one
 immutable version (`_hash`).
 
-| Method and path                                     | Purpose                                                                                        |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `GET /health`                                       | `{ status: "ok", name, version, commit, startedAt }`                                           |
-| `GET /status`                                       | `{ nodeName, nodeId, role, hubAddress, peers: [...], storage, tables: { <table>: rowCount } }` |
-| `GET /api/stats`                                    | Row counts per table, seed size, uptime                                                        |
-| `GET /api/species`                                  | List of current species versions                                                               |
-| `GET /api/species/:hash/image`                      | PNG bytes, `Content-Type: image/png`                                                           |
-| `GET /api/traits`                                   | List of current trait versions                                                                 |
-| `GET /api/animals?species=<id>&trait=<id>&q=<text>` | Current animal versions with species name joined                                               |
-| `GET /api/animals/:id`                              | Current version with species, breeder and traits joined                                        |
-| `GET /api/animals/:id/history`                      | All versions with InsertHistory rows, newest first                                             |
-| `PUT /api/animals/:id`                              | Creates a new version from the current one plus the changed fields; returns it                 |
-| `GET /api/customers`, `GET /api/breeders`           | Lists with the person joined                                                                   |
-| `GET /api/invoices`, `GET /api/invoices/:id`        | Invoice with items and animals joined                                                          |
-| `POST /api/invoices`                                | Body `{ customerId, items: [{ animalId, quantity }] }`, issues an invoice                      |
-| `GET /api/conflicts`                                | Open DAG branch conflicts (slice D11)                                                          |
-| `POST /api/conflicts/:table/:id/resolve`            | Runs the deterministic resolution (slice D12)                                                  |
-| `GET /api/events`                                   | Server-sent events: `insert`, `sync`, `topology`, `conflict`                                   |
-| `GET /` and static files                            | The web app                                                                                    |
+| Method and path                                                  | Purpose                                                                                        |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /health`                                                    | `{ status: "ok", name, version, commit, startedAt }`                                           |
+| `GET /status`                                                    | `{ nodeName, nodeId, role, hubAddress, peers: [...], storage, tables: { <table>: rowCount } }` |
+| `GET /api/stats`                                                 | Row counts per table, seed size, uptime                                                        |
+| `GET /api/species`                                               | List of current species versions                                                               |
+| `GET /api/species/:hash/image`                                   | PNG bytes, `Content-Type: image/png`                                                           |
+| `GET /api/traits`                                                | List of current trait versions                                                                 |
+| `GET /api/animals?species=<id>&breeder=<id>&trait=<id>&q=<text>` | Current animal versions with species and breeder joined                                        |
+| `GET /api/animals/:id`                                           | Current version with species, breeder and traits joined                                        |
+| `GET /api/animals/:id/history`                                   | All versions with InsertHistory rows, newest first                                             |
+| `PUT /api/animals/:id`                                           | Creates a new version from the current one plus the changed fields; returns it                 |
+| `GET /api/customers`, `GET /api/breeders`                        | Lists with the person joined                                                                   |
+| `GET /api/invoices`, `GET /api/invoices/:id`                     | Invoice with items and animals joined                                                          |
+| `POST /api/invoices`                                             | Body `{ customerId, items: [{ animalId, quantity }] }`, issues an invoice                      |
+| `GET /api/conflicts`                                             | Open DAG branch conflicts (slice D11)                                                          |
+| `POST /api/conflicts/:table/:id/resolve`                         | Runs the deterministic resolution (slice D12)                                                  |
+| `GET /api/events`                                                | Server-sent events: `insert`, `sync`, `topology`, `conflict`                                   |
+| `GET /` and static files                                         | The web app                                                                                    |
 
 Errors use Fastify's default shape `{ statusCode, error, message }`.
 
@@ -689,9 +689,27 @@ node-service start` answers on 8080 and tests pass. Deviation: the package is
       implementations behind one interface with a toggle in configuration, and
       `docs/findings/n-to-m.md` comparing query shape, payload size and
       validation. Done when both paths return the same result in a test.
-- [ ] **B7 Persons and breeders.** Depends on: B4. Tables `persons`,
+- [x] **B7 Persons and breeders.** Depends on: B4. Tables `persons`,
       `breeders`, column `breederRef`, `GET /api/breeders`, breeder shown in the
       detail view. Done when a breeder appears with their person data.
+      Deviation: `GET /api/animals` also gains `breederId`/`breederFarmName`
+      (light) and a `?breeder=<id>` filter, and `GET /api/animals/:id` gains a
+      full `breeder` object, both already anticipated by section 2.5's
+      contract table. The web app gets a `#/breeders` view with
+      `breeders-list` cards linking into the filtered animals view, a third
+      navigation entry and, on the animals view, a compact two-chip breeder
+      filter summary (active breeder plus an "All" reset) instead of a third
+      full chip row, chosen for legibility at 360px as the number of
+      breeders grows; picking a breeder happens from the breeders view, not
+      from a chip picker in the animals view. The seed holds six Duckburg
+      persons and four breeders (Grandma Duck's Farm first in the seed
+      file), not a fixed count the roadmap left open; two persons (Gladstone
+      Gander, Fethry Duck) are seeded without a role yet, ready for slice B8
+      to reference them as customers. `AnimalBreeder.personName` and `.city`
+      are typed nullable for the defensive case of a breeder whose own
+      `personRef` does not resolve, the same dangling-reference tolerance
+      `speciesName` already has (`docs/findings/db-basics.md`, "Joining a
+      reference").
 - [ ] **B8 Customers and invoices.** Depends on: B7. Tables `customers`,
       `invoices`, `invoiceItems`, `changeSets` (3.4), `POST /api/invoices`
       writing all rows plus one change set, `GET /api/invoices`, view
