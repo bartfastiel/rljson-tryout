@@ -37,6 +37,7 @@ Slice D2 (hub transport) makes the nodes talk: the hub serves its store over soc
 Slice D3 (change set synchronisation) makes them agree: every change a node writes is announced as one change set, every other node pulls it within tens of milliseconds, an animal renamed on one node shows the new name on all of them, and the seed is deterministic, so a node seeded `medium` fills the `small` ones with its generated rows.
 Slice B13 (live updates) makes it visible: every node streams its inserts, transfers and topology changes over `GET /api/events`, and the web app refreshes what it shows the moment they arrive, with a header indicator for the connection.
 Slice D4 (bootstrap and catch-up) makes them complete: whenever a node connects to its hub, both compare the change sets they hold and pull what they lack, so a node that restarts or joins late holds everything the others wrote while it was away within moments of reconnecting, and a hub that restarts learns what its clients hold.
+Slice D3b (transfer indicators) shows the traffic: every partner node in the header carries an upstream and a downstream arrow that fills up while a change set arrives from or goes to that node, and a tap on the node opens the last ten transfers with it, each expandable to the rows it carried, an edited entity next to the version it replaced.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
@@ -254,11 +255,29 @@ fifty. The animal picker of the invoice form asks the node for the twenty
 animals matching its search the same way.
 
 The web app shows the environment in the header: this node as a badge,
-every other node of `NODE_URLS` as a link outlined green when discovery
+every other node of `NODE_URLS` as a badge outlined green when discovery
 on this node sees it and red otherwise, with a small marker for the
-browser's own `/health` probe and, on the hub, a small count of its
-connected clients. The `Network` view lists the same nodes with all three
-signals, what this node's hub transport is doing, and the discovered
+browser's own `/health` probe, on the hub a small count of its connected
+clients, and two small arrows: the upstream arrow fills up from the
+bottom, over and over, while a change set is arriving from that node and
+for one more second after it landed, the downstream arrow does the same
+while this node announces to it (a hub's announcement reaches every
+client, so every badge shows it), a failed pull flashes the arrow red
+once, and with `prefers-reduced-motion` the arrow simply turns green for
+the same time. Tapping a partner opens a popup (full screen on a phone,
+a dialog on a wide screen) with the node's link and the last ten
+transfers with it, newest first, each with the direction, the tables,
+the short change set hash, the row count, the time, the duration and the
+outcome, kept current from the stream while it is open; a row expands to
+the change set's payload: every row with its fields and, for an edited
+entity, the new version next to the one it replaced with the changed
+fields marked and long texts cut to the changed region. The data comes
+from `GET /api/sync/transfers?peer=<nodeId>&limit=10` (the sync agent
+remembers the last fifty transfers) and `GET /api/change-sets/:hash`
+(`{ hash, id, items: [{ table, ref, row, previousRow }] }`, `404` for a
+change set the node does not hold). The `Network` view lists the same
+nodes with all three signals, the same arrows and a `Transfers` button
+per partner, what this node's hub transport is doing, and the discovered
 peers.
 
 Everything a node does is also a stream: `GET /api/events` answers
