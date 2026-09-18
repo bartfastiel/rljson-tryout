@@ -95,7 +95,15 @@ entity its change set, the way the API writes them
 `large` seeds in about 1.4 seconds into the in-memory store and 16 seconds
 into SQLite). The node serves the data as
 `GET /api/species`
-(`[{ id, hash, name, latinName, description }]`), `GET /api/traits`
+(`[{ id, hash, name, latinName, description, imageUrl }]`),
+`GET /api/species/:hash/image` (the PNG of that species version,
+`Cache-Control: public, max-age=31536000, immutable` because the hash names
+the version and the version names the image by content, `404` for an
+unknown hash; every species image is a 256 by 256 badge rendered
+deterministically from the species id by the domain package's own PNG
+encoder, stored once in the node's blob store under the content id the
+species row carries in `imageBlobId`, see
+[docs/findings/blobs.md](docs/findings/blobs.md)), `GET /api/traits`
 (`[{ id, hash, name, description }]`), `GET /api/breeders`
 (`[{ id, hash, farmName, suppliesSince, person: { id, name, city } | null }]`,
 the supplying person already joined), `GET /api/customers`
@@ -105,7 +113,7 @@ with `?species=<id>`, `?breeder=<id>`, `?trait=<id>`, `?q=<text>` (a
 case-insensitive substring of the name or the species name), or any
 combination, and sliced with `?limit=<1..200>` (default 50) and
 `?offset=<n>` (default 0), returning
-`{ items: [{ id, hash, name, speciesId, speciesName, breederId, breederFarmName, bornOn, priceCents }], total, limit, offset }`
+`{ items: [{ id, hash, name, speciesId, speciesName, speciesImageUrl, breederId, breederFarmName, bornOn, priceCents }], total, limit, offset }`
 with the species and breeder already joined but the background story and
 the traits left out so the list stays light, and `400` for a `limit` or
 `offset` outside its range), `GET /api/animals/:id`
@@ -252,7 +260,11 @@ the text (the text lives in the hash, `#/animals?q=quack`, so it combines
 with the filter chips and survives a reload), a line says how many of the
 matching animals are shown, and a "Load more" button appends the next
 fifty. The animal picker of the invoice form asks the node for the twenty
-animals matching its search the same way.
+animals matching its search the same way. Every species has a badge: the
+species cards show it at the top, the animal cards as a small round
+thumbnail beside the name, the animal detail next to the facts, all
+served from `GET /api/species/:hash/image` with a cache header that lets
+the browser keep them.
 
 The web app shows the environment in the header: this node as a badge,
 every other node of `NODE_URLS` as a badge outlined green when discovery
