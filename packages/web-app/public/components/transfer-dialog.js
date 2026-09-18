@@ -9,7 +9,12 @@ import {
   transferActivity,
 } from '../transfer-activity.js';
 import { applyActivityTo, transferIcon } from '../transfer-icon.js';
-import { errorState, statusMessage, timeFormat } from '../view-helpers.js';
+import {
+  errorState,
+  formatBytes,
+  statusMessage,
+  timeFormat,
+} from '../view-helpers.js';
 
 /**
  * The partner node a popup is about: its id as the transfers name it
@@ -61,14 +66,6 @@ const rowCountText = (tables) => {
   }
   return `${rows} ${rows === 1 ? 'row' : 'rows'}`;
 };
-
-/**
- * "12.7 kB" for a size in bytes, one decimal from a kilobyte on.
- *
- * @param {number} bytes
- */
-const formatBytes = (bytes) =>
-  bytes < 1000 ? `${bytes} B` : `${(bytes / 1000).toFixed(1)} kB`;
 
 /**
  * "blob 12.7 kB" for the one blob a pull fetched with the rows (the image

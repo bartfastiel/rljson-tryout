@@ -2,7 +2,7 @@
 import { fetchJson, postFile } from '../api.js';
 import { element } from '../dom.js';
 import { LiveContent } from '../live-content.js';
-import { errorState, statusMessage } from '../view-helpers.js';
+import { errorState, formatBytes, statusMessage } from '../view-helpers.js';
 
 /**
  * One species as `GET /api/species` returns it and
@@ -41,14 +41,6 @@ const speciesImage = (species) => {
   image.decoding = 'async';
   return image;
 };
-
-/**
- * "12.7 kB" for a size in bytes, one decimal from a kilobyte on.
- *
- * @param {number} bytes
- */
-const formatBytes = (bytes) =>
-  bytes < 1000 ? `${bytes} B` : `${(bytes / 1000).toFixed(1)} kB`;
 
 /**
  * Why a chosen file is not sent, `null` when it is: the same two rules the
