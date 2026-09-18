@@ -3,6 +3,18 @@ import { fetchJson } from './api.js';
 import { liveEvents } from './live-events.js';
 
 /**
+ * Where a node's id comes from, as the node reports it under
+ * `/status.identity`: `persistent` when the id was restored from the
+ * node's data directory (it survived a restart), `false` when the process
+ * generated it at this start; `startedAt` when this run of discovery
+ * began.
+ *
+ * @typedef {object} StatusIdentity
+ * @property {boolean} persistent
+ * @property {string} startedAt
+ */
+
+/**
  * One node of the environment as `GET /status` lists it under `nodes`:
  * the link a browser can open, what the node reported about itself when
  * this node last polled it, and the two flags this node has for it.
@@ -14,6 +26,7 @@ import { liveEvents } from './live-events.js';
  * @property {string | null} nodeId
  * @property {string | null} role
  * @property {number | null} connectedClients
+ * @property {StatusIdentity | null} identity
  * @property {boolean} reachable
  * @property {string | null} lastSeen
  * @property {boolean} seenInTopology
@@ -33,6 +46,7 @@ import { liveEvents } from './live-events.js';
  * @property {string} firstSeen
  * @property {string} lastSeen
  * @property {{ reachable: boolean, latencyMs: number | null, measuredAt: string } | null} probe
+ * @property {boolean} excludedFromElection whether this node keeps the peer out of its hub election
  */
 
 /**
@@ -98,6 +112,7 @@ import { liveEvents } from './live-events.js';
  * @typedef {object} Status
  * @property {string} nodeName
  * @property {string | null} nodeId
+ * @property {(StatusIdentity & { identityPath: string | null }) | null} identity
  * @property {string} publicUrl
  * @property {string} domain
  * @property {'starting' | 'standalone' | 'hub' | 'client'} role

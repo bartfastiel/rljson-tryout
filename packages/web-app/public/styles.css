@@ -762,6 +762,23 @@ a.animal-card {
   border-color: var(--color-accent-tint);
 }
 
+.identity-badge {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  background: var(--color-background);
+  border: 1px dashed var(--color-border);
+}
+
+.identity-persistent {
+  color: var(--color-text);
+  border-style: solid;
+}
+
 .node-id {
   font-size: 0.8125rem;
   overflow-wrap: anywhere;

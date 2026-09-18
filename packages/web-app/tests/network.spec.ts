@@ -17,6 +17,11 @@ const node3Url = 'https://node3.example.test';
 const threeNodeStatus = {
   nodeName: 'node1',
   nodeId: 'id-node1',
+  identity: {
+    persistent: true,
+    startedAt: '2026-09-17T10:00:03.000Z',
+    identityPath: '/data/identity/petshop-test/node-id',
+  },
   publicUrl: 'https://node1.example.test',
   domain: 'petshop-test',
   role: 'client',
@@ -38,6 +43,7 @@ const threeNodeStatus = {
         latencyMs: 0.8,
         measuredAt: '2026-09-17T10:05:00.000Z',
       },
+      excludedFromElection: true,
     },
   ],
   nodes: [
@@ -48,6 +54,7 @@ const threeNodeStatus = {
       nodeId: 'id-node1',
       role: 'client',
       connectedClients: null,
+      identity: { persistent: true, startedAt: '2026-09-17T10:00:03.000Z' },
       reachable: true,
       lastSeen: '2026-09-17T10:05:00.000Z',
       seenInTopology: true,
@@ -59,6 +66,7 @@ const threeNodeStatus = {
       nodeId: 'id-node2',
       role: 'hub',
       connectedClients: 2,
+      identity: { persistent: false, startedAt: '2026-09-17T10:00:00.000Z' },
       reachable: true,
       lastSeen: '2026-09-17T10:05:00.000Z',
       seenInTopology: true,
@@ -70,6 +78,7 @@ const threeNodeStatus = {
       nodeId: null,
       role: null,
       connectedClients: null,
+      identity: null,
       reachable: false,
       lastSeen: null,
       seenInTopology: false,
@@ -287,6 +296,9 @@ test.describe('with three nodes in the environment', () => {
     await expect(thisNode).toContainText(
       'connected to the hub at 10.42.0.12:3000',
     );
+    await expect(thisNode).toContainText(
+      'persistent id, restored from the data directory (/data/identity/petshop-test/node-id)',
+    );
 
     const cards = page.locator('.node-card');
     await expect(cards).toHaveCount(3);
@@ -298,6 +310,16 @@ test.describe('with three nodes in the environment', () => {
     await expect(cards.nth(1).locator('.role-badge')).toHaveText('hub');
     await expect(cards.nth(1).locator('.node-clients')).toHaveText(/2/);
     await expect(cards.nth(0).locator('.node-clients')).toHaveCount(0);
+    await expect(cards.nth(0).locator('.identity-badge')).toHaveText(
+      'persistent id',
+    );
+    await expect(cards.nth(0).locator('.identity-badge')).toHaveClass(
+      /identity-persistent/,
+    );
+    await expect(cards.nth(1).locator('.identity-badge')).toHaveText(
+      'fresh id',
+    );
+    await expect(cards.nth(2).locator('.identity-badge')).toHaveCount(0);
     await expect(cards.nth(1).locator('.topology-dot')).toHaveClass(
       /topology-dot-seen/,
     );
@@ -323,6 +345,9 @@ test.describe('with three nodes in the environment', () => {
     await expect(peers.first()).toContainText('node2');
     await expect(peers.first()).toContainText('10.42.0.12:3000');
     await expect(peers.first()).toContainText('reachable, 0.8 ms');
+    await expect(peers.first()).toContainText(
+      'Electionexcluded by this node (it restarted or denies the hub role)',
+    );
 
     await expectNoHorizontalScroll(page);
   });
@@ -393,6 +418,9 @@ test.describe('with a single node', () => {
     await expect(thisNode.locator('.role-badge')).toHaveText('standalone');
     await expect(thisNode).toContainText('none elected');
     await expect(thisNode).toContainText('idle, this node runs on its own');
+    await expect(thisNode).toContainText(
+      'fresh id, generated at this start, not written to disk',
+    );
     await expect(page.locator('.node-clients')).toHaveCount(0);
     await expect(page.locator('.node-card')).toHaveCount(1);
     await expect(page.locator('.node-card').first()).toContainText(
