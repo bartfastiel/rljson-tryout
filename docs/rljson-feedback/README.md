@@ -315,7 +315,12 @@ In the order we would fix them:
     the return type of `hsh`
     ([30](issues/30-dependency-ranges-install-several-copies-of-rljson-hash-and-io.md),
     [32](issues/32-hsh-and-hip-are-typed-to-return-t-instead-of-hashed-t.md)).
-11. Documentation: per-table `detectDagBranch`, the repeated-insert rule,
+11. Version deltas on the wire, so that a renamed animal with a
+    7 000-character story ships 3.5 kB instead of 10.9 kB while rows stay
+    whole, hashed and verified; with guidance to model an entity as a
+    tuple of references and a worked cakes example. Measured and argued
+    in [granularity-and-deltas.md](granularity-and-deltas.md).
+12. Documentation: per-table `detectDagBranch`, the repeated-insert rule,
     the head-table `id` rules and the `jsonArray` element question, the
     `timeId` order ([23](issues/23-detectdagbranch-is-per-table-not-per-entity.md),
     [24](issues/24-duplicate-insert-appends-a-history-row-and-a-new-tip.md),
