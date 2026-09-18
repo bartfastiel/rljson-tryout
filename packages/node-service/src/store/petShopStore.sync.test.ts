@@ -378,6 +378,53 @@ describe('the store primitives of the synchronisation', () => {
     expect(await store.holdsChangeSet("x' OR '1'='1")).toBe(false);
   });
 
+  it('announces what it writes itself with the ids of the entities written', async () => {
+    const store = await memoryStore();
+    cleanups.push(() => store.close());
+    const announced: [string, readonly string[]][] = [];
+    const unsubscribe = store.onChangeSetWritten((changeSet, entityIds) =>
+      announced.push([changeSet.id, entityIds]),
+    );
+
+    await store.seedIfEmpty('small');
+    await store.issueInvoice({
+      customerId: 'scrooge-mcduck',
+      items: [
+        { animalId: 'donald-the-third', quantity: 1 },
+        { animalId: 'daphne-duck', quantity: 2 },
+      ],
+    });
+    await store.updateAnimal('bowser-the-guard-dog', {
+      traitIds: ['fiercely-loyal'],
+    });
+    unsubscribe();
+    await store.updateAnimal('bowser-the-guard-dog', { priceCents: 1 });
+
+    expect(announced).toHaveLength(46);
+    expect(announced[0]).toStrictEqual(['seed-species-duck', ['duck']]);
+    expect(announced.find(([id]) => id === 'issue-invoice-2026-0001')).toEqual([
+      'issue-invoice-2026-0001',
+      [
+        'invoice-2026-0001',
+        'invoice-2026-0001-item-1',
+        'invoice-2026-0001-item-2',
+      ],
+    ]);
+    expect(announced[44]).toStrictEqual([
+      'issue-invoice-2026-0007',
+      [
+        'invoice-2026-0007',
+        'invoice-2026-0007-item-1',
+        'invoice-2026-0007-item-2',
+      ],
+    ]);
+    expect(announced[45]![0]).toMatch(/^update-animal-bowser-the-guard-dog-/);
+    expect(announced[45]![1]).toStrictEqual([
+      'bowser-the-guard-dog',
+      'bowser-the-guard-dog--fiercely-loyal',
+    ]);
+  });
+
   it('does not announce a received change set', async () => {
     const store = await memoryStore();
     cleanups.push(() => store.close());

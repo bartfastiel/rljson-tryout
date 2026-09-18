@@ -111,8 +111,15 @@ export class FakeSyncStore implements SyncStore {
     this.behaviour = behaviour;
   }
 
-  /** What a test's store "writes itself", announced to the agent. */
-  writeOwnChangeSet(id: string, items: HashedChangeSetRow['items']) {
+  /**
+   * What a test's store "writes itself", announced to the agent with the
+   * given entity ids.
+   */
+  writeOwnChangeSet(
+    id: string,
+    items: HashedChangeSetRow['items'],
+    entityIds: readonly string[] = [],
+  ) {
     const changeSet = hashed({ id, items });
     this.local.set(FakeSyncStore.key('changeSets', changeSet._hash), changeSet);
     this.local.set(`changeSetsInsertHistory@${changeSet._hash}`, {
@@ -120,7 +127,7 @@ export class FakeSyncStore implements SyncStore {
       changeSetsRef: changeSet._hash,
     });
     for (const listener of this.changeSetListeners) {
-      listener(changeSet);
+      listener(changeSet, entityIds);
     }
     return changeSet;
   }

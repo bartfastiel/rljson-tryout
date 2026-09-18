@@ -51,7 +51,7 @@ export type StatusReport = {
 export type StatusSources = Readonly<{
   configuration: Pick<
     Configuration,
-    'nodeName' | 'publicUrl' | 'storage' | 'seedSize'
+    'nodeName' | 'publicUrl' | 'rljsonDomain' | 'storage' | 'seedSize'
   >;
   store: Pick<PetShopStore, 'tableRowCounts'>;
   orchestrator: Pick<RoleOrchestrator, 'snapshot'>;
@@ -59,13 +59,32 @@ export type StatusSources = Readonly<{
   syncAgent: Pick<SyncAgent, 'snapshot'>;
 }>;
 
-export const buildStatusReport = async ({
+/**
+ * The network part of `/status`, which the SSE `topology` event streams
+ * whenever it changes (slice B13): this node's id and role, the hub, the
+ * peers discovery knows, every node of the environment as the directory
+ * sees it, and the state of the hub transport.
+ */
+export type TopologyReport = {
+  nodeId: string | null;
+  role: NodeRole;
+  hubNodeId: string | null;
+  hubAddress: string | null;
+  peers: StatusPeer[];
+  nodes: StatusNode[];
+  transport: TransportSnapshot;
+};
+
+export type TopologySources = Pick<
+  StatusSources,
+  'orchestrator' | 'directory'
+> & { configuration: Pick<Configuration, 'nodeName'> };
+
+export const buildTopologyReport = ({
   configuration,
-  store,
   orchestrator,
   directory,
-  syncAgent,
-}: StatusSources): Promise<StatusReport> => {
+}: TopologySources): TopologyReport => {
   const network = orchestrator.snapshot();
   const peers = network.peers.map((peer) => ({
     ...peer,
@@ -85,16 +104,40 @@ export const buildStatusReport = async ({
   );
 
   return {
-    nodeName: configuration.nodeName,
     nodeId: network.nodeId,
-    publicUrl: configuration.publicUrl,
-    domain: network.domain,
     role: network.role,
     hubNodeId: network.hubNodeId,
     hubAddress: network.hubAddress,
     peers,
     nodes,
     transport: network.transport,
+  };
+};
+
+export const buildStatusReport = async ({
+  configuration,
+  store,
+  orchestrator,
+  directory,
+  syncAgent,
+}: StatusSources): Promise<StatusReport> => {
+  const topology = buildTopologyReport({
+    configuration,
+    orchestrator,
+    directory,
+  });
+
+  return {
+    nodeName: configuration.nodeName,
+    nodeId: topology.nodeId,
+    publicUrl: configuration.publicUrl,
+    domain: configuration.rljsonDomain,
+    role: topology.role,
+    hubNodeId: topology.hubNodeId,
+    hubAddress: topology.hubAddress,
+    peers: topology.peers,
+    nodes: topology.nodes,
+    transport: topology.transport,
     sync: syncAgent.snapshot(),
     storage: configuration.storage,
     seedSize: configuration.seedSize,

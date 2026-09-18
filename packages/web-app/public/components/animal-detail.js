@@ -8,6 +8,7 @@ import {
   hashQuery,
   hrefWithParams,
 } from '../hash-route.js';
+import { LiveContent } from '../live-content.js';
 import { notFoundView } from '../not-found-view.js';
 import {
   applicationName,
@@ -328,6 +329,54 @@ const detailView = (animal, history) => {
 };
 
 /**
+ * The tables the detail reads from; a change set naming one of them
+ * refreshes the current version.
+ */
+const shownTables = ['animals', 'animalTraits', 'species', 'breeders'];
+
+/**
+ * A version and its history the node does not have: the not-found view
+ * takes the place of the detail.
+ */
+class AnimalNotFound extends Error {
+  name = 'AnimalNotFound';
+}
+
+/**
+ * Fetches one version of an animal and the animal's history. Fails with
+ * `AnimalNotFound` for an unknown id or version.
+ *
+ * @param {string} id
+ * @param {string | null} version
+ */
+const fetchAnimal = async (id, version) => {
+  const detailPath =
+    version === null
+      ? `/api/animals/${encodeURIComponent(id)}`
+      : `/api/animals/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`;
+  const response = await fetch(detailPath, {
+    headers: { accept: 'application/json' },
+  });
+  if (response.status === 404) {
+    throw new AnimalNotFound(
+      version === null
+        ? `There is no animal with id "${id}".`
+        : `There is no version "${version}" of the animal "${id}".`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `The node answered ${response.status} ${response.statusText} for ${detailPath}.`,
+    );
+  }
+  const animal = /** @type {AnimalDetail} */ (await response.json());
+  const history = /** @type {AnimalVersion[]} */ (
+    await fetchJson(`/api/animals/${encodeURIComponent(id)}/history`)
+  );
+  return { animal, history };
+};
+
+/**
  * Shows one animal: a heading with its name and an "Edit" action, a
  * compact facts block, its background story as paragraphs and the list of
  * its versions, reached from an animal card at `#/animals/<id>`; with
@@ -337,11 +386,21 @@ const detailView = (animal, history) => {
  * change replaces this element with a fresh instance (see `app.js`), which
  * re-reads the id and the version. Shows a loading, a not-found (unknown
  * id or version) or an error state with a retry button until the animal is
- * there.
+ * there. The current version then follows every change set of the node
+ * that touches an animal, so an edit made in another tab or on another
+ * node shows up with its new version in the list; an older version is a
+ * fixed point in the history and stays as it is.
  */
 class AnimalDetailElement extends HTMLElement {
+  /** @type {LiveContent | null} */
+  #detail = null;
+
   connectedCallback() {
     void this.load();
+  }
+
+  disconnectedCallback() {
+    this.#detail?.stop();
   }
 
   async load() {
@@ -350,42 +409,33 @@ class AnimalDetailElement extends HTMLElement {
       throw new Error('animal-detail requires an animal-id attribute.');
     }
     const version = requestedVersion();
-    const detailPath =
-      version === null
-        ? `/api/animals/${encodeURIComponent(id)}`
-        : `/api/animals/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`;
+    const build = async () => {
+      const { animal, history } = await fetchAnimal(id, version);
+      document.title = `${animal.name} · ${applicationName}`;
+      return detailView(animal, history);
+    };
 
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(backLink(), statusMessage('Loading animal…'));
     try {
-      const response = await fetch(detailPath, {
-        headers: { accept: 'application/json' },
-      });
-      if (response.status === 404) {
+      if (version === null) {
+        this.#detail ??= new LiveContent(shownTables, build);
+        this.replaceChildren(backLink(), await this.#detail.show());
+      } else {
+        this.replaceChildren(backLink(), await build());
+      }
+    } catch (error) {
+      if (error instanceof AnimalNotFound) {
         // The not-found view supplies its own way back, so it replaces the
         // persistent back link instead of sitting alongside a second one.
         this.replaceChildren(
-          notFoundView(
-            version === null
-              ? `There is no animal with id "${id}".`
-              : `There is no version "${version}" of the animal "${id}".`,
-            { href: animalListHref(), text: 'Back to Animals' },
-          ),
+          notFoundView(error.message, {
+            href: animalListHref(),
+            text: 'Back to Animals',
+          }),
         );
         return;
       }
-      if (!response.ok) {
-        throw new Error(
-          `The node answered ${response.status} ${response.statusText} for ${detailPath}.`,
-        );
-      }
-      const animal = /** @type {AnimalDetail} */ (await response.json());
-      const history = /** @type {AnimalVersion[]} */ (
-        await fetchJson(`/api/animals/${encodeURIComponent(id)}/history`)
-      );
-      document.title = `${animal.name} · ${applicationName}`;
-      this.replaceChildren(backLink(), detailView(animal, history));
-    } catch (error) {
       this.replaceChildren(
         backLink(),
         errorState('Could not load the animal.', error, () => void this.load()),

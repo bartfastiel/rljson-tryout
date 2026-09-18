@@ -185,16 +185,23 @@ describe.each(storageKinds)('over the %s store', (storage) => {
         Then(
           'the client serves that invoice by its id with one item',
           async () => {
-            const response = await client!.server.inject({
-              method: 'GET',
-              url: `/api/invoices/${issued.id}`,
+            // The change set of the invoice is arriving on the client at
+            // the same time: for the moment between its invoice row and
+            // its item rows landing, the invoice is current locally without
+            // items, so the read is repeated until the item is there.
+            let invoice: InvoiceDetailResponse | undefined;
+            await until(async () => {
+              const response = await client!.server.inject({
+                method: 'GET',
+                url: `/api/invoices/${issued.id}`,
+              });
+              invoice = response.json<InvoiceDetailResponse>();
+              return response.statusCode === 200 && invoice.items.length > 0;
             });
 
-            expect(response.statusCode).toBe(200);
-            const invoice = response.json<InvoiceDetailResponse>();
-            expect(invoice.id).toBe(issued.id);
-            expect(invoice.items).toStrictEqual(issued.items);
-            expect(invoice.items[0]?.animal?.id).toBe('donald-the-third');
+            expect(invoice?.id).toBe(issued.id);
+            expect(invoice?.items).toStrictEqual(issued.items);
+            expect(invoice?.items[0]?.animal?.id).toBe('donald-the-third');
           },
         );
 

@@ -520,4 +520,47 @@ describe('RoleOrchestrator with discovery enabled', () => {
       expect.objectContaining({ message: 'discovery stopped' }),
     );
   });
+
+  it('tells its change listeners about the start, every manager event and the stop', async () => {
+    const { orchestrator, manager } = orchestratorOverFake();
+    const roles: string[] = [];
+    const unsubscribe = orchestrator.onChange(() =>
+      roles.push(orchestrator.snapshot().role),
+    );
+
+    await orchestrator.start();
+    manager().join(fakeNodeInfo('bbbbbbbb-peer'));
+    manager().elect(selfNodeId, '10.0.0.13:3000');
+    manager().leave('bbbbbbbb-peer');
+    await orchestrator.stop();
+    unsubscribe();
+    await orchestrator.start();
+
+    // The manager's first topology arrives while the start is still
+    // running (no node id yet), the start itself follows, then the join
+    // (peer joined, topology), the election (hub changed, role changed,
+    // topology), the leave (peer left, topology) and the stop.
+    expect(roles).toStrictEqual([
+      'starting',
+      'standalone',
+      'starting',
+      'starting',
+      'hub',
+      'hub',
+      'hub',
+      'hub',
+      'hub',
+      'standalone',
+    ]);
+  });
+
+  it('tells its change listeners when it starts without discovery', async () => {
+    const { orchestrator } = orchestratorOverFake({ discovery: 'disabled' });
+    const roles: string[] = [];
+    orchestrator.onChange(() => roles.push(orchestrator.snapshot().role));
+
+    await orchestrator.start();
+
+    expect(roles).toStrictEqual(['standalone']);
+  });
 });

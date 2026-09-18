@@ -107,6 +107,7 @@ export class RoleOrchestrator {
   ) => DiscoveryManager;
   private readonly now: () => number;
   private readonly seen = new Map<string, SeenTimes>();
+  private readonly changeListeners = new Set<() => void>();
   private manager: DiscoveryManager | null = null;
   private selfNodeId: string | null = null;
   private followedRole: NetworkTopology['myRole'] = 'unassigned';
@@ -145,6 +146,7 @@ export class RoleOrchestrator {
         { nodeId: this.selfNodeId, domain: this.configuration.rljsonDomain },
         'discovery disabled, running standalone',
       );
+      this.notifyChange();
       return;
     }
 
@@ -177,6 +179,7 @@ export class RoleOrchestrator {
       },
       'discovery started',
     );
+    this.notifyChange();
   }
 
   /**
@@ -194,6 +197,28 @@ export class RoleOrchestrator {
       }
     } finally {
       await this.transport.stop();
+      this.notifyChange();
+    }
+  }
+
+  /**
+   * Registers a listener that is called whenever something the snapshot
+   * reports may have changed: the start and stop of discovery and every
+   * event of the manager (a peer that joined or left, a role or hub
+   * change, a topology recompute). Returns the function that unregisters
+   * it. The transport's own changes (a client that connected, a socket
+   * that dropped) have no event here; whoever cares polls the snapshot.
+   */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private notifyChange(): void {
+    for (const listener of this.changeListeners) {
+      listener();
     }
   }
 
@@ -295,10 +320,12 @@ export class RoleOrchestrator {
         },
         'peer joined',
       );
+      this.notifyChange();
     });
     manager.on('peer-left', (nodeId: string) => {
       this.seen.delete(nodeId);
       this.logger.info({ nodeId }, 'peer left');
+      this.notifyChange();
     });
     manager.on('topology-changed', ({ topology }) => {
       const selfNodeId = manager.getIdentity().nodeId;
@@ -314,6 +341,7 @@ export class RoleOrchestrator {
           seen.lastSeen = now;
         }
       }
+      this.notifyChange();
     });
     manager.on('role-changed', (event: RoleChangedEvent) => {
       this.logger.info(
@@ -321,6 +349,7 @@ export class RoleOrchestrator {
         'role changed',
       );
       this.followRole(manager.getTopology(), manager.getIdentity().nodeId);
+      this.notifyChange();
     });
     manager.on('hub-changed', (event) => {
       const topology = manager.getTopology();
@@ -339,6 +368,7 @@ export class RoleOrchestrator {
       if (topology.myRole === 'client' && this.followedRole === 'client') {
         this.followRole(topology, manager.getIdentity().nodeId);
       }
+      this.notifyChange();
     });
     manager.on('log', (entry: NetworkLogEntry) => {
       // Election and probe messages repeat on every probe cycle; the

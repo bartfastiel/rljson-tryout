@@ -6,12 +6,16 @@ import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 
 import type { Configuration } from './configuration.ts';
+import { EventHub, type EventHubOptions } from './events/eventHub.ts';
+import { LiveEvents } from './events/liveEvents.ts';
+import type { TopologyWatchOptions } from './events/topologyWatch.ts';
 import type { NodeDirectory } from './network/nodeDirectory.ts';
 import type { RoleOrchestrator } from './network/roleOrchestrator.ts';
 import type { SyncAgent } from './network/syncAgent.ts';
 import { registerAnimalsRoutes } from './routes/animals.ts';
 import { registerBreedersRoutes } from './routes/breeders.ts';
 import { registerCustomersRoutes } from './routes/customers.ts';
+import { registerEventsRoute } from './routes/events.ts';
 import { registerInvoicesRoutes } from './routes/invoices.ts';
 import { registerSpeciesRoutes } from './routes/species.ts';
 import { registerStatsRoute } from './routes/stats.ts';
@@ -31,9 +35,10 @@ const readPackageVersion = (): string => {
 
 /**
  * Everything the HTTP server answers from: the configuration, the store
- * behind the `/api` routes, the network components behind `/status`, and
- * the logger the whole process shares (`main.ts` creates it once with the
- * configured level; the tests pass a silent one).
+ * behind the `/api` routes, the network components behind `/status`, the
+ * logger the whole process shares (`main.ts` creates it once with the
+ * configured level; the tests pass a silent one), and the timings of the
+ * event stream, which only the tests shorten.
  */
 export type ServerDependencies = Readonly<{
   configuration: Configuration;
@@ -42,12 +47,15 @@ export type ServerDependencies = Readonly<{
   directory: NodeDirectory;
   syncAgent: SyncAgent;
   logger: FastifyBaseLogger;
+  events?: EventHubOptions & TopologyWatchOptions;
 }>;
 
 /**
  * Builds a Fastify instance configured for this service, with the `/health`
  * and `/status` routes, the `/api` routes from roadmap section 2.5 reading
- * from the given store, and the web app served from the configured
+ * from the given store, the `/api/events` stream fed by the store, the
+ * sync agent and the network components from the moment the server is
+ * ready until it closes, and the web app served from the configured
  * directory at `/`. Does not start listening; the caller decides when and
  * where to bind.
  */
@@ -58,6 +66,7 @@ export const buildServer = ({
   directory,
   syncAgent,
   logger,
+  events = {},
 }: ServerDependencies): FastifyInstance => {
   // Fastify's default validator coerces body values to the schema's type
   // (`"100"` and `true` become numbers, `null` becomes `0` or `""`), which
@@ -97,6 +106,23 @@ export const buildServer = ({
   registerCustomersRoutes(server, store);
   registerAnimalsRoutes(server, store);
   registerInvoicesRoutes(server, store);
+
+  const eventHub = new EventHub(logger.child({ component: 'events' }), events);
+  const liveEvents = new LiveEvents(
+    eventHub,
+    { configuration, store, orchestrator, directory, syncAgent },
+    events,
+  );
+  registerEventsRoute(server, eventHub);
+  server.addHook('onReady', async () => {
+    liveEvents.start();
+  });
+  // `preClose` runs before Fastify waits for the open connections to end,
+  // which a stream never would on its own.
+  server.addHook('preClose', async () => {
+    liveEvents.stop();
+    eventHub.close();
+  });
 
   // The app has no build step and no hashed file names, so browsers must
   // revalidate the entry document on every load to pick up new versions.

@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
+import { LiveContent } from '../live-content.js';
 import {
   dateFormat,
   errorState,
@@ -78,21 +79,27 @@ const breederCards = (breeders) => {
  * name and city, supplies since), each linking to the animals list filtered
  * to that breeder (`#/animals?breeder=<id>`). Fetches `/api/breeders` when
  * it enters the document and shows a loading, an empty or an error state
- * with a retry button until the list is there.
+ * with a retry button until the list is there; from then on the cards
+ * follow every change set of the node that touches a breeder or a person.
  */
 class BreedersList extends HTMLElement {
+  #cards = new LiveContent(['breeders', 'persons'], async () =>
+    breederCards(/** @type {Breeder[]} */ (await fetchJson('/api/breeders'))),
+  );
+
   connectedCallback() {
     void this.load();
+  }
+
+  disconnectedCallback() {
+    this.#cards.stop();
   }
 
   async load() {
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(viewTitle(), statusMessage('Loading breeders…'));
     try {
-      const breeders = /** @type {Breeder[]} */ (
-        await fetchJson('/api/breeders')
-      );
-      this.replaceChildren(viewTitle(), breederCards(breeders));
+      this.replaceChildren(viewTitle(), await this.#cards.show());
     } catch (error) {
       this.replaceChildren(
         viewTitle(),

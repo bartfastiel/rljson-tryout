@@ -6,6 +6,7 @@ import './components/breeders-list.js';
 import './components/invoice-detail.js';
 import './components/invoice-form.js';
 import './components/invoices-list.js';
+import './components/live-indicator.js';
 import './components/network-view.js';
 import './components/node-bar.js';
 import './components/species-list.js';
