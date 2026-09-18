@@ -188,10 +188,19 @@ a {
     min-height: var(--header-height);
   }
 
+  /*
+   * The bar's height follows its content here, never the header's: a bar
+   * that wrapped under the title (a long node name, a wide font) would
+   * otherwise be as tall as the whole header and hang over the page.
+   */
+  .node-bar {
+    height: auto;
+    padding: var(--space-1) 0;
+  }
+
   .node-bar:has(.node-link) {
     flex-basis: 100%;
     flex-wrap: wrap;
-    height: auto;
     padding-bottom: var(--space-2);
     overflow: visible;
   }

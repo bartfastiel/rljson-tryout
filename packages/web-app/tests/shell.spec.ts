@@ -111,3 +111,26 @@ test.describe('with a dark colour scheme preference', () => {
     expect(await bodyBackgroundLuminance(page)).toBeLessThan(0.1);
   });
 });
+
+test('keeps the header above the page when the node badge wraps under the title', async ({
+  page,
+}) => {
+  // Narrow enough that the title, the live indicator and the badge of
+  // `node-under-test` do not share one row, whatever font the machine has.
+  await page.setViewportSize({ width: 340, height: 780 });
+  await page.goto('/#/invoices');
+  const badge = page.getByRole('banner').locator('.node-badge-active');
+  await expect(badge).toBeVisible();
+
+  const header = await boundingBoxOf(page.getByRole('banner'));
+  const badgeBox = await boundingBoxOf(badge);
+  const main = await boundingBoxOf(page.getByRole('main'));
+
+  expect(badgeBox.y).toBeGreaterThanOrEqual(header.y);
+  expect(badgeBox.y + badgeBox.height).toBeLessThanOrEqual(
+    header.y + header.height,
+  );
+  expect(main.y).toBeGreaterThanOrEqual(header.y + header.height);
+  await page.getByRole('link', { name: 'New invoice' }).click();
+  await expect(page).toHaveURL(/#\/invoices\/new$/);
+});
