@@ -147,7 +147,7 @@ describeFeature(
               );
             }, 30_000);
             console.log(
-              `${client.name} was connected to the hub again ${latency} ms after its restart`,
+              `${client.name} was connected to the hub again ${latency} ms after it was healthy again`,
             );
             await waitForStatuses(allConnected, convergenceTimeoutMs);
           },

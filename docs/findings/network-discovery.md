@@ -280,3 +280,184 @@ Timings measured in D1 and C3: 0.1 s self-election of the earliest node,
   transport is behind the port; a probe protocol that identifies the hub
   transport (or an explicit "I am not the hub" answer) would let survivors
   notice.
+
+## Slice D7: identity persistence and the split view
+
+### What we tried
+
+- Gave node1 and node2 of `deploy/compose/three-nodes.yml` the SQLite
+  store on a named volume each, like the production pods, and left node3
+  in memory without a volume, so that the Compose setup has nodes whose
+  identity file (`/data/identity/<domain>/node-id`) outlives a restart and
+  one whose file goes with the container.
+- Ran three cases against the image of `main` before this slice and
+  against the image with it, on the host ports 8531 to 8533, reading
+  `/status` of all three nodes four times a second and the compose logs
+  afterwards: (a) a quick restart of a SQLite client (`docker compose
+restart`, the container and its file system kept), the hub's quick
+  restart in the same way, and (b) the replacement of the memory node
+  (`docker compose up --force-recreate node3`, a new container from the
+  same image), once while it was a client and once while it was the hub.
+  (c) In every case the D4 ready handshake and the catch-up were read
+  from `/status.sync.catchUp` of the returning node and the survivors.
+- Read the bundled `dist/network.js` of `@rljson/network` 0.0.21 for what
+  the library offers against the split view: `NetworkManager.stop()` and
+  `start()`, `assignHub()` and `clearOverride()`, `excludeFromElection()`
+  and `clearExclusions()`, `getProbeScheduler()`, and the `PeerTable` and
+  `BroadcastLayer` code paths a restarted peer goes through.
+- Built `TopologyRepair` (`packages/node-service/src/network/topologyRepair.ts`)
+  on the survivors' side, gave `/status` an `identity` and every peer an
+  `excludedFromElection` flag, and wrote `features/identity.feature` with
+  three scenarios against Compose and one in-process over fakes.
+
+### What happened before the mitigation
+
+- (a) The SQLite client restarted in 0.9 s (the `restart` command), was
+  down for about a second as the others saw it, answered `/status` again
+  2.2 s after the command started with the same node id and a new
+  `startedAt`, was a connected client of the unchanged hub 0.8 s later
+  and completed its catch-up in 4 ms with nothing missing. The two
+  survivors kept the client's previous `startedAt` in their peer table,
+  as the D1 finding predicted, without any visible effect at that moment.
+- The hub restarted in 0.7 s, was back at 1.9 s with its id and a new
+  `startedAt`, found node3 as the earliest node in its fresh peer table
+  and became node3's client at 2.8 s; node2 and node3 kept the restarted
+  node as their hub on its stale `startedAt`, their sockets reconnected
+  to its probe listener and failed the WebSocket handshake, and after 90 s
+  nothing had changed: three nodes, no hub transport anywhere,
+  `connectedToHub: false` on all of them, no catch-up.
+- The stale entry of case (a) is not harmless either: it poisons the next
+  election. With the hub stopped for 25 s (the "restart slowly"
+  workaround of the D1 finding), the survivors dropped it with
+  `peer-left` and re-elected among themselves, but node3 elected node2 on
+  node2's stale, earlier `startedAt` while node2, whose own value is the
+  fresh one, elected node3; both were clients of each other, no hub, no
+  connection, unchanged 30 s later. The returning node then followed
+  node3. So a quick restart of any node, client or hub, leaves a wrong
+  election result waiting for the next re-election.
+- (b) The memory node was replaced in 6.4 s (the `up --force-recreate`
+  command with the health check), answered with a fresh id 2.2 s after
+  the command started and `persistent: false`, and joined as a client
+  within 5 s. As the hub, its old id stayed the survivors' hub for 16.8 s:
+  the new container got the old container's IP address, so the probes
+  against the old entry kept succeeding against the new process's probe
+  listener, and only the broadcast timeout dropped the old id. The
+  survivors then elected the earlier of the two of them, the other
+  connected in the same moment, the new node3 4.7 s later (its socket's
+  reconnection backoff), 21.5 s after the command started; the catch-ups
+  found nothing missing in 3 ms.
+- (c) The ready handshake and the catch-up ran wherever a socket came
+  about, in every case in under 5 ms with nothing missing, because the
+  seeds are identical; the D4 measurements with writes in between stand.
+  In the split view nothing connects, so nothing catches up.
+
+### What the library offers
+
+- `excludeFromElection(nodeId, durationMs)` keeps a node out of
+  `_computeHub` until the duration passed and recomputes the topology at
+  once; the exclusion is checked lazily on every election and forgotten
+  by `stop()`. This is the one means that changes this node's election
+  without touching what it announces.
+- `assignHub(nodeId)` and `clearOverride()` are a manual override, which
+  freezes the election until it is cleared, and clearing runs the next
+  election without the incumbent on the same stale peer table, so the
+  split comes right back.
+- `stop()` and `start()` on the same manager are supported (documented
+  for `setDomain`) and clear the peer table, but `start()` builds a new
+  `NodeIdentity` with `startedAt: Date.now()`, so the node that restarts
+  its manager announces a new start time and every other node then holds
+  a stale entry for it in turn; on paper that turns the two-way split of
+  the hub case into a three-way one. `ProbeScheduler.stop()` also keeps
+  its listeners while `start()` subscribes again, so a second start
+  doubles the `probes-updated` handlers.
+- Nothing drops or refreshes a single peer from outside, nothing lets a
+  node mark itself as restarted, and `getProbeScheduler().setPeers()` is
+  overwritten on the next peer event. The returning node itself has
+  nothing to do: its table is fresh, its announcements carry the new
+  start time, and the survivors do not read it.
+- Excluding a peer whose reported start time differs from the peer table
+  yields exactly the election the correct start time would: a node that
+  holds a stale entry for a peer was running when the peer restarted, so
+  its own start time is earlier than the peer's current one, and the peer
+  could never win that node's election with the true value, neither as
+  the earliest nor as the incumbent, which an earlier reachable candidate
+  displaces. That holds for clients and hubs alike, which is why the
+  repair excludes every restarted peer, not only a restarted hub.
+
+### What happened with the mitigation
+
+- `TopologyRepair` compares the peer table (`startedAt` as first
+  announced) with what the directory polls from each node's `/status`
+  (`identity.startedAt` of its current run, its role) once a second. A
+  peer whose start time moved while its id stayed is excluded once the
+  difference held for 5 s (two directory rounds), the hub this node
+  follows is excluded when it reported another role for 30 s; every
+  exclusion lasts 90 s, is renewed while the condition holds and is
+  logged with its cause, at most once per minute per peer and cause.
+- (a) The SQLite client restarted in 0.7 s, answered at 2.2 s with the
+  same id and `identity.persistent: true` (the file existed before the
+  manager started), was connected with its catch-up done at 2.7 s, and
+  the two survivors excluded it from their election 8.1 s and 8.6 s after
+  the command started (the first poll after its return plus the 5 s
+  grace), logging `peer-restarted` with both start times. The hub stayed.
+  In the integration run: restart 726 ms, connected 2 ms after the health
+  check passed, excluded by both others 2.8 s later.
+- The hub restarted in 0.96 s, was back at 2.2 s, elected node1 and then
+  node3 from its fresh table (4.7 s). node3 excluded it at 8.8 s and
+  became hub itself, because node1, which node3's stale table would have
+  put first, had been excluded since case (a); the restarted node
+  connected to node3 in the same second. node1 excluded the restarted
+  node at 12.2 s, followed node3 and connected. All three agreed with two
+  connected clients 12.2 s after the restart command, the catch-ups took
+  1 to 4 ms. The integration run measured 569 ms for the restart and
+  13.2 s to full agreement.
+- (b) The memory hub's replacement heals exactly as before, in 21.8 s
+  through the broadcast timeout, with no exclusion: the new node follows
+  the earliest survivor from about 5 s, that survivor denies the hub role
+  for the 10 to 15 s until the old id leaves its table, which is shorter
+  than the 30 s grace. The first version of the repair gave the denial a
+  10 s grace, and the new node excluded the survivor it was about to
+  follow at 15 s, the other one at 26 s, and elected itself, a lone hub
+  until the exclusions lapsed; that is why the grace has to outlast the
+  broadcast timeout plus one check interval (20 s). The integration run:
+  replaced and healthy in 6.2 s, the old id gone from both survivors
+  19.1 s after the command started, everyone connected 29 ms later.
+- A restarted SQLite client stays excluded on its peers for as long as
+  its stale entry lives, which is until it leaves for longer than the
+  broadcast timeout; the network view shows it as "excluded by this
+  node". By the argument above that costs nothing: the peer is never the
+  earliest node from that peer's point of view.
+
+### What it means for rljson users
+
+- A persistent id with a restart faster than the broadcast timeout is a
+  trap, not a feature, until `PeerTable` refreshes `startedAt`: every
+  survivor keeps a start time that is wrong, and the wrong value decides
+  the next election, whether the restarted node was the hub or a client.
+- Do not restart the `NetworkManager` to get a fresh peer table: the
+  restart changes the start time you announce, and the same bug then
+  strikes everybody else's view of you.
+- Have every node report the `startedAt` of its identity on a side
+  channel (`/status` here), compare it with the peer table, and exclude a
+  peer whose value moved with `excludeFromElection`; renew the exclusion
+  while the difference holds. It is sound for any node that was running
+  when the peer restarted.
+- A rule of the form "my hub says it is not the hub" needs a grace period
+  longer than the broadcast timeout: a replaced hub is denied for exactly
+  that long by everyone, legitimately.
+- Whether an id is persistent is a fact of the start, not of the storage:
+  a memory node keeps its id across a container restart (its file system
+  stays) and loses it with a replaced container or pod, and a SQLite node
+  on a fresh volume starts with a generated id like everyone else.
+  `identity.persistent` therefore reports whether the id was read from an
+  existing file, the one thing the node can know.
+
+### Addition to the upstream report
+
+For the rljson feedback on `PeerTable` (issue 07): the application-side
+mitigation that works with 0.0.21 is a timed `excludeFromElection` of
+every peer whose self-reported `startedAt` differs from the peer table,
+renewed while the difference lasts; the report should also name the
+client variant, a quickly restarted client whose stale entry makes the
+survivors elect two different hubs at the next re-election, since that
+shows the bug is not limited to hub restarts.
