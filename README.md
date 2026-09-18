@@ -38,6 +38,7 @@ Slice D3 (change set synchronisation) makes them agree: every change a node writ
 Slice B13 (live updates) makes it visible: every node streams its inserts, transfers and topology changes over `GET /api/events`, and the web app refreshes what it shows the moment they arrive, with a header indicator for the connection.
 Slice D4 (bootstrap and catch-up) makes them complete: whenever a node connects to its hub, both compare the change sets they hold and pull what they lack, so a node that restarts or joins late holds everything the others wrote while it was away within moments of reconnecting, and a hub that restarts learns what its clients hold.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
+What we learned about rljson is collected in [docs/findings/](docs/findings/), and the lessons learned and reproduced bug reports for rljson's authors in [docs/rljson-feedback/](docs/rljson-feedback/README.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
 
