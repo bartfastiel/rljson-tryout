@@ -432,8 +432,12 @@ test.describe('the transfer icons of the node bar', () => {
       element.style.getPropertyValue('--transfer-phase'),
     );
     expect(phase).toMatch(/^-\d+ms$/);
-    // The `sync` event above refreshed `/status`, which rebuilt the bar.
-    await page.waitForTimeout(600);
+    // The `sync` event above refreshes `/status`, which rebuilds the bar
+    // and replaces the icon.
+    const replaced = await icon.elementHandle();
+    await expect
+      .poll(() => replaced!.evaluate((element) => element.isConnected))
+      .toBe(false);
     await expect(icon).toHaveClass(/is-receiving/);
     expect(
       await icon.evaluate((element) =>

@@ -49,10 +49,18 @@ const tablesSummary = (tables) => {
 };
 
 /**
+ * "6 rows" for the rows a transfer named, nothing while they are not
+ * known yet (a pull that just started).
+ *
  * @param {Record<string, number>} tables
  */
-const rowCount = (tables) =>
-  Object.values(tables).reduce((sum, count) => sum + count, 0);
+const rowCountText = (tables) => {
+  const rows = Object.values(tables).reduce((sum, count) => sum + count, 0);
+  if (rows === 0) {
+    return '';
+  }
+  return `${rows} ${rows === 1 ? 'row' : 'rows'}`;
+};
 
 let nextId = 0;
 
@@ -66,7 +74,6 @@ let nextId = 0;
  */
 const rowSummary = (transfer, partner) => {
   const summary = tablesSummary(transfer.tables);
-  const rows = rowCount(transfer.tables);
   const time = element('time', 'transfer-row-time');
   time.dateTime = transfer.at;
   time.textContent = timeFormat.format(new Date(transfer.at));
@@ -91,11 +98,7 @@ const rowSummary = (transfer, partner) => {
       summary === '' ? 'change set' : summary,
     ),
     hash,
-    element(
-      'span',
-      'transfer-row-count',
-      rows === 0 ? '' : `${rows} ${rows === 1 ? 'row' : 'rows'}`,
-    ),
+    element('span', 'transfer-row-count', rowCountText(transfer.tables)),
     time,
     element(
       'span',
@@ -321,12 +324,13 @@ class TransferDialog extends HTMLElement {
    */
   #onTransfer(transfer) {
     const partner = this.#partner;
+    const nodeId = partner?.nodeId ?? null;
     const list = this.#list;
     if (
       partner === null ||
-      partner.nodeId === null ||
+      nodeId === null ||
       list === null ||
-      !concernsPartner(transfer, partner.nodeId)
+      !concernsPartner(transfer, nodeId)
     ) {
       return;
     }

@@ -2415,11 +2415,7 @@ export class PetShopStore {
       return undefined;
     }
     const rows = await Promise.all(
-      changeSet.items.map((item) =>
-        this.tableCfgsByKey.has(item.table) && isSafeWhereValue(item.ref)
-          ? this.localRow(item.table, item.ref)
-          : undefined,
-      ),
+      changeSet.items.map((item) => this.localItemRow(item)),
     );
     const items = await Promise.all(
       changeSet.items.map(
@@ -2436,6 +2432,20 @@ export class PetShopStore {
       ),
     );
     return { hash: changeSet._hash, id: changeSet.id, items };
+  }
+
+  /**
+   * The row a change set item names from the local store alone,
+   * `undefined` when the store lacks it or the item names a table this
+   * store does not have.
+   */
+  private async localItemRow(
+    item: ChangeSetItem,
+  ): Promise<SyncRow | undefined> {
+    if (!this.tableCfgsByKey.has(item.table) || !isSafeWhereValue(item.ref)) {
+      return undefined;
+    }
+    return this.localRow(item.table, item.ref);
   }
 
   /**
