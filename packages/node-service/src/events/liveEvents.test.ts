@@ -35,6 +35,11 @@ class RecordingSink implements EventSink {
 
 const standalone: NetworkSnapshot = {
   nodeId: 'id-node1',
+  identity: {
+    persistent: false,
+    startedAt: '2026-09-18T09:59:00.000Z',
+    identityPath: null,
+  },
   role: 'standalone',
   domain: 'petshop-test',
   hubNodeId: null,

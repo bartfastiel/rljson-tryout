@@ -37,6 +37,9 @@ export class FakeDiscoveryManager implements DiscoveryManager {
   topology: NetworkTopology;
   started = false;
   stopped = false;
+  /** Every exclusion asked for, in order, with its duration. */
+  readonly exclusions: { nodeId: string; durationMs: number }[] = [];
+  private readonly excluded = new Set<string>();
   private readonly listeners = new Map<string, Set<Listener>>();
 
   constructor(config: NetworkConfig, self: NodeInfo) {
@@ -81,6 +84,33 @@ export class FakeDiscoveryManager implements DiscoveryManager {
 
   getIdentity(): NodeIdentity {
     return this.identity;
+  }
+
+  /**
+   * Records the exclusion and, like the real manager, recomputes the
+   * topology at once: an excluded hub is dropped and the earliest of the
+   * remaining reachable nodes is elected.
+   */
+  excludeFromElection(nodeId: string, durationMs: number): void {
+    this.exclusions.push({ nodeId, durationMs });
+    this.excluded.add(nodeId);
+    if (this.topology.hubNodeId === nodeId) {
+      const candidates = Object.values(this.topology.nodes)
+        .filter((node) => !this.excluded.has(node.nodeId))
+        .sort((left, right) => left.startedAt - right.startedAt);
+      const winner = candidates[0];
+      if (winner === undefined) {
+        this.settle(null, null);
+      } else {
+        this.settle(winner.nodeId, `${winner.localIps[0]}:${winner.port}`);
+      }
+    } else {
+      this.emit('topology-changed', { topology: this.topology });
+    }
+  }
+
+  isExcludedFromElection(nodeId: string): boolean {
+    return this.excluded.has(nodeId);
   }
 
   emit<E extends NetworkManagerEventName>(

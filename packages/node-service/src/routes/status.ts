@@ -8,6 +8,7 @@ import type {
   NodeDirectory,
 } from '../network/nodeDirectory.ts';
 import type {
+  IdentitySnapshot,
   NodeRole,
   PeerSnapshot,
   RoleOrchestrator,
@@ -25,15 +26,17 @@ export type StatusNode = DirectoryEntry & { seenInTopology: boolean };
 
 /**
  * The answer of `GET /status` (roadmap section 2.5): this node's identity
- * and role, the hub it follows or is, the peers discovery knows, every
- * node of the environment with one flag from discovery and one from the
- * server-side probe, the state of the hub transport, the change set
- * synchronisation (counters, the last transfers and the last catch-up),
- * and the row counts of the store.
+ * (its id, where the id comes from and when this run started) and role,
+ * the hub it follows or is, the peers discovery knows, every node of the
+ * environment with one flag from discovery and one from the server-side
+ * probe, the state of the hub transport, the change set synchronisation
+ * (counters, the last transfers and the last catch-up), and the row
+ * counts of the store.
  */
 export type StatusReport = {
   nodeName: string;
   nodeId: string | null;
+  identity: IdentitySnapshot | null;
   publicUrl: string;
   domain: string;
   role: NodeRole;
@@ -67,6 +70,7 @@ export type StatusSources = Readonly<{
  */
 export type TopologyReport = {
   nodeId: string | null;
+  identity: IdentitySnapshot | null;
   role: NodeRole;
   hubNodeId: string | null;
   hubAddress: string | null;
@@ -99,12 +103,20 @@ export const buildTopologyReport = ({
         network.transport.role === 'hub'
           ? network.transport.connectedClients
           : null,
+      identity:
+        network.identity === null
+          ? null
+          : {
+              persistent: network.identity.persistent,
+              startedAt: network.identity.startedAt,
+            },
     },
     peers.map((peer) => peer.nodeId),
   );
 
   return {
     nodeId: network.nodeId,
+    identity: network.identity,
     role: network.role,
     hubNodeId: network.hubNodeId,
     hubAddress: network.hubAddress,
@@ -130,6 +142,7 @@ export const buildStatusReport = async ({
   return {
     nodeName: configuration.nodeName,
     nodeId: topology.nodeId,
+    identity: topology.identity,
     publicUrl: configuration.publicUrl,
     domain: configuration.rljsonDomain,
     role: topology.role,

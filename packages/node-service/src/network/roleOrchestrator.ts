@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -33,13 +33,19 @@ export type PeerProbeSnapshot = Readonly<{
 /**
  * One other node of the domain as discovery knows it: its identity, where
  * to reach its hub port, the role it holds in the current topology, when
- * this node first and last saw it, and the latest TCP probe against it.
- * `lastSeen` means "still known to discovery at that time": it advances
- * with every topology recompute (every probe cycle at the latest) for as
- * long as the peer is in the peer table, and a peer that stopped
- * announcing keeps advancing until the broadcast timeout drops it. It is
- * not a heartbeat; `probe.measuredAt` and `probe.reachable` say whether
- * the peer actually answered.
+ * this node first and last saw it, the latest TCP probe against it, and
+ * whether this node currently keeps it out of its hub election
+ * (`TopologyRepair`, slice D7). `startedAt` is what the peer table holds,
+ * the value of the peer's first announcement: `@rljson/network` never
+ * refreshes it, so a peer that restarted with its persistent id within
+ * the broadcast timeout keeps its previous start time here
+ * (`docs/findings/network-discovery.md`). `lastSeen` means "still known
+ * to discovery at that time": it advances with every topology recompute
+ * (every probe cycle at the latest) for as long as the peer is in the
+ * peer table, and a peer that stopped announcing keeps advancing until
+ * the broadcast timeout drops it. It is not a heartbeat;
+ * `probe.measuredAt` and `probe.reachable` say whether the peer actually
+ * answered.
  */
 export type PeerSnapshot = Readonly<{
   nodeId: string;
@@ -51,10 +57,28 @@ export type PeerSnapshot = Readonly<{
   firstSeen: string;
   lastSeen: string;
   probe: PeerProbeSnapshot | null;
+  excludedFromElection: boolean;
+}>;
+
+/**
+ * Where this node's id comes from and when this run of discovery began:
+ * `persistent` when the id was read from the identity file an earlier
+ * process left under `DATA_DIR` (the id has survived a restart), `false`
+ * when this process generated it (a first start, a data directory that
+ * does not outlive the process, or discovery disabled); `startedAt` the
+ * start time the announcements of `@rljson/network` carry, which changes
+ * with every process while the id stays; `identityPath` the file the id
+ * lives in, `null` without discovery.
+ */
+export type IdentitySnapshot = Readonly<{
+  persistent: boolean;
+  startedAt: string;
+  identityPath: string | null;
 }>;
 
 export type NetworkSnapshot = Readonly<{
   nodeId: string | null;
+  identity: IdentitySnapshot | null;
   role: NodeRole;
   domain: string;
   hubNodeId: string | null;
@@ -69,7 +93,13 @@ export type NetworkSnapshot = Readonly<{
  */
 export type DiscoveryManager = Pick<
   NetworkManager,
-  'start' | 'stop' | 'on' | 'getTopology' | 'getIdentity'
+  | 'start'
+  | 'stop'
+  | 'on'
+  | 'getTopology'
+  | 'getIdentity'
+  | 'excludeFromElection'
+  | 'isExcludedFromElection'
 >;
 
 export type RoleOrchestratorOptions = Readonly<{
@@ -110,6 +140,7 @@ export class RoleOrchestrator {
   private readonly changeListeners = new Set<() => void>();
   private manager: DiscoveryManager | null = null;
   private selfNodeId: string | null = null;
+  private identity: IdentitySnapshot | null = null;
   private followedRole: NetworkTopology['myRole'] = 'unassigned';
 
   constructor(
@@ -142,6 +173,11 @@ export class RoleOrchestrator {
 
     if (this.configuration.discovery === 'disabled') {
       this.selfNodeId = randomUUID();
+      this.identity = {
+        persistent: false,
+        startedAt: isoString(this.now()),
+        identityPath: null,
+      };
       this.logger.info(
         { nodeId: this.selfNodeId, domain: this.configuration.rljsonDomain },
         'discovery disabled, running standalone',
@@ -155,6 +191,16 @@ export class RoleOrchestrator {
       'identity',
     );
     mkdirSync(identityDirectory, { recursive: true });
+    // `NodeIdentity.create` of `@rljson/network` reads the id from this
+    // file and writes a fresh one there when it is missing; whether the
+    // file exists before the manager starts tells a restored id from a
+    // generated one.
+    const identityPath = join(
+      identityDirectory,
+      this.configuration.rljsonDomain,
+      'node-id',
+    );
+    const persistent = existsSync(identityPath);
     const manager = this.createDiscoveryManager({
       domain: this.configuration.rljsonDomain,
       port: this.configuration.hubPort,
@@ -166,20 +212,38 @@ export class RoleOrchestrator {
     await manager.start();
     const identity = manager.getIdentity();
     this.selfNodeId = identity.nodeId;
+    this.identity = {
+      persistent,
+      startedAt: isoString(identity.startedAt),
+      identityPath,
+    };
     this.manager = manager;
     this.logger.info(
       {
         nodeId: identity.nodeId,
+        persistent,
+        startedAt: this.identity.startedAt,
         hostname: identity.hostname,
         addresses: identity.localIps,
         domain: identity.domain,
         hubPort: identity.port,
         broadcastPort: this.configuration.broadcastPort,
-        identityDirectory,
+        identityPath,
       },
       'discovery started',
     );
     this.notifyChange();
+  }
+
+  /**
+   * Keeps a peer out of this node's hub election for `durationMs`
+   * (`NetworkManager.excludeFromElection`); the manager recomputes the
+   * topology at once, so an excluded hub is replaced with the events that
+   * follow. `TopologyRepair` calls this for a peer whose peer table entry
+   * is known to be stale. Nothing happens without discovery.
+   */
+  excludeFromElection(nodeId: string, durationMs: number): void {
+    this.manager?.excludeFromElection(nodeId, durationMs);
   }
 
   /**
@@ -228,6 +292,7 @@ export class RoleOrchestrator {
     if (this.selfNodeId === null) {
       return {
         nodeId: null,
+        identity: null,
         role: 'starting',
         domain,
         hubNodeId: null,
@@ -239,6 +304,7 @@ export class RoleOrchestrator {
     if (this.manager === null) {
       return {
         nodeId: this.selfNodeId,
+        identity: this.identity,
         role: 'standalone',
         domain,
         hubNodeId: null,
@@ -249,9 +315,10 @@ export class RoleOrchestrator {
     }
 
     const topology = this.manager.getTopology();
-    const peers = this.peersOf(topology);
+    const peers = this.peersOf(topology, this.manager);
     return {
       nodeId: this.selfNodeId,
+      identity: this.identity,
       role: this.roleOf(topology, peers.length),
       domain,
       hubNodeId: topology.hubNodeId,
@@ -268,7 +335,10 @@ export class RoleOrchestrator {
     return peerCount === 0 ? 'standalone' : 'starting';
   }
 
-  private peersOf(topology: NetworkTopology): PeerSnapshot[] {
+  private peersOf(
+    topology: NetworkTopology,
+    manager: DiscoveryManager,
+  ): PeerSnapshot[] {
     const now = this.now();
     return Object.values(topology.nodes)
       .filter((node) => node.nodeId !== this.selfNodeId)
@@ -302,6 +372,7 @@ export class RoleOrchestrator {
                   latencyMs: probe.reachable ? probe.latencyMs : null,
                   measuredAt: isoString(probe.measuredAt),
                 },
+          excludedFromElection: manager.isExcludedFromElection(node.nodeId),
         };
       })
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
