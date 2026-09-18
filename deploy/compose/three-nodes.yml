@@ -21,6 +21,15 @@
 # one. `NODE<n>_SEED_SIZE` sets one node's `SEED_SIZE` (`small` unless
 # given), for example `none` on a node that is to receive everything over
 # the network, or `medium` on the one that provides it.
+#
+# The stores mirror production: node1 and node2 run over SQLite on a named
+# volume each, so their database file and their node identity
+# (`/data/identity/<domain>/node-id`) survive `restart`, `stop` and `start`
+# and a recreated container, until `down --volumes` removes the volumes;
+# node3 runs in memory without a volume, so it keeps its identity across a
+# `restart` (the container's file system stays) and gets a fresh one when
+# the container is recreated (`up --force-recreate node3`), like the
+# memory node's pod in Kubernetes.
 name: rljson-tryout-three-nodes
 
 x-node: &node
@@ -44,10 +53,13 @@ services:
     environment:
       <<: *node-environment
       NODE_NAME: node1
+      STORAGE: sqlite
       PUBLIC_URL: http://localhost:${NODE1_PORT:-8301}
       SEED_SIZE: ${NODE1_SEED_SIZE:-small}
     ports:
       - '${NODE1_PORT:-8301}:8080'
+    volumes:
+      - node1-data:/data
 
   node2:
     <<: *node
@@ -55,10 +67,13 @@ services:
     environment:
       <<: *node-environment
       NODE_NAME: node2
+      STORAGE: sqlite
       PUBLIC_URL: http://localhost:${NODE2_PORT:-8302}
       SEED_SIZE: ${NODE2_SEED_SIZE:-small}
     ports:
       - '${NODE2_PORT:-8302}:8080'
+    volumes:
+      - node2-data:/data
 
   node3:
     <<: *node
@@ -74,3 +89,7 @@ services:
 networks:
   petshop:
     driver: bridge
+
+volumes:
+  node1-data:
+  node2-data:
