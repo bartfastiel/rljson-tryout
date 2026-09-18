@@ -119,6 +119,13 @@ What the browser does:
   page again, in parallel, and drops the answer when the selection or the
   page count moved on meanwhile), so the 100-invoice burst above ended in
   one refresh of the invoice list per tab.
+- The indicator cost the phone header its room: with the wider system
+  font of the Ubuntu runner (not on Windows) the node badge wrapped under
+  the title at 375 px, and a node bar of `height: 100%` in the now taller
+  header hung over the first row of every view and swallowed the taps on
+  it, which failed eleven unrelated Playwright tests in CI. The bar's
+  height follows its content on phones now, and a test at 340 px keeps
+  the header above the page.
 
 ## What it means for rljson users
 
