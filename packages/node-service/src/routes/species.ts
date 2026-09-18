@@ -123,7 +123,10 @@ export const registerSpeciesRoutes = (
     },
   );
 
-  server.post<{ Params: SpeciesParams; Body: Buffer }>(
+  // The body is whatever the parser of the declared media type produced:
+  // a `Buffer` from the parser above, something else from Fastify's own
+  // JSON and text parsers, which the handler refuses by the type first.
+  server.post<{ Params: SpeciesParams; Body: unknown }>(
     '/api/species/:id/image',
     { bodyLimit: maximumUploadedImageBytes },
     async (request, reply): Promise<SpeciesResponse | ErrorBody> => {

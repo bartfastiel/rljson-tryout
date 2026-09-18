@@ -1677,7 +1677,7 @@ export class PetShopStore {
       return { content, source: 'local' };
     }
     const cascade = this.blobCascade?.();
-    if (cascade === undefined || cascade === null) {
+    if (cascade === undefined) {
       return undefined;
     }
     let content: Buffer;
@@ -1688,10 +1688,7 @@ export class PetShopStore {
       if (!(await cascade.blobExists(blobId))) {
         return undefined;
       }
-      const served = await cascade.getBlob(blobId);
-      content = Buffer.isBuffer(served.content)
-        ? served.content
-        : Buffer.from(served.content);
+      content = (await cascade.getBlob(blobId)).content;
     } catch (error) {
       throw new Error(
         `the network could not serve blob ${blobId}: ${errorMessage(error)}`,
