@@ -55,6 +55,7 @@ import {
  * @property {string} name
  * @property {string | null} speciesId
  * @property {string | null} speciesName
+ * @property {string | null} speciesImageUrl
  * @property {string | null} breederId
  * @property {string | null} breederFarmName
  * @property {string} bornOn
@@ -126,6 +127,25 @@ const storyParagraphs = (story) => {
 };
 
 /**
+ * The species badge beside the facts, decorative since the facts name the
+ * species; left out when the species does not resolve.
+ *
+ * @param {AnimalDetail} animal
+ */
+const speciesImage = (animal) => {
+  if (animal.speciesImageUrl === null) {
+    return null;
+  }
+  const image = element('img', 'animal-species-image');
+  image.src = animal.speciesImageUrl;
+  image.alt = '';
+  image.width = 256;
+  image.height = 256;
+  image.decoding = 'async';
+  return image;
+};
+
+/**
  * The compact facts block: species as a link to the filtered list, breeder
  * as a link to the breeders view, born date and price.
  *
@@ -161,6 +181,18 @@ const factsBlock = (animal) => {
     element('dd', '', priceFormat.format(animal.priceCents / 100)),
   );
   return facts;
+};
+
+/**
+ * The species badge and the facts block side by side.
+ *
+ * @param {AnimalDetail} animal
+ */
+const overview = (animal) => {
+  const image = speciesImage(animal);
+  const block = element('div', 'animal-overview');
+  block.append(...(image === null ? [] : [image]), factsBlock(animal));
+  return block;
 };
 
 /**
@@ -320,7 +352,7 @@ const detailView = (animal, history) => {
   view.append(
     headingRow(animal, isNewestTip),
     ...(isNewestTip ? [] : [oldVersionNotice(animal, history)]),
-    factsBlock(animal),
+    overview(animal),
     ...(traits === null ? [] : [traits]),
     storyParagraphs(animal.backgroundStory),
     versionsSection(history, animal, newestTipHash),
@@ -377,8 +409,9 @@ const fetchAnimal = async (id, version) => {
 };
 
 /**
- * Shows one animal: a heading with its name and an "Edit" action, a
- * compact facts block, its background story as paragraphs and the list of
+ * Shows one animal: a heading with its name and an "Edit" action, the
+ * badge of its species beside a compact facts block, its background story
+ * as paragraphs and the list of
  * its versions, reached from an animal card at `#/animals/<id>`; with
  * `?version=<hash>` it shows that older version read-only, with a notice
  * and a link back to the current one. Fetches `GET /api/animals/<id>` and

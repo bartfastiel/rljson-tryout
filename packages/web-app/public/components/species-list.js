@@ -13,9 +13,29 @@ import { errorState, statusMessage } from '../view-helpers.js';
  * @property {string} name
  * @property {string} latinName
  * @property {string} description
+ * @property {string} imageUrl
  */
 
 const viewTitle = () => element('h1', 'view-title', 'Species');
+
+/**
+ * The badge of a species at the top of its card. The intrinsic size and
+ * the square aspect ratio reserve the space before the bytes arrive, so
+ * the text below does not jump; the image loads lazily since a long list
+ * of species scrolls past most of them.
+ *
+ * @param {Species} species
+ */
+const speciesImage = (species) => {
+  const image = element('img', 'species-image');
+  image.src = species.imageUrl;
+  image.alt = species.name;
+  image.width = 256;
+  image.height = 256;
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  return image;
+};
 
 /**
  * @param {Species} species
@@ -31,6 +51,7 @@ const speciesCard = (species) => {
 
   const card = element('article', 'card species-card');
   card.append(
+    speciesImage(species),
     element('h2', 'species-name', species.name),
     latinNameLine,
     element('p', 'species-description', species.description),

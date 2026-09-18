@@ -23,6 +23,7 @@ import {
  * @property {string} name
  * @property {string | null} speciesId
  * @property {string | null} speciesName
+ * @property {string | null} speciesImageUrl
  * @property {string | null} breederId
  * @property {string | null} breederFarmName
  * @property {string} bornOn
@@ -302,6 +303,27 @@ const animalFilters = (species, traits, breeders, selection) => {
 };
 
 /**
+ * The small round badge of the animal's species at the left of its card,
+ * decorative since the species is named right next to it; a blank disc of
+ * the same size when the species does not resolve, so every card lines up.
+ *
+ * @param {Animal} animal
+ */
+const speciesThumbnail = (animal) => {
+  if (animal.speciesImageUrl === null) {
+    return element('span', 'animal-thumbnail');
+  }
+  const image = element('img', 'animal-thumbnail');
+  image.src = animal.speciesImageUrl;
+  image.alt = '';
+  image.width = 48;
+  image.height = 48;
+  image.loading = 'lazy';
+  image.decoding = 'async';
+  return image;
+};
+
+/**
  * @param {Animal} animal
  * @param {Selection} selection
  */
@@ -319,13 +341,15 @@ const animalCard = (animal, selection) => {
   // The whole card is one link to the animal's detail page, carrying the
   // selection along so that the detail can link back to this very list;
   // a tap anywhere on it reaches the detail view with a single target.
-  const card = element('a', 'card animal-card');
-  card.href = animalsHref(selection, animal.id);
-  card.append(
+  const text = element('div', 'animal-card-text');
+  text.append(
     element('h2', 'animal-name', animal.name),
     meta,
     element('p', 'animal-price', priceFormat.format(animal.priceCents / 100)),
   );
+  const card = element('a', 'card animal-card');
+  card.href = animalsHref(selection, animal.id);
+  card.append(speciesThumbnail(animal), text);
 
   const item = element('li', 'card-list-item');
   item.append(card);

@@ -551,6 +551,18 @@ a.card {
   text-decoration: none;
 }
 
+/* The badge is a round motif on a transparent background, so the surface
+   of the card shows through in light and dark mode alike. The square
+   aspect ratio holds the space before the bytes arrive. */
+.species-image {
+  display: block;
+  width: 100%;
+  max-width: 14rem;
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 0 var(--space-3);
+}
+
 .species-name {
   margin: 0;
   font-size: 1.25rem;
@@ -566,6 +578,26 @@ a.card {
 .species-description {
   max-width: var(--text-measure);
   margin: 0 0 var(--space-4);
+}
+
+a.animal-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.animal-thumbnail {
+  flex: none;
+  display: block;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--color-background);
+}
+
+.animal-card-text {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .animal-name {
@@ -612,6 +644,26 @@ a.card {
   margin-bottom: var(--space-2);
   color: var(--color-text-muted);
   text-decoration: none;
+}
+
+.animal-overview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-6);
+}
+
+.animal-species-image {
+  flex: none;
+  display: block;
+  width: 6rem;
+  height: 6rem;
+}
+
+.animal-overview .animal-facts {
+  flex: 1 1 12rem;
+  margin: 0;
 }
 
 .animal-facts,
@@ -1857,6 +1909,11 @@ button.chip {
 
   .card {
     padding: var(--space-5);
+  }
+
+  .animal-species-image {
+    width: 8rem;
+    height: 8rem;
   }
 
   .transfer-dialog {
