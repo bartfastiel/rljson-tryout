@@ -6,6 +6,7 @@ import { HubTransport } from './network/hubTransport.ts';
 import { NodeDirectory } from './network/nodeDirectory.ts';
 import { RoleOrchestrator } from './network/roleOrchestrator.ts';
 import { SyncAgent } from './network/syncAgent.ts';
+import { TopologyRepair } from './network/topologyRepair.ts';
 import { buildServer } from './server.ts';
 import { createIo } from './store/createIo.ts';
 import { PetShopStore } from './store/petShopStore.ts';
@@ -49,6 +50,15 @@ try {
     transport,
     logger.child({ component: 'sync' }),
   );
+  const repair = new TopologyRepair(
+    {
+      network: () => orchestrator.snapshot(),
+      reports: () => directory.reports(),
+      excludeFromElection: (nodeId, durationMs) =>
+        orchestrator.excludeFromElection(nodeId, durationMs),
+    },
+    logger.child({ component: 'repair' }),
+  );
   const server = buildServer({
     configuration,
     store,
@@ -62,6 +72,7 @@ try {
     server.log.info({ signal }, 'shutting down');
 
     try {
+      repair.stop();
       directory.stop();
       await server.close();
       await syncAgent.stop();
@@ -103,6 +114,9 @@ try {
   // node's id from a broadcast can immediately correlate it with a URL.
   await orchestrator.start();
   await directory.start();
+  // The repair compares what discovery holds with what the directory
+  // polls, so it runs once both exist.
+  repair.start();
 } catch (error) {
   logger.error(error, 'failed to start the server');
   process.exit(1);
