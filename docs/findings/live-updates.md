@@ -25,9 +25,13 @@
   the client in batches of ten with a stream open on both nodes, and the
   hub's stream watched for 45 s while the client was stopped and started
   again.
-- Measured through Traefik on the preview of pull request #40 (three
-  memory nodes, staging certificates, `curl -N` for 40 s on node1 while an
-  invoice was issued on node3).
+- Measured through Traefik on the preview of pull request #40
+  (`node1-pr-40`, a single memory node behind a staging certificate, as
+  every preview is): a stream read for 45 s with five invoices issued on
+  the node meanwhile, a stream left idle for 200 s, and the app in two
+  tabs of one Chromium with an invoice issued in one of them. The
+  cross-node `sync` event through Traefik is a production check after the
+  merge, since only production runs three nodes.
 
 ## What happened
 
@@ -94,10 +98,35 @@ Timings, two nodes (hub `medium` on 8452, client `small` on 8453):
   out, otherwise every 3 s directory poll and every 10 s probe cycle
   would be an event.
 
-Through Traefik (preview of #40, `node1-pr-40` and `node3-pr-40`):
+Through Traefik (preview of #40, `https://node1-pr-40.rljson-tryout…`,
+HTTPS, HTTP/2 from Node's `fetch`, no ingress annotation added):
 
-- See the section below; the numbers were recorded after the preview
-  came up.
+- Traefik as k3s ships it passes the stream through unchanged: the
+  response carried `content-type: text/event-stream`, `cache-control:
+no-cache`, `x-accel-buffering: no` and chunked transfer, and an
+  `insert` event arrived 0.6 ms before the answer of the `POST` that
+  caused it (median of five, the two responses race over the same
+  connection), 32 ms after the request left, which is the round trip.
+  Traefik does not buffer `text/event-stream`; its flush interval only
+  applies to other content types.
+- Nothing closes an idle stream: left alone for 200 s, the connection
+  saw a heartbeat every 15.0 s and nothing else, and ended only when the
+  client aborted. Traefik's timeouts that could apply
+  (`respondingTimeouts.idleTimeout`, 180 s by default) count idle
+  keep-alive connections between requests, not a response in progress,
+  and the heartbeat keeps the response in progress anyway. No k3s or
+  Traefik setting was touched for this.
+- The app in two tabs of one Chromium against the preview: tab B on the
+  invoice list showed "Live updates: live", an invoice issued through the
+  form in tab A (105 ms for the `POST`) appeared as a card in tab B
+  310 ms later, one navigation entry in tab B throughout (no reload),
+  which is the 300 ms debounce plus one `GET /api/invoices`.
+- A preview is a single node, so the cross-node `sync` event through
+  Traefik is checked in production after the merge: `curl -N
+https://node1.rljson-tryout…/api/events` while an invoice is issued on
+  node3 should show `pending` and `completed` `sync` events within a
+  second, given the tens of milliseconds the sync itself takes
+  (`docs/findings/change-set-sync.md`).
 
 What the browser does:
 
