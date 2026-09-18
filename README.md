@@ -35,6 +35,7 @@ Phase A (walking skeleton to production) is complete; phase B (the domain on one
 Slice D1 (discovery and roles) was pulled forward: every node discovers the other nodes of its rljson domain by UDP broadcast, takes part in the hub election and reports the outcome at `/status`; since C3 the three production nodes agree on one hub, which the header of the web app and the `Network` view show live.
 Slice D2 (hub transport) makes the nodes talk: the hub serves its store over socket.io on the hub port, every client connects to it, and a row written on one node is readable by its hash on every other node through the read cascade of `@rljson/server`.
 Slice D3 (change set synchronisation) makes them agree: every change a node writes is announced as one change set, every other node pulls it within tens of milliseconds, an animal renamed on one node shows the new name on all of them, and the seed is deterministic, so a node seeded `medium` fills the `small` ones with its generated rows.
+Slice B13 (live updates) makes it visible: every node streams its inserts, transfers and topology changes over `GET /api/events`, and the web app refreshes what it shows the moment they arrive, with a header indicator for the connection.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
@@ -248,7 +249,29 @@ on this node sees it and red otherwise, with a small marker for the
 browser's own `/health` probe and, on the hub, a small count of its
 connected clients. The `Network` view lists the same nodes with all three
 signals, what this node's hub transport is doing, and the discovered
-peers, refreshed every five seconds.
+peers.
+
+Everything a node does is also a stream: `GET /api/events` answers
+server-sent events (`text/event-stream`, kept open, a comment heartbeat
+every fifteen seconds, an `id` per event and a `retry` hint of three
+seconds) with `insert` for every change set this node writes itself
+(`{ changeSetHash, changeSetId, tables, entityIds }`), `sync` for every
+change set transfer of the sync agent (the transfer as `/status` lists
+it, once when the pull starts with `status: "pending"` and once with its
+outcome) and `topology` whenever the network part of `/status` changes
+(`{ nodeId, role, hubNodeId, hubAddress, peers, nodes, transport }`);
+`conflict` is reserved for the conflict detection of slice D11. Try it
+with `curl -N http://localhost:8080/api/events` in one shell and an
+invoice issued in another. The web app follows the stream: a header
+indicator shows whether it is live (green), reconnecting (amber) or the
+browser is offline (grey), every list and detail refreshes in place when
+a change set touches what it shows, so an invoice issued in one tab or on
+another node appears in the invoice list of every other tab without a
+reload, the search text, filters, loaded pages and scroll position
+staying as they are, and the header and the `Network` view follow the
+`topology` and `sync` events, with a status poll every thirty seconds as
+the fallback. What the stream looks like on the wire, through Traefik
+and under load is in [docs/findings/live-updates.md](docs/findings/live-updates.md).
 
 Environment variables the service understands so far:
 
