@@ -72,9 +72,10 @@ const fileProblem = (file) => {
  * (`capture="environment"`) or its gallery, a status line while the bytes
  * travel and the node's own message when it refused them. A file that is
  * not a PNG or JPEG, or bigger than a mebibyte, never leaves the device.
- * On success the card's image is swapped for the new version's at once;
- * the whole list rebuilds from the node's `insert` event a moment later
- * anyway, which is what a second browser sees too.
+ * On success the card's image is swapped for the new version's at once,
+ * which is the feedback; the whole list rebuilds from the node's
+ * `insert` event a moment later anyway, which is what a second browser
+ * sees too.
  *
  * @param {Species} species
  * @param {HTMLImageElement} image
@@ -129,7 +130,7 @@ const uploadControl = (species, image) => {
         )
       );
       image.src = updated.imageUrl;
-      say('status', 'Image updated.');
+      message.hidden = true;
     } catch (error) {
       say('alert', error instanceof Error ? error.message : String(error));
     } finally {
