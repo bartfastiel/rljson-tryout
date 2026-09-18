@@ -45,6 +45,16 @@ const tableKeys = Object.keys(tableCfgs) as (keyof GeneratedSeed)[];
 const medium = seedPlans.medium.generated!;
 const large = seedPlans.large.generated!;
 
+/**
+ * The generated part of each size, produced once for the whole file: the
+ * `large` seed renders fifty species images and hashes 25 000 rows, which
+ * is not worth repeating per test.
+ */
+const generatedSeeds = {
+  medium: generatedSeedFor('medium')!,
+  large: generatedSeedFor('large')!,
+};
+
 const tinyCounts: GeneratedCounts = {
   species: 2,
   traits: 3,
@@ -265,7 +275,7 @@ describe('generateSeed', () => {
     }
     const statuses = new Set(generated.invoices.map((row) => row.status));
     const mediumStatuses = new Set(
-      generatedSeedFor('medium')!.invoices.map((row) => row.status),
+      generatedSeeds.medium.invoices.map((row) => row.status),
     );
     expect([...statuses].every((status) => mediumStatuses.has(status))).toBe(
       true,
@@ -310,7 +320,7 @@ describe('generateSeed', () => {
     const handWrittenAnimals = new Set(
       handWrittenSeedBase.animals.map((row) => row._hash),
     );
-    const mediumSeed = generatedSeedFor('medium')!;
+    const mediumSeed = generatedSeeds.medium;
 
     expect(
       mediumSeed.animals.some((row) => handWrittenSpecies.has(row.speciesRef)),
@@ -354,7 +364,7 @@ describe('generatedSeedFor', () => {
     ['medium', medium],
     ['large', large],
   ] as const)('generates the counts of the %s plan', (size, counts) => {
-    const generated = generatedSeedFor(size)!;
+    const generated = generatedSeeds[size];
 
     expect(generated.species).toHaveLength(counts.species);
     expect(generated.traits).toHaveLength(counts.traits);
@@ -366,7 +376,7 @@ describe('generatedSeedFor', () => {
   });
 
   it('produces the golden hashes of the medium seed', () => {
-    const generated = generatedSeedFor('medium')!;
+    const generated = generatedSeeds.medium;
 
     expect(
       Object.fromEntries(
@@ -421,7 +431,7 @@ describe('generatedSeedFor', () => {
   });
 
   it('produces the golden hashes of the large seed', () => {
-    const generated = generatedSeedFor('large')!;
+    const generated = generatedSeeds.large;
 
     expect(
       Object.fromEntries(
@@ -476,15 +486,13 @@ describe('generatedSeedFor', () => {
   });
 
   it('resolves every reference of the medium seed against the hand-written seed and itself', async () => {
-    const errors = await validationErrors(
-      wholeDocument(generatedSeedFor('medium')!),
-    );
+    const errors = await validationErrors(wholeDocument(generatedSeeds.medium));
 
     expect(errors).toStrictEqual({});
   });
 
   it('is rejected by the validator when a generated reference is broken', async () => {
-    const generated = generatedSeedFor('medium')!;
+    const generated = generatedSeeds.medium;
     const [firstItem, ...otherItems] = generated.invoiceItems;
     const broken: GeneratedSeed = {
       ...generated,
@@ -499,11 +507,17 @@ describe('generatedSeedFor', () => {
     expect(errors).toMatchObject({ base: { hasErrors: true } });
   });
 
-  it('resolves every reference of the large seed', async () => {
-    const errors = await validationErrors(
-      wholeDocument(generatedSeedFor('large')!),
-    );
+  // The validator walks 25 000 rows and every reference between them: about
+  // a second on a development machine, two to five on a shared CI runner.
+  it(
+    'resolves every reference of the large seed',
+    { timeout: 30_000 },
+    async () => {
+      const errors = await validationErrors(
+        wholeDocument(generatedSeeds.large),
+      );
 
-    expect(errors).toStrictEqual({});
-  });
+      expect(errors).toStrictEqual({});
+    },
+  );
 });
