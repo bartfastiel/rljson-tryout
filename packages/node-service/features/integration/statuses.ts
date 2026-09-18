@@ -57,6 +57,43 @@ export const allConnected = (statuses: StatusReport[]): boolean =>
 const sleep = (milliseconds: number): Promise<void> =>
   new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 
+/** Polls until the condition holds and returns how long that took. */
+export const until = async (
+  condition: () => Promise<boolean>,
+  timeoutMs: number,
+  pollIntervalMs = 100,
+): Promise<number> => {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  while (!(await condition())) {
+    if (Date.now() > deadline) {
+      throw new Error(`condition not met within ${timeoutMs} ms`);
+    }
+    await sleep(pollIntervalMs);
+  }
+  return Date.now() - started;
+};
+
+/** The compose node with the given service name. */
+export const nodeNamed = (name: string): ComposeNode => {
+  const node = composeNodes.find((candidate) => candidate.name === name);
+  if (node === undefined) {
+    throw new Error(`no compose node is named ${name}`);
+  }
+  return node;
+};
+
+/** The `/status` of a node, or `null` while it does not answer. */
+export const statusOrNull = async (
+  node: ComposeNode,
+): Promise<StatusReport | null> => {
+  try {
+    return await fetchStatus(node.port);
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Polls every node's `/status` until `condition` holds for all of them,
  * tolerating nodes that do not answer yet, and returns the statuses that
@@ -98,12 +135,5 @@ export const waitForStatuses = async (
 };
 
 /** The compose node whose `/status` this is, by its reported name. */
-export const nodeOf = (status: StatusReport): ComposeNode => {
-  const node = composeNodes.find(
-    (candidate) => candidate.name === status.nodeName,
-  );
-  if (node === undefined) {
-    throw new Error(`no compose node is named ${status.nodeName}`);
-  }
-  return node;
-};
+export const nodeOf = (status: StatusReport): ComposeNode =>
+  nodeNamed(status.nodeName);

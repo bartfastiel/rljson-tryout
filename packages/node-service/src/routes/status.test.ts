@@ -105,6 +105,11 @@ const serverOverFakeNetwork = async () => {
       return Response.json({
         nodeName: 'node2',
         nodeId: 'id-node2',
+        identity: {
+          persistent: true,
+          startedAt: '2026-09-18T10:00:00.000Z',
+          identityPath: '/data/identity/petshop-test/node-id',
+        },
         role: 'client',
         transport: { role: 'client', connectedToHub: true },
       });
@@ -129,6 +134,7 @@ const serverOverFakeNetwork = async () => {
   await directory.start();
   return {
     server,
+    dataDirectory,
     manager: () => {
       if (manager === undefined) {
         throw new Error('the orchestrator has not created its manager yet');
@@ -150,6 +156,7 @@ describe('GET /status', () => {
     expect(response.json()).toStrictEqual({
       nodeName: 'node1',
       nodeId: null,
+      identity: null,
       publicUrl: 'http://localhost:8080',
       domain: 'petshop-test',
       role: 'starting',
@@ -164,6 +171,7 @@ describe('GET /status', () => {
           nodeId: null,
           role: 'starting',
           connectedClients: null,
+          identity: null,
           reachable: true,
           lastSeen: expect.any(String) as string,
           seenInTopology: true,
@@ -237,7 +245,7 @@ describe('GET /status', () => {
   });
 
   it('reports the hub role, the transport, the peers with their names and every node of the environment', async () => {
-    const { server, manager } = await serverOverFakeNetwork();
+    const { server, manager, dataDirectory } = await serverOverFakeNetwork();
     manager().join(
       fakeNodeInfo('id-node2', { hostname: 'node2', localIps: ['172.18.0.3'] }),
     );
@@ -258,6 +266,7 @@ describe('GET /status', () => {
         nodeId: string | null;
         role: string | null;
         connectedClients: number | null;
+        identity: { persistent: boolean; startedAt: string } | null;
         reachable: boolean;
         seenInTopology: boolean;
       }[];
@@ -267,6 +276,16 @@ describe('GET /status', () => {
     expect(status).toMatchObject({
       nodeName: 'node1',
       nodeId: 'id-node1',
+      identity: {
+        persistent: false,
+        startedAt: '1970-01-01T00:00:01.000Z',
+        identityPath: join(
+          dataDirectory,
+          'identity',
+          'petshop-test',
+          'node-id',
+        ),
+      },
       publicUrl: 'http://node1:8080',
       role: 'hub',
       hubNodeId: 'id-node1',
@@ -285,6 +304,7 @@ describe('GET /status', () => {
       hostname: 'node2',
       addresses: ['172.18.0.3'],
       role: 'client',
+      excludedFromElection: false,
     });
     expect(status.peers[1]).toMatchObject({
       nodeId: 'id-node4',
@@ -299,6 +319,7 @@ describe('GET /status', () => {
         nodeId: 'id-node1',
         role: 'hub',
         connectedClients: 0,
+        identity: { persistent: false, startedAt: '1970-01-01T00:00:01.000Z' },
         reachable: true,
         lastSeen: expect.any(String) as string,
         seenInTopology: true,
@@ -310,6 +331,7 @@ describe('GET /status', () => {
         nodeId: 'id-node2',
         role: 'client',
         connectedClients: null,
+        identity: { persistent: true, startedAt: '2026-09-18T10:00:00.000Z' },
         reachable: true,
         lastSeen: expect.any(String) as string,
         seenInTopology: true,
@@ -321,6 +343,7 @@ describe('GET /status', () => {
         nodeId: null,
         role: null,
         connectedClients: null,
+        identity: null,
         reachable: false,
         lastSeen: null,
         seenInTopology: false,

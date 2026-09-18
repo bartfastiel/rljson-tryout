@@ -163,19 +163,44 @@ probe listener on `HUB_PORT` (3000) and the UDP broadcast socket on
 every node it hears, and takes part in the hub election of
 `@rljson/network` (earliest start wins, an incumbent hub is kept while it
 answers). `GET /status` reports the outcome:
-`{ nodeName, nodeId, publicUrl, domain, role, hubNodeId, hubAddress, peers, nodes, transport, sync, storage, tables }`
+`{ nodeName, nodeId, identity, publicUrl, domain, role, hubNodeId, hubAddress, peers, nodes, transport, sync, storage, tables }`
 with `role` one of `starting`, `standalone` (no other node of the domain
-is known, or discovery is disabled), `hub` and `client`; `peers` lists
+is known, or discovery is disabled), `hub` and `client`; `identity`
+says where the id comes from:
+`{ persistent, startedAt, identityPath }`, `persistent` true when the id
+was read from the identity file an earlier process left under `DATA_DIR`
+(it has survived a restart) and false when this process generated it,
+`startedAt` the start time the node's announcements carry, which changes
+with every process while the id stays; `peers` lists
 every node discovery knows (`nodeId`, `name` when known, `hostname`,
-`addresses`, `port`, `role`, `startedAt`, `firstSeen`, `lastSeen`,
-`probe: { reachable, latencyMs, measuredAt } | null`; a peer's `lastSeen`
+`addresses`, `port`, `role`, `startedAt` as the peer first announced it,
+`firstSeen`, `lastSeen`,
+`probe: { reachable, latencyMs, measuredAt } | null`,
+`excludedFromElection`; a peer's `lastSeen`
 advances for as long as discovery still lists it, not per heartbeat, so
 `probe.measuredAt` and `probe.reachable` tell whether it answered); `nodes` lists every
 URL of `NODE_URLS` (this node included and flagged `self`) with the name,
-node id, role and, for the hub, `connectedClients` it reported to this
-node's poll of its `/status`, `reachable` from that server-side poll,
-`seenInTopology` from discovery and `lastSeen`; `tables` holds the row
-count of every table of the store.
+node id, role, `identity` and, for the hub, `connectedClients` it
+reported to this node's poll of its `/status`, `reachable` from that
+server-side poll, `seenInTopology` from discovery and `lastSeen`;
+`tables` holds the row count of every table of the store.
+
+`excludedFromElection` is the trace of a repair this node runs on its
+own election: `@rljson/network` never refreshes the start time of a peer
+it already knows, so a node that restarts with its persistent id within
+the broadcast timeout (15 s) keeps its previous start time in every
+other node's election, where it may still count as the earliest node,
+and a hub restarted that quickly left the others following a node that
+had itself become a client
+([docs/findings/network-discovery.md](docs/findings/network-discovery.md)).
+Every node therefore compares, once a second, what its peers report
+about themselves in `identity.startedAt` and `role` with what discovery
+holds, and keeps a peer whose start time moved (for 5 s) or a hub that
+denies its role (for 30 s) out of its own election for 90 s at a time,
+renewed while the difference lasts, at most once per minute per peer and
+cause, each time logged with the cause. The network view shows the
+identity origin as "persistent id" or "fresh id" per node and the
+election state per peer.
 `GET /api/stats` reports
 `{ nodeName, seedSize, uptimeSeconds, startedAt, rssBytes, tables }`: the
 seed size the node was configured with, its uptime, the resident set size
@@ -359,7 +384,12 @@ Environment variables the service understands so far:
 
 `deploy/compose/three-nodes.yml` starts three node services of the domain
 `petshop-compose` on one bridge network, reachable from the host on the
-ports 8301 to 8303 (`NODE1_PORT` to `NODE3_PORT`):
+ports 8301 to 8303 (`NODE1_PORT` to `NODE3_PORT`); like in production,
+node1 and node2 run over SQLite on a named volume each, so their database
+file and their node id survive a restart and a recreated container until
+`down --volumes`, and node3 runs in memory without a volume, so a
+recreated node3 container (`up --force-recreate node3`) comes back with a
+fresh id:
 
 ```sh
 docker compose -f deploy/compose/three-nodes.yml up --build --wait
@@ -406,7 +436,12 @@ fourth scenario, the transfers with a node and the rows an edit carried
 as the web app reads them, runs in-process only) and
 `features/bootstrap.feature` ("node3 restarts and catches up"; its two
 other scenarios, a hub that restarts and a node that joins with change
-sets of its own, run in-process only) drive exactly this setup:
+sets of its own, run in-process only) and `features/identity.feature`
+("a sqlite node keeps its node id across a restart", "a memory node gets
+a fresh id and the old one disappears from the others within the peer
+timeout", "a hub restarted within two seconds is agreed upon again
+within one minute"; its fourth scenario, the survivor's side of the
+repair, runs in-process only) drive exactly this setup:
 
 ```sh
 pnpm --filter @rljson-tryout/node-service test:integration
@@ -419,7 +454,9 @@ an animal and issues an invoice on the hub and reads both back on a
 client, issues an invoice on node3 and renames an animal on node2 and
 waits for them on the other nodes, restarts a client container and checks
 that it holds the hub's invoice again while the other client holds it
-once, saves the compose logs to
+once, restarts a SQLite client and the hub in place and replaces the
+memory node and checks the ids and the agreement on one hub, saves the
+compose logs to
 `packages/node-service/test-results/compose/three-nodes.log` and tears the
 project down again. `pnpm test` leaves it out; the `integration` job of
 the pipeline runs it against the image the `image` job pushed. What the
@@ -498,7 +535,9 @@ is a `StatefulSet` with one replica and a 2 Gi `local-path` persistent
 volume claim mounted at `/data`, which holds the SQLite file and the
 discovery identity, so that an invoice and the node id survive a restart
 and a redeploy (a rollout of a `StatefulSet` replaces its single pod, a
-few seconds of downtime the `smoke` job waits out). Production runs
+few seconds of downtime the `smoke` job waits out); the memory node keeps
+its id across a container restart inside its pod and gets a fresh one
+with every new pod. Production runs
 three nodes, `node1` and `node2` over `sqlite` and `node3` over `memory`,
 each with its own hostname, certificate and seed; previews run a single
 `node1` over `memory`. The image is the one the

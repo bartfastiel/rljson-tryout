@@ -8,6 +8,7 @@ type FakeNode = {
   nodeId: string;
   role: string;
   transport?: Record<string, unknown>;
+  identity?: Record<string, unknown>;
 };
 
 const selfUrl = 'http://node1:8080';
@@ -16,6 +17,7 @@ const self = {
   nodeId: 'id-node1',
   role: 'hub' as const,
   connectedClients: 2,
+  identity: { persistent: true, startedAt: '2023-11-14T22:00:00.000Z' },
 };
 
 /**
@@ -101,11 +103,13 @@ describe('NodeDirectory', () => {
         nodeId: 'id-node1',
         role: 'hub',
         connectedClients: 2,
+        identity: { persistent: true, startedAt: '2023-11-14T22:00:00.000Z' },
         reachable: true,
         lastSeen: '2023-11-14T22:13:20.000Z',
         seenInTopology: true,
       },
     ]);
+    expect(directory.reports()).toStrictEqual([]);
   });
 
   it('keeps the order of NODE_URLS and never fetches its own URL', async () => {
@@ -214,6 +218,11 @@ describe('NodeDirectory', () => {
           nodeName: 'node2',
           nodeId: 'id-node2',
           role: 'client',
+          identity: {
+            persistent: true,
+            startedAt: '2023-11-14T22:10:00.000Z',
+            identityPath: '/data/identity/petshop-test/node-id',
+          },
         },
         'http://node3:8080': {
           nodeName: 'node3',
@@ -235,6 +244,7 @@ describe('NodeDirectory', () => {
       nodeId: 'id-node2',
       role: 'client',
       connectedClients: null,
+      identity: { persistent: true, startedAt: '2023-11-14T22:10:00.000Z' },
       reachable: true,
       lastSeen: '2023-11-14T22:13:20.000Z',
       seenInTopology: true,
@@ -243,11 +253,20 @@ describe('NodeDirectory', () => {
       name: 'node3',
       nodeId: 'id-node3',
       role: 'starting',
+      identity: null,
       reachable: true,
       seenInTopology: false,
     });
     expect(directory.nameOf('id-node3')).toBe('node3');
     expect(directory.nameOf('id-unknown')).toBeNull();
+    expect(directory.reports()).toStrictEqual([
+      {
+        nodeId: 'id-node2',
+        role: 'client',
+        startedAt: '2023-11-14T22:10:00.000Z',
+      },
+      { nodeId: 'id-node3', role: 'starting', startedAt: null },
+    ]);
     expect(records).toContainEqual(
       expect.objectContaining({
         level: 'info',
@@ -345,12 +364,54 @@ describe('NodeDirectory', () => {
       lastSeen: '2023-11-14T22:13:20.000Z',
       seenInTopology: true,
     });
+    expect(directory.reports()).toStrictEqual([]);
     expect(records).toContainEqual(
       expect.objectContaining({
         level: 'warn',
         message: 'node unreachable',
       }),
     );
+  });
+
+  it('keeps an identity only when it names a start time', async () => {
+    const { directory } = directoryOver(
+      {
+        'http://node2:8080': {
+          nodeName: 'node2',
+          nodeId: 'id-node2',
+          role: 'client',
+          identity: {
+            persistent: 'yes',
+            startedAt: '2023-11-14T22:10:00.000Z',
+          },
+        },
+        'http://node3:8080': {
+          nodeName: 'node3',
+          nodeId: 'id-node3',
+          role: 'client',
+          identity: { persistent: true },
+        },
+        'http://node4:8080': {
+          nodeName: 'node4',
+          nodeId: 'id-node4',
+          role: 'client',
+          identity: 'restored' as unknown as Record<string, unknown>,
+        },
+      },
+      ['http://node2:8080', 'http://node3:8080', 'http://node4:8080'],
+    );
+    started.push(directory);
+
+    await directory.start();
+
+    expect(
+      directory.entries(self, []).map((entry) => entry.identity),
+    ).toStrictEqual([
+      self.identity,
+      { persistent: false, startedAt: '2023-11-14T22:10:00.000Z' },
+      null,
+      null,
+    ]);
   });
 
   it('treats a status without usable fields as unknown', async () => {

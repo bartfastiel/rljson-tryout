@@ -6,6 +6,11 @@ import { TopologyWatch, topologyFingerprint } from './topologyWatch.ts';
 
 const standalone: NetworkSnapshot = {
   nodeId: 'id-node1',
+  identity: {
+    persistent: false,
+    startedAt: '2026-09-18T09:59:00.000Z',
+    identityPath: null,
+  },
   role: 'standalone',
   domain: 'petshop-test',
   hubNodeId: null,
@@ -24,6 +29,7 @@ const peer = (lastSeen: string, latencyMs: number) => ({
   firstSeen: '2026-09-18T10:00:01.000Z',
   lastSeen,
   probe: { reachable: true, latencyMs, measuredAt: lastSeen },
+  excludedFromElection: false,
 });
 
 const asClient = (lastSeen: string, latencyMs: number): NetworkSnapshot => ({
@@ -47,6 +53,7 @@ const selfEntry = (lastSeen: string): StatusNode => ({
   nodeId: 'id-node1',
   role: 'standalone',
   connectedClients: null,
+  identity: null,
   reachable: true,
   lastSeen,
   seenInTopology: true,
@@ -87,6 +94,7 @@ describe('topologyFingerprint', () => {
   it('ignores the timestamps and latencies that advance on their own', () => {
     const report = (lastSeen: string, latencyMs: number): TopologyReport => ({
       nodeId: 'id-node1',
+      identity: standalone.identity,
       role: 'client',
       hubNodeId: 'id-node2',
       hubAddress: '10.0.0.2:3000',

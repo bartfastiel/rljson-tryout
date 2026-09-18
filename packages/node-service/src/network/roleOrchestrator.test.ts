@@ -1,8 +1,15 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { NetworkConfig } from '@rljson/network';
+import { NodeIdentity, type NetworkConfig } from '@rljson/network';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -101,6 +108,7 @@ describe('RoleOrchestrator before start', () => {
 
     expect(orchestrator.snapshot()).toStrictEqual({
       nodeId: null,
+      identity: null,
       role: 'starting',
       domain: 'petshop-test',
       hubNodeId: null,
@@ -122,6 +130,11 @@ describe('RoleOrchestrator with discovery disabled', () => {
 
     expect(snapshot.role).toBe('standalone');
     expect(snapshot.nodeId).toMatch(uuidPattern);
+    expect(snapshot.identity).toStrictEqual({
+      persistent: false,
+      startedAt: '2023-11-14T22:13:20.000Z',
+      identityPath: null,
+    });
     expect(snapshot.peers).toStrictEqual([]);
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -230,6 +243,7 @@ describe('RoleOrchestrator with discovery enabled', () => {
         firstSeen: '2023-11-14T22:13:20.000Z',
         lastSeen: '2023-11-14T22:13:30.000Z',
         probe: null,
+        excludedFromElection: false,
       },
     ]);
     await orchestrator.stop();
@@ -419,6 +433,106 @@ describe('RoleOrchestrator with discovery enabled', () => {
         measuredAt: '2023-11-14T22:13:20.000Z',
       },
     ]);
+    await orchestrator.stop();
+  });
+
+  it('reports a generated id on a first start and a persistent one once the identity file exists', async () => {
+    const dataDirectory = temporaryDirectory();
+    const identityPath = join(
+      dataDirectory,
+      'identity',
+      'petshop-test',
+      'node-id',
+    );
+    const first = orchestratorOverFake({ dataDirectory });
+    await first.orchestrator.start();
+    expect(first.orchestrator.snapshot().identity).toStrictEqual({
+      persistent: false,
+      startedAt: '1970-01-01T00:00:00.500Z',
+      identityPath,
+    });
+    await first.orchestrator.stop();
+
+    mkdirSync(join(dataDirectory, 'identity', 'petshop-test'), {
+      recursive: true,
+    });
+    writeFileSync(identityPath, selfNodeId);
+    const second = orchestratorOverFake({ dataDirectory });
+    await second.orchestrator.start();
+
+    expect(second.orchestrator.snapshot().identity).toMatchObject({
+      persistent: true,
+      identityPath,
+    });
+    expect(second.records).toContainEqual(
+      expect.objectContaining({
+        message: 'discovery started',
+        fields: expect.objectContaining({
+          persistent: true,
+          identityPath,
+        }) as Record<string, unknown>,
+      }),
+    );
+    await second.orchestrator.stop();
+  });
+
+  it('names the file the pinned library keeps the id in', async () => {
+    const dataDirectory = temporaryDirectory();
+    const identityDirectory = join(dataDirectory, 'identity');
+    const identity = await NodeIdentity.create({
+      domain: 'petshop-test',
+      port: 3000,
+      identityDir: identityDirectory,
+    });
+    const { orchestrator } = orchestratorOverFake({ dataDirectory });
+
+    await orchestrator.start();
+    const reported = orchestrator.snapshot().identity;
+
+    expect(reported?.persistent).toBe(true);
+    expect(readFileSync(reported?.identityPath ?? '', 'utf-8')).toBe(
+      identity.nodeId,
+    );
+    await orchestrator.stop();
+  });
+
+  it('forwards an election exclusion to the manager and marks the peer', async () => {
+    const { orchestrator, manager, transport } = orchestratorOverFake();
+    await orchestrator.start();
+    manager().join(fakeNodeInfo('bbbbbbbb-peer', { startedAt: 100 }));
+    manager().join(fakeNodeInfo('cccccccc-peer', { startedAt: 900 }));
+    manager().elect('bbbbbbbb-peer', '10.0.0.13:3000');
+    await settle();
+
+    orchestrator.excludeFromElection('bbbbbbbb-peer', 90_000);
+    await settle();
+
+    expect(manager().exclusions).toStrictEqual([
+      { nodeId: 'bbbbbbbb-peer', durationMs: 90_000 },
+    ]);
+    expect(orchestrator.snapshot()).toMatchObject({
+      role: 'hub',
+      hubNodeId: selfNodeId,
+    });
+    expect(
+      orchestrator
+        .snapshot()
+        .peers.map((peer) => [peer.nodeId, peer.excludedFromElection]),
+    ).toStrictEqual([
+      ['bbbbbbbb-peer', true],
+      ['cccccccc-peer', false],
+    ]);
+    expect(transport.calls.at(-1)).toMatchObject({ kind: 'hub' });
+    await orchestrator.stop();
+  });
+
+  it('ignores an election exclusion without discovery', async () => {
+    const { orchestrator } = orchestratorOverFake({ discovery: 'disabled' });
+    await orchestrator.start();
+
+    orchestrator.excludeFromElection('bbbbbbbb-peer', 90_000);
+
+    expect(orchestrator.snapshot().role).toBe('standalone');
     await orchestrator.stop();
   });
 

@@ -3,11 +3,13 @@ import { resolve } from 'node:path';
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { expect } from 'vitest';
 
-import type { StatusReport } from '../../src/routes/status.ts';
-import { composeNodes, ComposeProject } from './composeProject.ts';
+import { ComposeProject } from './composeProject.ts';
 import {
   allConnected,
   fetchStatus,
+  nodeNamed as byName,
+  statusOrNull,
+  until,
   waitForStatuses,
   type ComposeNode,
 } from './statuses.ts';
@@ -39,30 +41,6 @@ const request = async <Body>(
   return { status: response.status, body: (await response.json()) as Body };
 };
 
-/** Polls until the condition holds and returns how long that took. */
-const until = async (
-  condition: () => Promise<boolean>,
-  timeoutMs: number,
-): Promise<number> => {
-  const started = Date.now();
-  const deadline = started + timeoutMs;
-  while (!(await condition())) {
-    if (Date.now() > deadline) {
-      throw new Error(`condition not met within ${timeoutMs} ms`);
-    }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-  }
-  return Date.now() - started;
-};
-
-const byName = (name: string): ComposeNode => {
-  const node = composeNodes.find((candidate) => candidate.name === name);
-  if (node === undefined) {
-    throw new Error(`no compose node is named ${name}`);
-  }
-  return node;
-};
-
 const listsInvoice = async (
   node: ComposeNode,
   invoiceId: string,
@@ -81,16 +59,6 @@ const listedAnimalName = async (
       '/api/animals?limit=200',
     )
   ).body.items.find((animal) => animal.id === animalId)?.name;
-
-const statusOrNull = async (
-  node: ComposeNode,
-): Promise<StatusReport | null> => {
-  try {
-    return await fetchStatus(node.port);
-  } catch {
-    return null;
-  }
-};
 
 /**
  * The restart scenario of `features/steps/bootstrap.steps.ts` against the

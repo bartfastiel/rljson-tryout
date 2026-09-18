@@ -56,6 +56,46 @@ const nodeIdCode = (nodeId) =>
   element('code', 'node-id', nodeId ?? 'not known yet');
 
 /**
+ * Whether a node's id was restored from its data directory or generated
+ * at this start, as a badge; nothing for a node that reported no
+ * identity (yet).
+ *
+ * @param {import('../status-feed.js').StatusIdentity | null | undefined} identity
+ */
+const identityBadge = (identity) => {
+  if (identity === null || identity === undefined) {
+    return null;
+  }
+  const badge = element(
+    'span',
+    `identity-badge identity-${identity.persistent ? 'persistent' : 'fresh'}`,
+    identity.persistent ? 'persistent id' : 'fresh id',
+  );
+  badge.title = identity.persistent
+    ? 'The node id was restored from the data directory; it survives restarts'
+    : 'The node id was generated when the process started';
+  return badge;
+};
+
+/**
+ * Where this node's id comes from, in one sentence, with the path of the
+ * identity file when there is one.
+ *
+ * @param {import('../status-feed.js').Status['identity'] | undefined} identity
+ */
+const identitySummary = (identity) => {
+  if (identity === null || identity === undefined) {
+    return 'not known yet';
+  }
+  const origin = identity.persistent
+    ? 'persistent id, restored from the data directory'
+    : 'fresh id, generated at this start';
+  return identity.identityPath === null
+    ? `${origin}, not written to disk`
+    : `${origin} (${identity.identityPath})`;
+};
+
+/**
  * A yes or no signal row for the node cards: a marker element, then the
  * wording for the state, so that colour and text always agree.
  *
@@ -125,6 +165,7 @@ const thisNode = (status, at) => {
     ['Name', status.nodeName],
     ['Role', roleBadge(status.role)],
     ['Node id', nodeIdCode(status.nodeId)],
+    ['Identity', identitySummary(status.identity)],
     ['Domain', status.domain],
     ['Hub', hub],
     ['Peers', String(status.peers.length)],
@@ -180,9 +221,10 @@ const nodeCard = (node, reachableFromBrowser, at) => {
   const meta = element('p', 'node-card-meta');
   meta.append(
     roleBadge(node.role),
-    ...[connectedClientsBadge(node.connectedClients)].filter(
-      (badge) => badge !== null,
-    ),
+    ...[
+      connectedClientsBadge(node.connectedClients),
+      identityBadge(node.identity),
+    ].filter((badge) => badge !== null),
     element('span', 'node-card-url', node.url),
     nodeIdCode(node.nodeId),
   );
@@ -371,6 +413,12 @@ const peerCard = (peer, at) => {
       ['Started', formatRelativeTime(peer.startedAt, at)],
       ['First seen', formatRelativeTime(peer.firstSeen, at)],
       ['Last seen', formatRelativeTime(peer.lastSeen, at)],
+      [
+        'Election',
+        peer.excludedFromElection
+          ? 'excluded by this node (it restarted or denies the hub role)'
+          : 'candidate',
+      ],
     ]),
   );
   return card;

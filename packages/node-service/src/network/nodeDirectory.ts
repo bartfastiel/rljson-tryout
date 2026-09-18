@@ -4,12 +4,23 @@ import type { Configuration } from '../configuration.ts';
 import type { NodeRole } from './roleOrchestrator.ts';
 
 /**
+ * What a node reports about its own id under `/status.identity`, as far
+ * as the directory keeps it: whether the id was restored from its data
+ * directory and when its current run of discovery started (slice D7).
+ */
+export type ReportedIdentity = Readonly<{
+  persistent: boolean;
+  startedAt: string;
+}>;
+
+/**
  * One node of the environment as `NODE_URLS` lists it, with what the last
  * `GET /status` against it revealed: its display name, its node id, the
- * role it reported and, when it is the hub, how many clients its hub
- * transport holds (`null` otherwise). `self` marks the entry whose URL is
- * this node's own `PUBLIC_URL`; it is never fetched over HTTP, its values
- * come from the local snapshot instead.
+ * role it reported, when it is the hub, how many clients its hub
+ * transport holds (`null` otherwise), and its identity (`null` until it
+ * answered, or for a node that does not report one). `self` marks the
+ * entry whose URL is this node's own `PUBLIC_URL`; it is never fetched
+ * over HTTP, its values come from the local snapshot instead.
  */
 export type DirectoryEntry = Readonly<{
   url: string;
@@ -18,6 +29,7 @@ export type DirectoryEntry = Readonly<{
   nodeId: string | null;
   role: NodeRole | null;
   connectedClients: number | null;
+  identity: ReportedIdentity | null;
   reachable: boolean;
   lastSeen: string | null;
 }>;
@@ -31,6 +43,19 @@ export type SelfDescription = Readonly<{
   nodeId: string | null;
   role: NodeRole;
   connectedClients: number | null;
+  identity: ReportedIdentity | null;
+}>;
+
+/**
+ * What a reachable node of the environment last said about itself, for
+ * whoever compares it with what discovery holds (`TopologyRepair`): its
+ * id, its role, and the start time of its current run of discovery
+ * (`null` for a node that reports no identity).
+ */
+export type NodeReport = Readonly<{
+  nodeId: string;
+  role: NodeRole | null;
+  startedAt: string | null;
 }>;
 
 export type NodeDirectoryOptions = Readonly<{
@@ -46,6 +71,7 @@ type PolledStatus = {
   nodeId: string | null;
   role: NodeRole | null;
   connectedClients: number | null;
+  identity: ReportedIdentity | null;
   reachable: boolean;
   lastSeen: number | null;
 };
@@ -63,6 +89,7 @@ const unknownStatus = (statusUrl: string): PolledStatus => ({
   nodeId: null,
   role: null,
   connectedClients: null,
+  identity: null,
   reachable: false,
   lastSeen: null,
 });
@@ -72,6 +99,24 @@ const readString = (value: unknown): string | null =>
 
 const readRole = (value: unknown): NodeRole | null =>
   nodeRoles.has(value as NodeRole) ? (value as NodeRole) : null;
+
+/**
+ * The `identity` of a polled `/status`, when the node reports one with a
+ * start time; a node of a version before slice D7 reports none.
+ */
+const readIdentity = (identity: unknown): ReportedIdentity | null => {
+  if (typeof identity !== 'object' || identity === null) {
+    return null;
+  }
+  const { persistent, startedAt } = identity as {
+    persistent?: unknown;
+    startedAt?: unknown;
+  };
+  const started = readString(startedAt);
+  return started === null
+    ? null
+    : { persistent: persistent === true, startedAt: started };
+};
 
 /**
  * The `transport.connectedClients` of a polled `/status`, which only a
@@ -177,6 +222,7 @@ export class NodeDirectory {
           nodeId: self.nodeId,
           role: self.role,
           connectedClients: self.connectedClients,
+          identity: self.identity,
           reachable: true,
           lastSeen: new Date(this.now()).toISOString(),
           seenInTopology: true,
@@ -190,6 +236,7 @@ export class NodeDirectory {
         nodeId: status.nodeId,
         role: status.role,
         connectedClients: status.connectedClients,
+        identity: status.identity,
         reachable: status.reachable,
         lastSeen:
           status.lastSeen === null
@@ -212,6 +259,25 @@ export class NodeDirectory {
       }
     }
     return null;
+  }
+
+  /**
+   * What every node that answered the last poll round reports about
+   * itself. A node that did not answer is left out: its last answer may
+   * be from before a restart.
+   */
+  reports(): NodeReport[] {
+    const reports: NodeReport[] = [];
+    for (const status of this.polled.values()) {
+      if (status.reachable && status.nodeId !== null) {
+        reports.push({
+          nodeId: status.nodeId,
+          role: status.role,
+          startedAt: status.identity?.startedAt ?? null,
+        });
+      }
+    }
+    return reports;
   }
 
   private scheduleNext(): void {
@@ -250,6 +316,7 @@ export class NodeDirectory {
       status.nodeId = nodeId;
       status.role = readRole(body.role);
       status.connectedClients = readConnectedClients(body.transport);
+      status.identity = readIdentity(body.identity);
       status.reachable = true;
       status.lastSeen = this.now();
     } catch (error) {
