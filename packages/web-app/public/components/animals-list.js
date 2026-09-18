@@ -559,7 +559,7 @@ class AnimalsList extends HTMLElement {
       this.filters.replaceWith(filters);
       this.filters = filters;
     }
-    const last = pages[pages.length - 1];
+    const last = pages.at(-1);
     this.showPage(
       {
         items: pages.flatMap((page) => page.items),

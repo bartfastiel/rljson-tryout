@@ -20,6 +20,32 @@ const emptyBlock = (): StreamBlock => ({
   comments: [],
 });
 
+/** Applies one line of a block to it, the way the protocol reads it. */
+const applyLine = (block: StreamBlock, line: string): void => {
+  if (line.startsWith(':')) {
+    block.comments.push(line.slice(1).trim());
+    return;
+  }
+  const separator = line.indexOf(':');
+  const field = separator === -1 ? line : line.slice(0, separator);
+  const value =
+    separator === -1 ? '' : line.slice(separator + 1).replace(/^ /, '');
+  if (field === 'id' || field === 'event' || field === 'retry') {
+    block[field] = value;
+  } else if (field === 'data') {
+    block.data = block.data === null ? value : `${block.data}\n${value}`;
+  }
+};
+
+/** Parses one block, the lines between two blank lines. */
+export const parseBlock = (raw: string): StreamBlock => {
+  const block = emptyBlock();
+  for (const line of raw.split('\n')) {
+    applyLine(block, line);
+  }
+  return block;
+};
+
 /**
  * Parses the complete blocks of a stream buffer: everything up to the
  * last blank line, leaving a trailing partial block in the buffer.
@@ -29,30 +55,11 @@ export const parseBlocks = (
 ): { blocks: StreamBlock[]; rest: string } => {
   const blocks: StreamBlock[] = [];
   let rest = buffer;
-  for (;;) {
-    const end = rest.indexOf('\n\n');
-    if (end === -1) {
-      return { blocks, rest };
-    }
-    const block = emptyBlock();
-    for (const line of rest.slice(0, end).split('\n')) {
-      if (line.startsWith(':')) {
-        block.comments.push(line.slice(1).trim());
-        continue;
-      }
-      const separator = line.indexOf(':');
-      const field = separator === -1 ? line : line.slice(0, separator);
-      const value =
-        separator === -1 ? '' : line.slice(separator + 1).replace(/^ /, '');
-      if (field === 'id' || field === 'event' || field === 'retry') {
-        block[field] = value;
-      } else if (field === 'data') {
-        block.data = block.data === null ? value : `${block.data}\n${value}`;
-      }
-    }
-    blocks.push(block);
+  for (let end = rest.indexOf('\n\n'); end !== -1; end = rest.indexOf('\n\n')) {
+    blocks.push(parseBlock(rest.slice(0, end)));
     rest = rest.slice(end + 2);
   }
+  return { blocks, rest };
 };
 
 /**
@@ -74,7 +81,6 @@ export class EventStreamReader {
   private constructor(response: Response, controller: AbortController) {
     this.response = response;
     this.controller = controller;
-    void this.pump();
   }
 
   static async open(url: string): Promise<EventStreamReader> {
@@ -83,7 +89,9 @@ export class EventStreamReader {
       signal: controller.signal,
       headers: { accept: 'text/event-stream' },
     });
-    return new EventStreamReader(response, controller);
+    const reader = new EventStreamReader(response, controller);
+    void reader.pump();
+    return reader;
   }
 
   /** Whether the server ended the stream. */
@@ -176,8 +184,9 @@ export class EventStreamReader {
   }
 
   private wake(): void {
-    for (const waiter of [...this.waiters]) {
-      this.waiters.delete(waiter);
+    const waiters = [...this.waiters];
+    this.waiters.clear();
+    for (const waiter of waiters) {
       waiter();
     }
   }

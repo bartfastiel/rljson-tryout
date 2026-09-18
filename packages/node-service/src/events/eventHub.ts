@@ -118,16 +118,21 @@ export class EventHub {
   close(): void {
     this.closed = true;
     this.stopHeartbeat();
-    for (const sink of [...this.sinks]) {
-      this.sinks.delete(sink);
+    const sinks = [...this.sinks];
+    this.sinks.clear();
+    for (const sink of sinks) {
       if (!sink.writableEnded) {
         sink.end();
       }
     }
   }
 
+  /**
+   * Writes to every client. A `Set` skips what a `deliver` removed while
+   * the loop runs, so the set is iterated as it is.
+   */
   private broadcast(chunk: string): void {
-    for (const sink of [...this.sinks]) {
+    for (const sink of this.sinks) {
       this.deliver(sink, chunk);
     }
   }
