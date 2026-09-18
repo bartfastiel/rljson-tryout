@@ -182,10 +182,25 @@ describeFeature(
         Then(
           'the client serves that invoice by its id with one item',
           async () => {
-            const response = await request<InvoiceDetailResponse>(
-              client,
-              `/api/invoices/${issued.id}`,
-            );
+            // The change set of the invoice is arriving on the client at
+            // the same time: for the milliseconds between its invoice row
+            // and its item rows landing, the invoice is current locally
+            // without items, so the read is repeated until the item is
+            // there, either through the cascade or from the change set.
+            const deadline = Date.now() + 5_000;
+            let response: { status: number; body: InvoiceDetailResponse };
+            do {
+              response = await request<InvoiceDetailResponse>(
+                client,
+                `/api/invoices/${issued.id}`,
+              );
+              if (response.status === 200 && response.body.items.length > 0) {
+                break;
+              }
+              await new Promise((resolvePromise) =>
+                setTimeout(resolvePromise, 100),
+              );
+            } while (Date.now() < deadline);
 
             expect(response.status).toBe(200);
             expect(response.body.id).toBe(issued.id);
