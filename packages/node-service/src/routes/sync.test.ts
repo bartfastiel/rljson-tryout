@@ -91,6 +91,10 @@ describe('GET /api/sync/transfers', () => {
       method: 'GET',
       url: '/api/sync/transfers?peer=client-a&limit=50',
     });
+    const withNobody = await server.inject({
+      method: 'GET',
+      url: '/api/sync/transfers?peer=&limit=50',
+    });
 
     expect(
       withHub.json<SyncTransfer[]>().map((transfer) => transfer.changeSetId),
@@ -100,6 +104,7 @@ describe('GET /api/sync/transfers', () => {
     ).toStrictEqual(
       Array.from({ length: 12 }, (_, index) => `broadcast-${12 - index}`),
     );
+    expect(withNobody.json<SyncTransfer[]>()).toHaveLength(13);
   });
 
   it.each(['0', '51', 'ten', '', '1.5'])(
