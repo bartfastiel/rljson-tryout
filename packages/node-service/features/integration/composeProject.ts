@@ -69,12 +69,35 @@ export class ComposeProject {
   }
 
   /**
-   * Restarts one service (`node1` to `node3`) and waits for its health
-   * check: what a restart of a pod looks like to the other nodes.
+   * Restarts one service (`node1` to `node3`) in place, the container and
+   * its file system kept, and waits for its health check: what a restart
+   * of a pod looks like to the other nodes. Returns how long the restart
+   * command itself took, the node's downtime as the others saw it.
    */
-  async restart(service: string): Promise<void> {
+  async restart(service: string): Promise<number> {
+    const started = Date.now();
     await this.compose(['restart', service]);
+    const downtimeMs = Date.now() - started;
     await this.awaitHealthy(service);
+    return downtimeMs;
+  }
+
+  /**
+   * Replaces one service's container by a new one from the same image and
+   * waits for its health check: what a replaced pod looks like. A service
+   * without a volume loses its data directory, and with it its identity.
+   */
+  async recreate(service: string): Promise<void> {
+    await this.compose([
+      'up',
+      '--detach',
+      '--force-recreate',
+      '--no-build',
+      '--wait',
+      '--wait-timeout',
+      '120',
+      service,
+    ]);
   }
 
   /** Stops one service; the container and its file system stay. */
