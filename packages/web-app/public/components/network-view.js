@@ -58,12 +58,12 @@ const nodeIdCode = (nodeId) =>
 /**
  * Whether a node's id was restored from its data directory or generated
  * at this start, as a badge; nothing for a node that reported no
- * identity yet.
+ * identity (yet).
  *
- * @param {import('../status-feed.js').StatusIdentity | null} identity
+ * @param {import('../status-feed.js').StatusIdentity | null | undefined} identity
  */
 const identityBadge = (identity) => {
-  if (identity === null) {
+  if (identity === null || identity === undefined) {
     return null;
   }
   const badge = element(
@@ -81,10 +81,10 @@ const identityBadge = (identity) => {
  * Where this node's id comes from, in one sentence, with the path of the
  * identity file when there is one.
  *
- * @param {import('../status-feed.js').Status['identity']} identity
+ * @param {import('../status-feed.js').Status['identity'] | undefined} identity
  */
 const identitySummary = (identity) => {
-  if (identity === null) {
+  if (identity === null || identity === undefined) {
     return 'not known yet';
   }
   const origin = identity.persistent
