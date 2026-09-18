@@ -219,14 +219,14 @@ describe('TopologyRepair on a hub that denies its role', () => {
     });
 
     repair.check();
-    advance(9_999);
+    advance(29_999);
     repair.check();
     expect(exclusions).toStrictEqual([]);
     advance(1);
     repair.check();
 
     expect(exclusions).toStrictEqual([
-      { nodeId: 'id-hub', durationMs: 90_000, at: 1_700_000_010_000 },
+      { nodeId: 'id-hub', durationMs: 90_000, at: 1_700_000_030_000 },
     ]);
     expect(records).toContainEqual(
       expect.objectContaining({
@@ -248,11 +248,11 @@ describe('TopologyRepair on a hub that denies its role', () => {
       reports: [report('id-hub', oldStart, 'hub')],
     });
     repair.check();
-    advance(20_000);
+    advance(40_000);
     repair.check();
     set({ reports: [report('id-hub', oldStart, null)] });
     repair.check();
-    advance(20_000);
+    advance(40_000);
     repair.check();
     set({
       hubNodeId: selfNodeId,
@@ -260,8 +260,29 @@ describe('TopologyRepair on a hub that denies its role', () => {
       reports: [report('id-hub', oldStart, 'client')],
     });
     repair.check();
-    advance(20_000);
+    advance(40_000);
     repair.check();
+
+    expect(exclusions).toStrictEqual([]);
+  });
+
+  it('lets a denial that ends within the peer timeout pass', () => {
+    const { repair, exclusions, advance, set } = repairOver();
+    set({
+      hubNodeId: 'id-hub',
+      peers: [peer('id-hub', oldStart, 'hub')],
+      reports: [report('id-hub', oldStart, 'client')],
+    });
+
+    for (let second = 0; second < 20; second += 1) {
+      repair.check();
+      advance(1_000);
+    }
+    set({ reports: [report('id-hub', oldStart, 'hub')] });
+    for (let second = 0; second < 60; second += 1) {
+      repair.check();
+      advance(1_000);
+    }
 
     expect(exclusions).toStrictEqual([]);
   });
@@ -274,14 +295,14 @@ describe('TopologyRepair on a hub that denies its role', () => {
       reports: [report('id-hub', newStart, 'client')],
     });
 
-    for (let second = 0; second <= 30; second += 1) {
+    for (let second = 0; second <= 40; second += 1) {
       repair.check();
       advance(1_000);
     }
 
     expect(exclusions).toStrictEqual([
       { nodeId: 'id-hub', durationMs: 90_000, at: 1_700_000_005_000 },
-      { nodeId: 'id-hub', durationMs: 90_000, at: 1_700_000_010_000 },
+      { nodeId: 'id-hub', durationMs: 90_000, at: 1_700_000_030_000 },
     ]);
   });
 
@@ -295,7 +316,7 @@ describe('TopologyRepair on a hub that denies its role', () => {
     const agreeing = { ...denying, reports: [report('id-hub', null, 'hub')] };
 
     set(denying);
-    for (let second = 0; second <= 10; second += 1) {
+    for (let second = 0; second <= 30; second += 1) {
       repair.check();
       advance(1_000);
     }
@@ -303,19 +324,19 @@ describe('TopologyRepair on a hub that denies its role', () => {
     repair.check();
     advance(1_000);
     set(denying);
-    for (let second = 0; second <= 10; second += 1) {
+    for (let second = 0; second <= 30; second += 1) {
       repair.check();
       advance(1_000);
     }
     expect(exclusions).toHaveLength(1);
-    advance(46_000);
+    advance(26_000);
     repair.check();
     expect(exclusions).toHaveLength(1);
     advance(1_000);
     repair.check();
 
     expect(exclusions.map((exclusion) => exclusion.at)).toStrictEqual([
-      1_700_000_010_000, 1_700_000_070_000,
+      1_700_000_030_000, 1_700_000_090_000,
     ]);
   });
 });

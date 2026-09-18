@@ -46,7 +46,14 @@ export type TopologyRepairOptions = Readonly<{
    * the poll not yet) does not count.
    */
   restartGraceMs?: number;
-  /** How long the hub may report another role before it is excluded. */
+  /**
+   * How long the hub may report another role before it is excluded:
+   * longer than the broadcast timeout plus one check interval (20 s), so
+   * that a hub replaced by a node with a fresh id, whose survivors deny
+   * the new node the hub role until the old id leaves their peer tables,
+   * heals through that timeout, not through an exclusion of the very
+   * node they are about to elect.
+   */
   denialGraceMs?: number;
   /**
    * The least time between two exclusions of the same peer for the same
@@ -115,7 +122,7 @@ export class TopologyRepair {
     this.now = options.now ?? Date.now;
     this.checkIntervalMs = options.checkIntervalMs ?? 1_000;
     this.restartGraceMs = options.restartGraceMs ?? 5_000;
-    this.denialGraceMs = options.denialGraceMs ?? 10_000;
+    this.denialGraceMs = options.denialGraceMs ?? 30_000;
     this.repairIntervalMs = options.repairIntervalMs ?? 60_000;
     this.exclusionMs = options.exclusionMs ?? 90_000;
   }
