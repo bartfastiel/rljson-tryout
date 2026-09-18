@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { NodeReport } from './nodeDirectory.ts';
-import type { NetworkSnapshot } from './roleOrchestrator.ts';
+import type { NetworkSnapshot, PeerSnapshot } from './roleOrchestrator.ts';
 
 /**
  * Why a peer is kept out of this node's hub election:
@@ -154,12 +154,37 @@ export class TopologyRepair {
     const reports = new Map(
       this.sources.reports().map((report) => [report.nodeId, report]),
     );
+    const observed = new Set<string>([
+      ...this.observeRestarts(network.peers, reports, now),
+      ...this.observeHubDenial(network, reports, now),
+    ]);
+    for (const key of this.conditions.keys()) {
+      if (!observed.has(key)) {
+        this.conditions.delete(key);
+      }
+    }
+    for (const [key, condition] of this.conditions) {
+      if (this.isDue(key, condition, now)) {
+        this.repair(key, condition, now);
+      }
+    }
+    for (const [key, repaired] of this.repairedAt) {
+      if (now - repaired >= this.repairIntervalMs && !observed.has(key)) {
+        this.repairedAt.delete(key);
+      }
+    }
+  }
 
-    const observed = new Set<string>();
-    for (const peer of network.peers) {
+  private observeRestarts(
+    peers: readonly PeerSnapshot[],
+    reports: ReadonlyMap<string, NodeReport>,
+    now: number,
+  ): string[] {
+    const observed: string[] = [];
+    for (const peer of peers) {
       const reported = reports.get(peer.nodeId)?.startedAt ?? null;
       if (reported !== null && reported !== peer.startedAt) {
-        observed.add(
+        observed.push(
           this.observe(peer.nodeId, 'peer-restarted', now, {
             knownStartedAt: peer.startedAt,
             reportedStartedAt: reported,
@@ -167,47 +192,23 @@ export class TopologyRepair {
         );
       }
     }
-    const hubNodeId = network.hubNodeId;
-    if (hubNodeId !== null && hubNodeId !== network.nodeId) {
-      const reportedRole = reports.get(hubNodeId)?.role ?? null;
-      if (reportedRole !== null && reportedRole !== 'hub') {
-        observed.add(
-          this.observe(hubNodeId, 'hub-denies-role', now, { reportedRole }),
-        );
-      }
-    }
-    for (const key of this.conditions.keys()) {
-      if (!observed.has(key)) {
-        this.conditions.delete(key);
-      }
-    }
+    return observed;
+  }
 
-    for (const [key, condition] of this.conditions) {
-      if (now - condition.since < this.graceOf(condition.cause)) {
-        continue;
-      }
-      const repaired = this.repairedAt.get(key);
-      if (repaired !== undefined && now - repaired < this.repairIntervalMs) {
-        continue;
-      }
-      this.repairedAt.set(key, now);
-      this.logger.warn(
-        {
-          nodeId: condition.nodeId,
-          cause: condition.cause,
-          ...condition.details,
-          observedForMs: now - condition.since,
-          excludedForMs: this.exclusionMs,
-        },
-        'peer excluded from the hub election',
-      );
-      this.sources.excludeFromElection(condition.nodeId, this.exclusionMs);
+  private observeHubDenial(
+    network: Pick<NetworkSnapshot, 'nodeId' | 'hubNodeId'>,
+    reports: ReadonlyMap<string, NodeReport>,
+    now: number,
+  ): string[] {
+    const hubNodeId = network.hubNodeId;
+    if (hubNodeId === null || hubNodeId === network.nodeId) {
+      return [];
     }
-    for (const [key, repaired] of this.repairedAt) {
-      if (now - repaired >= this.repairIntervalMs && !observed.has(key)) {
-        this.repairedAt.delete(key);
-      }
+    const reportedRole = reports.get(hubNodeId)?.role ?? null;
+    if (reportedRole === null || reportedRole === 'hub') {
+      return [];
     }
+    return [this.observe(hubNodeId, 'hub-denies-role', now, { reportedRole })];
   }
 
   private observe(
@@ -224,6 +225,33 @@ export class TopologyRepair {
       condition.details = details;
     }
     return key;
+  }
+
+  /**
+   * Whether a condition has outlasted its grace period and the last
+   * repair for it, if any, is at least a repair interval ago.
+   */
+  private isDue(key: string, condition: Condition, now: number): boolean {
+    if (now - condition.since < this.graceOf(condition.cause)) {
+      return false;
+    }
+    const repaired = this.repairedAt.get(key);
+    return repaired === undefined || now - repaired >= this.repairIntervalMs;
+  }
+
+  private repair(key: string, condition: Condition, now: number): void {
+    this.repairedAt.set(key, now);
+    this.logger.warn(
+      {
+        nodeId: condition.nodeId,
+        cause: condition.cause,
+        ...condition.details,
+        observedForMs: now - condition.since,
+        excludedForMs: this.exclusionMs,
+      },
+      'peer excluded from the hub election',
+    );
+    this.sources.excludeFromElection(condition.nodeId, this.exclusionMs);
   }
 
   private graceOf(cause: RepairCause): number {
