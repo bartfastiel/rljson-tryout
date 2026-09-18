@@ -96,7 +96,7 @@ because its reference is broken" without a second, unjoined read.
 `GET /api/animals` must list every animal and show a missing species as
 missing rather than hide the animal (pull request #15). The route join was
 replaced by two whole-table reads and a `Map` join in JavaScript, which is
-now the pattern for every join in `packages/node-service/src/store/petShopStore.ts`.
+the pattern for every join in `packages/node-service/src/store/petShopStore.ts`.
 
 ## Workaround
 

@@ -119,8 +119,8 @@ takes about 6 s) splits the network until something else disturbs it.
 ## Workaround
 
 None inside the library. Operationally: restart a hub slowly, or handle a
-peer that disagrees about the hub in the application (planned as a later
-slice).
+peer that disagrees about the hub in the application (roadmap slices D6
+and D7).
 
 ## Suggested fix
 

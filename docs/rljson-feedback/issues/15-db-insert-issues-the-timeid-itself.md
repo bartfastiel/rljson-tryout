@@ -80,9 +80,9 @@ The whole seed (hand-written and generated, up to 24 759 rows) is written
 through `Core.import` with `validate: false`, history rows included,
 stamped from a fixed epoch plus a counter (`seedTimeId` in
 `packages/domain/src/seedTimeId.ts`). That bypasses `Db`'s incremental DAG
-tip set and its insert notifications for seeded rows. Two production nodes
-that had seeded the old way keep an extra tip per seed entity until their
-volumes are emptied, because rljson has no delete.
+tip set and its insert notifications for seeded rows. A node that seeded
+through `Db.insert` before the switch keeps an extra tip per seed entity
+until its volume is emptied, because rljson has no delete.
 
 ## Workaround
 

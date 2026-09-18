@@ -85,7 +85,10 @@ where { id: "x' OR '1'='1" }        -> 2 row(s): scrooge, ohara
 ```
 
 `_whereString` builds `` `${column} = '${value}' AND ` `` by string
-concatenation (`dist/index.js`, line 548 of 1.0.7). Through the hub
+concatenation (`dist/index.js`, line 548 of 1.0.7). `@rljson/io-mssql`
+0.0.30 has the same construction in `DbStatements.whereString`
+(`dist/io-mssql.js`, line 853, used by `_readRows`), found by reading its
+`dist`, not by running SQL Server. Through the hub
 transport a `where` arrives from other nodes as it was sent (issue 01), so
 on a SQLite node the clause is reachable from the network.
 
@@ -106,5 +109,5 @@ is filtered in memory.
 
 Bind parameters: build `column = ? AND ...` and pass the values to
 `prepare(query).all(...values)`; `node:sqlite` supports positional and
-named parameters. `Db.get` by `_hash` is safe today only because hashes
+named parameters. `Db.get` by `_hash` is safe only because hashes
 contain no quotes.

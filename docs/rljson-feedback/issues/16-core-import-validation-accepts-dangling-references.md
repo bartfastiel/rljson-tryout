@@ -137,4 +137,4 @@ tests.
 
 Validate against the union of payload and store for reference and buffet
 checks (a `readRowsByHashes` per referenced table is enough), and make the
-exception list explicit in the option's documentation until then.
+exception list explicit in the option's documentation otherwise.

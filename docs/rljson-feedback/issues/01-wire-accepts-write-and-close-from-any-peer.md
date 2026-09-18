@@ -122,11 +122,11 @@ on the receiving store as it came, which makes the unescaped SQL of
 ## Impact on us
 
 Three nodes share a pod network; the hub port (3000) is not mapped outside
-it, so the exposure is limited to the cluster. We still had to treat the
+it, so the exposure is limited to the cluster. We had to treat the
 transport as trusted-network-only in the design and lend the store through
 a facade whose `close()` is a no-op so that a peer's `close` at least does
 not close the SQLite file (`packages/node-service/src/store/borrowedIo.ts`).
-Writes from a peer are not prevented at all today.
+Nothing prevents writes from a peer.
 
 ## Workaround
 

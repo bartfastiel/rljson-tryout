@@ -1,7 +1,7 @@
 # Lessons learned with rljson, for its authors
 
 This is what a hobby project learned from building a small multi-node
-application on the rljson packages between 2026-09-17 and 2026-09-18. It is
+application on the rljson packages listed below. It is
 written for someone who knows rljson but not the project; the project's own
 notes live in [`../findings/`](../findings/) and every claim below links to
 the note or the issue it comes from. The bug reports are in
@@ -108,7 +108,7 @@ package, see [issue 30](issues/30-dependency-ranges-install-several-copies-of-rl
   is local because the row was cached; a two-hop read (client, hub, other
   client) 4.7 ms. When the hub container was stopped, the election replaced
   it 3.5 to 3.8 s after its socket closed and the clients were connected to
-  the new hub 17 ms later, with nothing written for that case yet
+  the new hub 17 ms later, without any code in the project for that case
   ([`hub-transport.md`](../findings/hub-transport.md), pull request #38
   review).
 - **Discovery needs no configuration.** UDP broadcast reached every
@@ -148,6 +148,7 @@ package, see [issue 30](issues/30-dependency-ranges-install-several-copies-of-rl
 | `WriteAheadLogSqliteIo`, a subclass that sets WAL and `synchronous = NORMAL` after `init()`                                                                                                                | The defaults cost two `fsync`s per row ([13](issues/13-sqlite-defaults-cost-two-fsyncs-per-row.md))                                                                                                                                                                                                              |
 | Whole-table reads plus JavaScript joins and filters for every query                                                                                                                                        | `where` keys that collide with a referenced table's columns are resolved through the reference ([05](issues/05-db-get-where-resolves-through-the-referenced-table.md)); the route join drops rows ([06](issues/06-route-join-drops-rows-with-unresolvable-references.md))                                        |
 | `isSafeWhereValue`, a whitelist for anything that enters a `where`                                                                                                                                         | `IoSqliteNode` interpolates values into SQL ([02](issues/02-sqlite-where-values-interpolated-into-sql.md)) and the hub runs a peer's clause as it came                                                                                                                                                           |
+| A TypeScript interface next to every `TableCfg` (`SpeciesRow` beside `speciesTableCfg`, and so on for ten tables)                                                                                          | Nothing derives a row type from a `TableCfg`; `Db.get` returns `Json`, so the two definitions drift silently when a column changes (see "Friction")                                                                                                                                                              |
 | A `hashed<T>(): Hashed<T>` helper                                                                                                                                                                          | `hsh` is typed to return `T` ([32](issues/32-hsh-and-hip-are-typed-to-return-t-instead-of-hashed-t.md))                                                                                                                                                                                                          |
 
 ## Friction and API ergonomics
@@ -190,6 +191,25 @@ Things that cost time, roughly in the order they were met:
   handover out of reach.
 - `NodeInfo` has no place for a name or URL, and the topology has no "last
   heard from" ([22](issues/22-nodeinfo-carries-no-name-or-metadata.md)).
+- Compile-time row types are not derived from `TableCfg`. A `TableCfg`
+  is a runtime value (`columns: ColumnCfg[]` with `type: JsonValueType`),
+  `Db.get` returns `Json`, and `hsh` returns its input type unchanged
+  ([32](issues/32-hsh-and-hip-are-typed-to-return-t-instead-of-hashed-t.md)),
+  so the project keeps a hand-written interface beside every
+  configuration (`packages/domain/src/tables/*.ts`) and nothing but a
+  test notices when the two drift apart. Configurations declared
+  `as const` with a mapped type (`RowOf<typeof speciesTableCfg>` turning
+  `type: 'string'` into `string`, `'number'` into `number`, `'jsonArray'`
+  into `JsonValue[]`), or a `defineTable(cfg)` helper that returns the
+  configuration and the row type together, would close the gap without a
+  build step.
+- The five column types cover JSON and nothing else: no date, decimal,
+  big integer, binary or geometry, and `number` is hashed after a
+  magnitude-dependent rounding that can merge two different values into
+  one row ([33](issues/33-float-rounding-in-the-hash-merges-different-values.md));
+  `jsonValue` columns cannot be read back on SQLite
+  ([34](issues/34-sqlite-cannot-read-a-jsonvalue-column.md)). Measured
+  and discussed in [data-types.md](data-types.md).
 - `@rljson/server` compiles only with `socket.io` and `socket.io-client`
   installed by the consumer, and a plain install produces three copies of
   `rljson` and `hash` ([30](issues/30-dependency-ranges-install-several-copies-of-rljson-hash-and-io.md)).
@@ -223,11 +243,12 @@ Things that cost time, roughly in the order they were met:
   ([16](issues/16-core-import-validation-accepts-dangling-references.md)),
   so a receiving node must validate what a peer serves itself. The hash
   check of the cascade is the one guard that holds without help.
-- What the project does today: the hub port is not mapped outside the pod
+- What the project does about it: the hub port is not mapped outside the pod
   network, the store is lent through a facade that ignores `close`, only
   hashes, `timeId`s and slugs enter a `where`, every pulled row is
-  re-hashed and its shape checked before it is written, and a bound on
-  change set size and per-peer failure counters are planned.
+  re-hashed and its shape checked before it is written; a bound on change
+  set size and per-peer failure counters belong to roadmap slices D14 to
+  D16.
 
 ## Performance observations
 
@@ -320,7 +341,17 @@ In the order we would fix them:
     whole, hashed and verified; with guidance to model an entity as a
     tuple of references and a worked cakes example. Measured and argued
     in [granularity-and-deltas.md](granularity-and-deltas.md).
-12. Documentation: per-table `detectDagBranch`, the repeated-insert rule,
+12. Logical column types with canonical string encodings (`date`,
+    `datetime`, `decimal`, `bigint`, `binary`, `geo`) on top of the JSON
+    value space, so that adapters can use native columns and the
+    validator can check the form while every existing hash stays valid;
+    document or fix the `number` rounding tiers ([33](issues/33-float-rounding-in-the-hash-merges-different-values.md),
+    [34](issues/34-sqlite-cannot-read-a-jsonvalue-column.md),
+    [data-types.md](data-types.md)).
+13. Row types derived from `TableCfg`: `as const` configurations with a
+    mapped type or a `defineTable` helper, and `Hashed<T>` as the return
+    type of `hsh` ([32](issues/32-hsh-and-hip-are-typed-to-return-t-instead-of-hashed-t.md)).
+14. Documentation: per-table `detectDagBranch`, the repeated-insert rule,
     the head-table `id` rules and the `jsonArray` element question, the
     `timeId` order ([23](issues/23-detectdagbranch-is-per-table-not-per-entity.md),
     [24](issues/24-duplicate-insert-appends-a-history-row-and-a-new-tip.md),
@@ -364,6 +395,12 @@ In the order we would fix them:
 | [30](issues/30-dependency-ranges-install-several-copies-of-rljson-hash-and-io.md)   | validate 0.0.11, io-sqlite-node 1.0.7, server 0.0.64 | Dependency ranges install several copies of `rljson`, `hash`, `io`; `server` lacks socket.io; unused `sql.js` |
 | [31](issues/31-timeid-has-no-order-within-a-millisecond.md)                         | rljson 0.0.81                                        | `timeId()` has no order within a millisecond                                                                  |
 | [32](issues/32-hsh-and-hip-are-typed-to-return-t-instead-of-hashed-t.md)            | hash 0.0.19                                          | `hsh` and `hip` are typed to return `T` instead of `Hashed<T>`                                                |
+| [33](issues/33-float-rounding-in-the-hash-merges-different-values.md)               | hash 0.0.19, io 0.0.78                               | Float rounding in the hash merges different `number` values into one row                                      |
+| [34](issues/34-sqlite-cannot-read-a-jsonvalue-column.md)                            | io-sqlite-node 1.0.7, io-mssql 0.0.30                | `IoSqliteNode` cannot read a `jsonValue` column back                                                          |
+
+Issues 01 to 32 are ordered by severity; numbers are stable identifiers,
+and reports added to the collection afterwards are appended, so a link
+to an issue never changes meaning.
 
 Not included on purpose: the `loafoe/ssh` Terraform provider's debug
 logging, the Hetzner and Kubernetes provider notes in

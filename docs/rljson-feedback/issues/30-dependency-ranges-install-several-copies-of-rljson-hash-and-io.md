@@ -2,7 +2,7 @@
 
 - Packages: `@rljson/validate` 0.0.11, `@rljson/io-sqlite-node` 1.0.7,
   `@rljson/server` 0.0.64 (with `@rljson/db` 0.0.42, `@rljson/io` 0.0.78,
-  `@rljson/network` 0.0.21 as the current versions on 2026-09-17)
+  `@rljson/network` 0.0.21, the versions this project pins)
 - Environment: pnpm 12.4.2 and npm 11 (Node 24.18.0), Windows 11 Pro
   (10.0.26200)
 - Severity: two copies of `@rljson/hash` compute hashes for the same data;
@@ -63,7 +63,7 @@ The declarations behind it (from the installed `package.json` files):
   dependencies; `dist/index.js` imports only `node:sqlite`, `node:fs`,
   `node:fs/promises`, `node:path` and `@rljson/*` (`grep -c "sql.js"
 dist/index.js` prints 0).
-- `@rljson/server` 0.0.64: `@rljson/network 0.0.20` (0.0.21 current), and
+- `@rljson/server` 0.0.64: `@rljson/network 0.0.20` (this project pins 0.0.21), and
   no `socket.io` / `socket.io-client` although `dist/socket-io-bridge.d.ts`
   imports both, so `tsc` on a file that imports `SocketIoBridge` fails
   until the consumer installs them (4.8.3, the versions in the package's

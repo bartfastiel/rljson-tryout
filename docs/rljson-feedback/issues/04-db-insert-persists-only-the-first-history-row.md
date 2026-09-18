@@ -83,8 +83,8 @@ version onto them, and `detectDagBranch` never sees them.
 ## Impact on us
 
 Found while seeding three species in one call (pull request #10, confirmed
-by the reviewer). Every write in the project has been one row per
-`Db.insert` since.
+by the reviewer). Every write in the project is one row per
+`Db.insert`.
 
 ## Workaround
 
@@ -94,4 +94,4 @@ history rows itself through `Core.import` (issue 15).
 ## Suggested fix
 
 Write every returned history row, or reject `_data` with more than one row
-with a clear error until then.
+with a clear error otherwise.

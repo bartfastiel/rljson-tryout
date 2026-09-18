@@ -78,7 +78,7 @@ candidates, the node elects itself, and the next cycle flips back.
 
 ## Impact on us
 
-Not yet observed in production (probe round trips are under 1.3 ms on
+Not observed in production (probe round trips are under 1.3 ms on
 one host), documented from the code and the reproduction while building
 the role orchestrator; every role flap costs a hub transport teardown and
 a reconnect of every client.

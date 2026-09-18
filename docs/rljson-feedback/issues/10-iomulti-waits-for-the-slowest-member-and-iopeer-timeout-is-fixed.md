@@ -158,8 +158,9 @@ A single stalled node makes every cross-node read of every node take 30 s.
 
 ## Workaround
 
-Reads that cascade are the only ones exposed to it; an application-level
-bound around them is planned (a race against a timer per read).
+Reads that cascade are the only ones exposed to it; roadmap slice D14
+puts an application-level bound around them (a race against a timer per
+read).
 
 ## Suggested fix
 

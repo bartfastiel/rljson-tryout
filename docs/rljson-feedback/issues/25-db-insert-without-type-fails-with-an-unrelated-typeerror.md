@@ -60,7 +60,7 @@ written and `_writeInsertHistory` dereferences `undefined`.
 
 ## Impact on us
 
-Cost an hour in the first slice; `_type` is now set by a helper
+Cost an hour in the first slice; `_type` is set by a helper
 everywhere.
 
 ## Suggested fix

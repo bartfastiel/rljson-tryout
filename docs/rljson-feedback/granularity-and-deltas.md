@@ -6,7 +6,7 @@ out where those rows come from, measures what they weigh, and compares the
 ways to make a small change ship a small payload: inside rljson's model,
 outside it, and a middle way that keeps the model and shrinks the wire.
 
-All numbers were measured on 2026-09-18 against the `medium` seed with the
+All numbers were measured against the `medium` seed with the
 pinned versions (`@rljson/db` 0.0.42, `@rljson/io` 0.0.78, `@rljson/rljson`
 0.0.81, `@rljson/hash` 0.0.19, `@rljson/server` 0.0.64) in two ways: two
 local nodes of this service (`node-a` on 8471/8472, `node-b` on 8474/8475,
@@ -18,7 +18,7 @@ rename writes. Byte counts are `Buffer.byteLength(JSON.stringify(row))`;
 _hash }` the receiving node gets per row, without socket.io framing (about
 70 bytes per request and acknowledgement).
 
-## What a rename produces today, and why
+## What a rename produces in this project, and why
 
 `PUT /api/animals/bowser-the-guard-dog` with `{ "name": "Bowser the Retired
 Guard Dog" }` writes eight rows (`docs/findings/entity-versions.md`,
@@ -146,7 +146,7 @@ its components and the traits layer do not move. The price is a different
 read model (a chain of `base` layers to resolve, `Db.join` instead of
 `Db.get`), a version DAG per layer table rather than per entity row, and a
 cake row that changes on every edit of any aspect; a rename of the
-long-story animal is 4.4 times cheaper than today, a rename of Bowser
+long-story animal is 4.4 times cheaper than as built, a rename of Bowser
 1.3 times, and the star schema with `traitsRefs` (D) is cheaper than the
 cake for both because it has fewer rows to name.
 
@@ -160,7 +160,7 @@ message. They would also replace the model rather than extend it:
   full content, and a patch addresses a mutable object by id and path.
   Two nodes that apply the same patch to the same base agree by
   construction, but nothing in the row itself says which version it is.
-- Verification by hash goes: today a peer's answer is re-hashed and
+- Verification by hash goes: in rljson a peer's answer is re-hashed and
   refused if the hash does not match (`docs/findings/change-set-sync.md`).
   A patch can only be checked against the state it produces, which the
   receiver does not have until it applied the patch, and a CRDT merge has
@@ -181,14 +181,14 @@ not an evolution of rljson, because everything above is what rljson is.
 ## The middle way: version deltas on the wire
 
 The rows can stay whole and immutable while the transport stops repeating
-what the receiver already holds. A new version of a row is announced as
-today (its hash); when the receiver pulls it and holds a base it can name
+what the receiver already holds. A new version of a row is announced by
+its hash, as `Connector` does; when the receiver pulls it and holds a base it can name
 (the previous version, found through the history row's `previous`, which
 the change set delivers alongside), it asks for the row relative to that
 base, the sender answers `{ base: <hash>, patch: { name: "Bowser the
 Retired Guard Dog" } }`, the receiver applies the patch to its copy of the
 base, runs `hsh` and compares the result with the hash it asked for. That
-is the same check `IoMulti` runs on a full row now; a wrong or malicious
+is the same check `IoMulti` runs on a full row; a wrong or malicious
 patch fails it in the same way and is never written. The model is intact:
 the stored row is the full row with its content hash, history rows and
 change sets are unchanged, deduplication and conflict detection see
@@ -248,7 +248,7 @@ For this project:
 1. Move `backgroundStory` into its own table with a `storyRef` on
    `animals` (a rename of the long-story animal drops from 10.9 kB to
    3.7 kB, an edit of the story costs the story row once), or model it as
-   a layer once slice D17 exists; the species image will follow the same
+   a layer under roadmap slice D17; the species image follows the same
    pattern with its blob id.
 2. Stop re-creating junction rows per animal version: keep `traitsRefs` as
    the relation (997 bytes per rename with the story moved out, the same
