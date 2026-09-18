@@ -103,8 +103,10 @@ The store:
   test reopens a seeded SQLite file with a fresh `BsMem`, finds zero blobs,
   serves the duck image, and finds one. A row whose `imageBlobId` is not
   what the renderer produces (a species written by a node with another
-  image algorithm) is served the freshly rendered image with a warning; the
-  route stays `200` rather than answering `404` for a species that exists.
+  image algorithm) was served the freshly rendered image with a warning
+  in this slice; since slice D5 such a row is an uploaded image, which is
+  pulled from the network and, when no node holds it, answered with `404`
+  and the reason (below).
 - `GET /api/species/:hash/image` answers `image/png` with
   `Cache-Control: public, max-age=31536000, immutable`: the path names the
   species version by its hash, the version names the image by its content,
@@ -151,3 +153,194 @@ describes for the pre-D3 seed.
   is `LPJNul-wow4m6Dsqxbninh`, 22 characters.
 - `Bs` offers no way to ask "how many blobs" or "is it empty" without
   listing them; `BsMem.size` exists but is not on the interface.
+
+## Slice D5: blob synchronisation
+
+### What we tried
+
+- `@rljson/bs` 0.0.26 (`BsMulti`, `BsPeer`, `BsPeerBridge`, `BsServer`)
+  as `@rljson/server` 0.0.64 wires them, socket.io 4.8.3, Node 24.18.0.
+  Read `BsMulti.getBlob`, `blobExists` and `readables` in the bundled
+  `dist/bs.js`, `BsPeer` (its `_withTimeout`, `isOpen`, the event names),
+  `BsPeerBridge._registerBsMethods`, `BsServer._generateTransportLayerCRUD`,
+  and in `server.js` `Client._setupBs`, `Server._queueBsPeer`,
+  `_rebuildMultis` and `_refreshServers`.
+- Ran a throwaway script with a `Server` over a `BsMem` behind real
+  socket.io and two `Client`s with a `BsMem` each: stored a blob on one
+  client and read it through the other client's `client.bs`, through the
+  hub's `server.bs`, and through the bare `client.peerStores.bs`; asked
+  every one of them for an id no node holds; watched which stores held
+  the blob afterwards.
+- Added an upload (`POST /api/species/:id/image`, raw bytes with the
+  media type, checked by the first bytes, one mebibyte at most) that
+  writes a new species version with a change set, so that a blob exists
+  on one node only (the seed images are deterministic and every node
+  renders them itself); let the hub transport hand the store the
+  `BsMulti` of its role (`fetchBlobsThrough`, next to `readThrough` and
+  `pullThrough`); made the `SyncAgent` pull every blob a received row
+  names (`blobReferencesOf`, today `species.imageBlobId`) after the rows
+  and list it on the transfer; and made `GET /api/species/:hash/image`
+  fall through to the network, then to the renderer for a seed species
+  only. Tested it with a fake `Bs` (`petShopStore.images.test.ts`), a
+  fake store (`syncAgent.test.ts`), real sockets (`hubTransport.test.ts`,
+  `syncAgent.transport.test.ts`), the Gherkin feature
+  `features/blob-sync.feature` in-process over both stores and against
+  the three containers, and by hand on Compose (host ports 8521 to 8523).
+
+### What happened
+
+What the library wires (`@rljson/server` 0.0.64 over `@rljson/bs` 0.0.26):
+
+- A `Client` builds `client.bs` as a `BsMulti` over `[local (priority 1,
+read and write), BsPeer to the hub (2, read only)]` and starts a
+  `BsPeerBridge` over its local `Bs` on the same socket, which is how
+  the hub reads the client's blobs. A `Server` builds `server.bs` as a
+  `BsMulti` over `[local (1, read and write), BsPeer per client (2, read
+only)]`, rebuilt on every join and leave like `server.io`, and serves
+  it through a `BsServer` to every client. The same one socket carries
+  the `Io` and the `Bs` events (`getBlob`, `blobExists`, ...); nothing
+  distinguishes them but the event name.
+- `BsPeerBridge` (the client's side, over its own store) registers the
+  read methods only: `getBlob`, `getBlobStream`, `blobExists`,
+  `getBlobProperties`, `listBlobs`. `BsServer` (the hub's side, over the
+  hub's multi) registers all eight, `setBlob` and `deleteBlob` included:
+  a client can write a blob into the hub's local store and delete one
+  from it over the wire, the same asymmetry `docs/findings/hub-transport.md`
+  records for `IoServer`, one step less open on the client side.
+- `BsMulti.getBlob` walks the readables one after the other in priority
+  order (not in parallel like `IoMulti.readRows` does within a group),
+  takes the first that answers, and then writes the content into every
+  writable member that did not answer ("hot-swap"), which is the local
+  store, before it returns. So the write-back the roadmap hoped for
+  exists at every hop: a blob read on client B that only client A holds
+  went A's bridge, hub's multi (cached in the hub's `BsMem`), B's multi
+  (cached in B's `BsMem`); reading through the bare `client.peerStores.bs`
+  instead caches on the hub but not locally, since a `BsPeer` alone has
+  no writable layer. `blobExists` walks the same way and answers `true`
+  from the first member that has the blob, `false` when none has, without
+  writing anything. Measured in-process over real sockets: `blobExists`
+  through the multi 1.4 ms, `getBlob` of a 30 byte blob two hops away
+  1.1 ms, a 10.6 kB blob on Compose 9 to 12 ms for the whole change set
+  pull (row, history row, blob).
+- The content survives the wire as a `Buffer` (socket.io carries binary
+  attachments), `properties.createdAt` comes back as an ISO string. A
+  `setBlob` on the receiving side files it under `hshBuffer(content)`
+  again, so the id is recomputed on every node the blob passes through
+  and never taken from the sender.
+- A miss is where it breaks: `BsMem.getBlob` throws
+  `Error('Blob not found: <id>')`, `BsServer` and `BsPeerBridge` pass
+  that `Error` object into the socket.io acknowledgement as it is, and
+  socket.io serialises an `Error` as `{}`. `BsPeer.getBlob` therefore
+  rejects with a plain `{}`, and `BsMulti.getBlob` runs
+  `err.message.includes('Blob not found')` over it, which throws
+  `TypeError: Cannot read properties of undefined (reading 'includes')`.
+  So `client.bs.getBlob(unknownId)` and `server.bs.getBlob(unknownId)`
+  both fail with a `TypeError` from inside the multi, and
+  `peerStores.bs.getBlob(unknownId)` with `{}`; none of them says "not
+  found". `blobExists` is unaffected (a boolean serialises). This
+  project asks the multi `blobExists` first and calls `getBlob` only for
+  an id some node has, and wraps whatever the multi throws into `the
+network could not serve blob <id>: <message>`.
+- `BsPeer` gives every request 30 s (`requestTimeoutMs` in its options,
+  which `Server` and `Client` do not pass through, like `IoPeer`), and a
+  request on a socket it knows to be closed fails at once. `BsMulti`
+  skips a peer whose `isOpen` is `false` and throws `All readable Bs
+instances are closed` when every member is. A hub with a frozen client
+  waits the full 30 s on that client's `blobExists` before it asks the
+  next one, since the walk is sequential, so every blob read on the
+  network can stall behind one slow node; the `SyncAgent` bounds a blob
+  by the change set's remaining deadline (15 s) and the image endpoint
+  by `blobPullTimeoutMs` (10 s), abandoning the read like a row pull.
+
+What this project does with it:
+
+- The store pulls a blob it lacks through the multi of the current role
+  (`PetShopStore.pullBlob`): local first, `blobExists` on the multi,
+  `getBlob` on the multi, then `blobIdOf(content)` against the id asked
+  for. A mismatch is refused (`BlobMismatchError`) and can never land
+  under the requested id, because a content-addressed `setBlob` files
+  the bytes under their own hash, so the worst a lying node achieves is
+  an unreferenced blob in the stores it passed through. The hot-swap
+  has already cached a good blob locally by the time the check runs; the
+  store's own `setBlob` afterwards is the safety net for a multi that
+  did not write back and a no-op otherwise.
+- The `SyncAgent` pulls the blobs of a change set after its rows were
+  written in one `Io.write` and its dependencies were pulled, within the
+  same deadline, and records `blobs: [{ blobId, bytes }]` on the
+  transfer (`/status.sync.transfers`, `GET /api/sync/transfers`, the
+  `sync` event; absent when the pull fetched none); the web app's
+  transfer popup shows it as "blob 10.6 kB". A blob that no node holds,
+  that comes back wrong or that does not arrive in time is logged and
+  left out: the change set counts as received (the version is current
+  with its `imageBlobId`), and `GET /api/species/:hash/image` asks the
+  network again the moment the image is wanted, caching it then. A node
+  that holds the version but gets the blob from nowhere answers `404`
+  with the blob id and the reason instead of a `500`, and only a seed
+  species (a row whose `imageBlobId` equals `speciesImageBlobId(id)`) is
+  rendered again from its id; an uploaded image cannot be.
+- An upload on a client, seen on Compose (node3 hub, node1 and node2
+  clients, `IoMem` everywhere): `POST` of the 10 566 byte PNG answered
+  in 17 ms with the new version; the hub pulled the change set with the
+  blob in 9 ms and the other client in 12 ms, both serving the same
+  bytes (`sha256sum` equal on all three) at the new version's URL, both
+  transfer rows naming the blob and its size. A memory node restarted
+  afterwards reseeded, joined, and its catch-up pulled the one missing
+  change set with the blob in 12 ms. A second upload of the same bytes
+  answered the current version unchanged in 17 ms and wrote nothing:
+  the same image twice makes no second version. The refusals answer
+  `415` for another media type or bytes that are not the declared image
+  (checked by the PNG signature or the JPEG start-of-image marker, so
+  an HTML page declared `image/png` is refused), `413` from Fastify's
+  own body limit for more than a mebibyte, `404` for an unknown species.
+- Animals keep referencing the species version they were written with,
+  so an animal card shows the badge of the old duck version after the
+  duck got a photo, until the animal is edited; the species card shows
+  the photo. That is the version rule of roadmap section 2.6 at work,
+  not a gap in the blob transfer.
+
+### What it means for rljson users
+
+- Use the multi (`client.bs`, `server.bs`) for reads you want cached:
+  `BsMulti.getBlob` writes a hit into the local layer at every hop, so a
+  blob read once on a client sits on the hub and the client afterwards.
+  A bare `BsPeer` caches on the far side only.
+- Ask `blobExists` before `getBlob` when a miss is possible: a not-found
+  from the other side of a socket arrives as `{}` and makes
+  `BsMulti.getBlob` throw a `TypeError` rather than "Blob not found".
+- Check the id yourself when the bytes matter: a `BsPeer` hands you
+  whatever the other node sent, and only the local `setBlob` recomputes
+  the hash. A content-addressed store makes a wrong blob inert, not
+  absent.
+- Expect one slow node to stall every blob read that misses locally:
+  the multi asks its peers one after the other with 30 s each. Bound
+  the wait in your own code; the library offers no option through
+  `Server` or `Client`.
+- The hub's `BsServer` accepts `setBlob` and `deleteBlob` from any
+  connected client; treat the hub port as trusted-network-only for blobs
+  as for rows.
+
+### Candidates for upstream issues
+
+- `BsServer` and `BsPeerBridge` put the `Error` object into the socket.io
+  acknowledgement, which arrives as `{}`; `BsMulti.getBlob`,
+  `getBlobStream`, `getBlobProperties` and `generateSignedUrl` then
+  crash on `err.message.includes(...)` with a `TypeError` for any miss
+  that went through a peer. Reproduction: a `Server` with an empty
+  `BsMem`, a `Client` over socket.io, `await client.bs.getBlob('nope')`;
+  expected `Blob not found: nope`, observed `Cannot read properties of
+undefined (reading 'includes')`. Serialising `{ message }` (as `IoServer`
+  does for `Io` errors) would fix both ends.
+- `BsPeer`'s `requestTimeoutMs` exists but `Server` and `Client` build
+  their peers with `new BsPeer(socket)` and offer no way to set it, the
+  same gap as `IoPeer`. Reproduction: `docker pause` one client and read
+  a blob the hub lacks on the hub; the read returns after 30 s.
+- `BsMulti.getBlob` and `blobExists` walk the readables sequentially,
+  so with several peers at the same priority the slowest one delays the
+  ones behind it; `IoMulti` asks a priority group in parallel.
+  Reproduction: two `BsPeer`s at priority 2, the first one paused, the
+  blob on the second; `getBlob` takes the first peer's full timeout.
+- `BsServer` exposes `setBlob` and `deleteBlob` to every socket while
+  `BsPeerBridge` exposes reads only; the asymmetry is undocumented and
+  lets any client write into and delete from the hub's blob store.
+  Reproduction: from a client, `socket.emit('deleteBlob', id, cb)`
+  removes the blob from the hub's local `Bs`.
