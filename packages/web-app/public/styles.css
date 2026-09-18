@@ -580,6 +580,41 @@ a.card {
   margin: 0 0 var(--space-4);
 }
 
+/* The two actions of a species card side by side, wrapping on a narrow
+   card; the upload control is a label over a visually hidden file input,
+   so the label carries the button's tap target and the input keeps the
+   keyboard focus ring on it. */
+.species-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.species-upload {
+  position: relative;
+}
+
+.species-upload-input:focus-visible + .button {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.species-upload-input:disabled + .button {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.species-upload-message {
+  margin: var(--space-3) 0 0;
+  font-size: 0.9375rem;
+  color: var(--color-text-muted);
+}
+
+.species-upload-error {
+  color: var(--color-error);
+}
+
 a.animal-card {
   display: flex;
   align-items: flex-start;
@@ -1029,7 +1064,15 @@ a.animal-card {
   color: var(--color-text-muted);
 }
 
+/* The blob a pull fetched with the rows stands out from the counts: it
+   is the one thing in the row that took bytes, not rows. */
+.transfer-row-blobs {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
 .transfer-row-count:empty,
+.transfer-row-blobs:empty,
 .transfer-row-duration:empty {
   display: none;
 }

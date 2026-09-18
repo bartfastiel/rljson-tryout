@@ -1,6 +1,49 @@
+import { crc32, deflateSync } from 'node:zlib';
+
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export type Box = { x: number; y: number; width: number; height: number };
+
+const pngChunk = (type: string, data: Buffer): Buffer => {
+  const typeAndData = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length);
+  const checksum = Buffer.alloc(4);
+  checksum.writeUInt32BE(crc32(typeAndData));
+  return Buffer.concat([length, typeAndData, checksum]);
+};
+
+/**
+ * A small opaque PNG of one colour, built here so that an upload test
+ * needs no fixture file: the signature, an 8-bit RGBA header, one
+ * deflated `IDAT` of unfiltered scanlines and the end chunk. A different
+ * colour gives different bytes, and with them a different blob id and
+ * species version, so that a retried test uploads something new.
+ */
+export const solidPng = (
+  width: number,
+  height: number,
+  [red, green, blue]: readonly [number, number, number],
+): Buffer => {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const stride = 1 + width * 4;
+  const scanlines = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      scanlines.set([red, green, blue, 255], y * stride + 1 + x * 4);
+    }
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', header),
+    pngChunk('IDAT', deflateSync(scanlines)),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+};
 
 export const boundingBoxOf = async (locator: Locator): Promise<Box> => {
   const box = await locator.boundingBox();

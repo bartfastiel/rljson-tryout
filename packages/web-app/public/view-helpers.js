@@ -63,6 +63,15 @@ export const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
 });
 
 /**
+ * "12.7 kB" for a size in bytes, one decimal from a kilobyte on: the size
+ * of an image chosen for upload and of a blob a transfer fetched.
+ *
+ * @param {number} bytes
+ */
+export const formatBytes = (bytes) =>
+  bytes < 1000 ? `${bytes} B` : `${(bytes / 1000).toFixed(1)} kB`;
+
+/**
  * The moment an rljson `timeId` (`<milliseconds since epoch>:<4 unique
  * characters>`) was issued, which is when the version it belongs to was
  * written on the node that wrote it.

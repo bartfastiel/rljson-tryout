@@ -49,11 +49,21 @@ import { liveEvents } from './live-events.js';
  */
 
 /**
+ * One blob a pull fetched from the network with the rows: its id and
+ * its size in bytes.
+ *
+ * @typedef {object} TransferredBlob
+ * @property {string} blobId
+ * @property {number} bytes
+ */
+
+/**
  * One change set transfer, from `GET /status` under `sync.transfers`:
  * which way it went, the node it came from or went to (`null` when the
  * announcement named none, or for a hub announcing to every client), the
- * change set by hash and id, the rows it named per table, how long the
- * pull took, when it finished and how it ended.
+ * change set by hash and id, the rows it named per table, the blobs the
+ * pull fetched (absent when none), how long the pull took, when it
+ * finished and how it ended.
  *
  * @typedef {object} SyncTransfer
  * @property {'incoming' | 'outgoing'} direction
@@ -61,6 +71,7 @@ import { liveEvents } from './live-events.js';
  * @property {string} changeSetHash
  * @property {string | null} changeSetId
  * @property {Record<string, number>} tables
+ * @property {TransferredBlob[]} [blobs] the blobs the pull fetched with the rows
  * @property {number} durationMs
  * @property {string} at
  * @property {'completed' | 'pending' | 'failed'} status

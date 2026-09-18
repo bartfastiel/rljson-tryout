@@ -1,5 +1,6 @@
 import type { TableCfg } from '@rljson/rljson';
 import {
+  blobReferencesOf,
   changeSetsTableCfg,
   hashMatches,
   type ChangeSetItem,
@@ -31,7 +32,7 @@ import {
  * What the agent needs from the node's store: the event for change sets
  * the store wrote itself, the lists and lookups of what it holds, the
  * reads from the peer stores, the local checks and the writes of
- * received rows and change sets.
+ * received rows and change sets, and the blob pulls of slice D5.
  */
 export type SyncStore = Pick<
   PetShopStore,
@@ -45,6 +46,8 @@ export type SyncStore = Pick<
   | 'pullHistoryRow'
   | 'writeReceivedRows'
   | 'recordReceivedChangeSet'
+  | 'hasLocalBlob'
+  | 'pullBlob'
 >;
 
 /**
@@ -72,9 +75,12 @@ export type SyncStatus = 'completed' | 'pending' | 'failed';
  * change set by hash and id, how many rows per table it named, how long
  * the pull took, when it finished, and whether it completed, is still
  * pending (the pull could not finish and is retried) or failed for good,
- * with the reason. The stream additionally hears a transfer the moment
- * its pull starts: `pending` with no `error`, `durationMs` 0 and the id
- * and tables not known yet; `/status` lists outcomes only.
+ * with the reason. `blobs` lists the blobs the pull fetched from the
+ * network because the received rows named them and this node lacked them
+ * (slice D5: the image of a species version), each with its size; absent
+ * when the pull fetched none. The stream additionally hears a transfer
+ * the moment its pull starts: `pending` with no `error`, `durationMs` 0
+ * and the id and tables not known yet; `/status` lists outcomes only.
  */
 export type SyncTransfer = Readonly<{
   direction: SyncDirection;
@@ -82,11 +88,15 @@ export type SyncTransfer = Readonly<{
   changeSetHash: string;
   changeSetId: string | null;
   tables: Readonly<Record<string, number>>;
+  blobs?: readonly TransferredBlob[];
   durationMs: number;
   at: string;
   status: SyncStatus;
   error?: string;
 }>;
+
+/** One blob a pull fetched from the network: its id and its size in bytes. */
+export type TransferredBlob = Readonly<{ blobId: string; bytes: number }>;
 
 /**
  * What `/status` reports under `sync.catchUp`: the last catch-up this
@@ -194,6 +204,7 @@ type PullOutcome = {
   fromNodeId: string | null;
   changeSetId: string | null;
   tables: Record<string, number>;
+  blobs: TransferredBlob[];
   started: number;
 };
 
@@ -361,7 +372,13 @@ const isoTime = (milliseconds: number): string =>
  * the store already holds is skipped by hash. Rows the
  * received rows point at but this node lacks (a reference to a version
  * from a change set that has not arrived yet, a `previous` of a version
- * from an earlier edit) are pulled too, recursively, up to a bound. A
+ * from an earlier edit) are pulled too, recursively, up to a bound. The
+ * blobs the received rows name (`imageBlobId` of a species version) and
+ * this node lacks are pulled after that through the blob cascade of the
+ * store, which caches them locally, and listed on the transfer with
+ * their sizes; a blob no node serves, or serves wrongly, is logged and
+ * left to the image endpoint, which asks the network again on demand:
+ * the change set applies with its rows either way (slice D5). A
  * pull whose peer could not answer within `pullTimeoutMs`, or whose rows
  * no node has yet, leaves the change set pending: it is tried again on
  * the next announcement of the same hash and every `retryIntervalMs`,
@@ -867,6 +884,7 @@ export class SyncAgent {
       fromNodeId: pending.fromNodeId,
       changeSetId: null,
       tables: {},
+      blobs: [],
       started,
     };
     this.notifyTransfer({
@@ -900,9 +918,9 @@ export class SyncAgent {
 
   /**
    * Pulls the change set row, then every item (data rows first), writes
-   * them all at once, pulls what they depend on and records the change
-   * set. Fills the outcome as it goes, so that a failure reports what was
-   * known by then.
+   * them all at once, pulls what they depend on and the blobs they name,
+   * and records the change set. Fills the outcome as it goes, so that a
+   * failure reports what was known by then.
    */
   private async pullChangeSet(
     changeSetHash: string,
@@ -919,7 +937,52 @@ export class SyncAgent {
     }
     await this.store.writeReceivedRows(received);
     await this.pullDependencies(received, deadline);
+    await this.pullBlobs(received, deadline, outcome);
     await this.store.recordReceivedChangeSet(changeSet);
+  }
+
+  /**
+   * Pulls every blob the received rows name and this node lacks, within
+   * the deadline of the change set, and lists the ones that arrived on
+   * the outcome. A blob that no node holds, that arrives with the wrong
+   * content or that does not arrive in time is logged and left out: the
+   * rows are written already, and `GET /api/species/:hash/image` asks the
+   * network again when the image is wanted.
+   */
+  private async pullBlobs(
+    received: readonly ReceivedRow[],
+    deadline: number,
+    outcome: PullOutcome,
+  ): Promise<void> {
+    const blobIds = new Set<string>();
+    for (const { table, row } of received) {
+      for (const blobId of blobReferencesOf(table, row)) {
+        blobIds.add(blobId);
+      }
+    }
+    for (const blobId of blobIds) {
+      if (await this.store.hasLocalBlob(blobId)) {
+        continue;
+      }
+      try {
+        const pulled = await this.within(deadline, `blob ${blobId}`, () =>
+          this.store.pullBlob(blobId),
+        );
+        if (pulled === undefined) {
+          this.logger.warn(
+            { blobId, changeSetHash: outcome.changeSetHash },
+            'a blob the received rows name is held by no node, left to the image endpoint',
+          );
+          continue;
+        }
+        outcome.blobs.push({ blobId, bytes: pulled.content.length });
+      } catch (error) {
+        this.logger.warn(
+          { err: error, blobId, changeSetHash: outcome.changeSetHash },
+          'a blob the received rows name could not be pulled, left to the image endpoint',
+        );
+      }
+    }
   }
 
   /**
@@ -972,6 +1035,7 @@ export class SyncAgent {
       changeSetHash: outcome.changeSetHash,
       changeSetId: outcome.changeSetId,
       tables: outcome.tables,
+      ...(outcome.blobs.length === 0 ? {} : { blobs: [...outcome.blobs] }),
       durationMs: Math.max(0, this.now() - outcome.started),
       at: isoTime(this.now()),
       status,

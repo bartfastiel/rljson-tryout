@@ -4,6 +4,7 @@ export {
   updateAnimalChangeSetId,
   type AnimalChanges,
 } from './animalChanges.ts';
+export { blobIdOf } from './blobId.ts';
 export {
   compareTimeIdsNewestFirst,
   currentRows,
@@ -36,6 +37,14 @@ export {
   speciesImageBlobId,
   speciesImageMimeType,
 } from './images/speciesImage.ts';
+export {
+  detectedImageMediaType,
+  isUploadedImageMediaType,
+  maximumUploadedImageBytes,
+  updateSpeciesImageChangeSetId,
+  uploadedImageMediaTypes,
+  type UploadedImageMediaType,
+} from './images/uploadedImage.ts';
 export {
   invoiceRows,
   type InvoiceDraft,
@@ -84,6 +93,10 @@ export {
   type AnimalRow,
   type HashedAnimalRow,
 } from './tables/animals.ts';
+export {
+  blobReferenceColumnsOf,
+  blobReferencesOf,
+} from './tables/blobReferences.ts';
 export {
   breedersInsertHistoryTableCfg,
   breedersTableCfg,

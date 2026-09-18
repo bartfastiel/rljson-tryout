@@ -96,14 +96,24 @@ entity its change set, the way the API writes them
 into SQLite). The node serves the data as
 `GET /api/species`
 (`[{ id, hash, name, latinName, description, imageUrl }]`),
-`GET /api/species/:hash/image` (the PNG of that species version,
+`GET /api/species/:hash/image` (the image of that species version with
+the media type the version names,
 `Cache-Control: public, max-age=31536000, immutable` because the hash names
 the version and the version names the image by content, `404` for an
-unknown hash; every species image is a 256 by 256 badge rendered
-deterministically from the species id by the domain package's own PNG
-encoder, stored once in the node's blob store under the content id the
-species row carries in `imageBlobId`, see
-[docs/findings/blobs.md](docs/findings/blobs.md)), `GET /api/traits`
+unknown hash and `404` with the reason for a version whose image no node
+of the network holds; every seeded species image is a 256 by 256 badge
+rendered deterministically from the species id by the domain package's
+own PNG encoder, stored once in the node's blob store under the content
+id the species row carries in `imageBlobId`, see
+[docs/findings/blobs.md](docs/findings/blobs.md)),
+`POST /api/species/:id/image` (the raw bytes of a PNG or JPEG with
+`Content-Type: image/png` or `image/jpeg`, at most one mebibyte, told by
+their first bytes; writes a new version of the species naming the uploaded
+blob, with one change set, and answers `200` with it as the list serves
+it, `415` for another media type or bytes that are not the declared
+image, `413` for a bigger body, `404` for an unknown id; the other nodes
+pull the version and then the blob through the hub, so the image renders
+everywhere within the second), `GET /api/traits`
 (`[{ id, hash, name, description }]`), `GET /api/breeders`
 (`[{ id, hash, farmName, suppliesSince, person: { id, name, city } | null }]`,
 the supplying person already joined), `GET /api/customers`
@@ -264,7 +274,16 @@ animals matching its search the same way. Every species has a badge: the
 species cards show it at the top, the animal cards as a small round
 thumbnail beside the name, the animal detail next to the facts, all
 served from `GET /api/species/:hash/image` with a cache header that lets
-the browser keep them.
+the browser keep them. Every species card has an "Upload image" control
+that takes a photo from the phone's camera or a PNG or JPEG file of at
+most one mebibyte, sends it to `POST /api/species/:id/image` and shows
+the new image on the card; the other nodes pull the new species version
+and its blob through the hub (the transfer popup lists the blob with its
+size, "blob 10.6 kB"), and a node that got the version without the bytes
+fetches them the moment someone opens the image
+([docs/findings/blobs.md](docs/findings/blobs.md)). Animals keep showing
+the badge of the species version they were written with until they are
+edited.
 
 The web app shows the environment in the header: this node as a badge,
 every other node of `NODE_URLS` as a badge outlined green when discovery
@@ -279,8 +298,9 @@ once, and with `prefers-reduced-motion` the arrow simply turns green for
 the same time. Tapping a partner opens a popup (full screen on a phone,
 a dialog on a wide screen) with the node's link and the last ten
 transfers with it, newest first, each with the direction, the tables,
-the short change set hash, the row count, the time, the duration and the
-outcome, kept current from the stream while it is open; a row expands to
+the short change set hash, the row count, the blob a pull fetched with
+the rows when there was one, the time, the duration and the outcome,
+kept current from the stream while it is open; a row expands to
 the change set's payload: every row with its fields and, for an edited
 entity, the new version next to the one it replaced with the changed
 fields marked and long texts cut to the changed region. The data comes

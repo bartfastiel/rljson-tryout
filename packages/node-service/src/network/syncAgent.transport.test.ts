@@ -175,6 +175,86 @@ describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
     });
   });
 
+  it('brings a species image uploaded on a client to the hub and the other client, blob included', async () => {
+    const { hub, clients, all } = await network();
+    const [uploader, other] = clients as [Node, Node];
+    await until(() => all.every(caughtUp));
+    const photo = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.from(`a photo taken on ${uploader.nodeId} at ${Date.now()}`),
+    ]);
+
+    const version = (await uploader.store.updateSpeciesImage(
+      'duck',
+      photo,
+      'image/jpeg',
+    ))!;
+
+    for (const receiver of [hub, other]) {
+      await until(() => receiver.agent.snapshot().received === 1);
+      expect(
+        (await receiver.store.listSpecies()).find((row) => row.id === 'duck'),
+      ).toStrictEqual(version);
+      expect(await receiver.store.hasLocalBlob(version.imageBlobId)).toBe(true);
+      expect(await receiver.store.speciesImage(version._hash)).toStrictEqual({
+        outcome: 'found',
+        image: { content: photo, mimeType: 'image/jpeg' },
+      });
+      expect(receiver.agent.snapshot().transfers[0]).toMatchObject({
+        direction: 'incoming',
+        peerNodeId: uploader.nodeId,
+        changeSetId: expect.stringMatching(
+          /^update-species-image-duck-/,
+        ) as string,
+        tables: { species: 1, speciesInsertHistory: 1 },
+        blobs: [{ blobId: version.imageBlobId, bytes: photo.length }],
+        status: 'completed',
+      });
+    }
+  });
+
+  it('serves an uploaded image on demand when the blob arrives after the change set', async () => {
+    const { hub, clients, all } = await network();
+    const [uploader, other] = clients as [Node, Node];
+    await until(() => all.every(caughtUp));
+    const photo = Buffer.concat([
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      Buffer.from(`a late photo ${Date.now()}`),
+    ]);
+    // The version is written on the uploader without its blob, the way a
+    // node that pulled the rows but not the blob holds it; the blob is
+    // stored on the uploader only once the others hold the version.
+    const { blobId } = await uploader.store.blobs.setBlob(photo);
+    const version = (await uploader.store.updateSpeciesImage(
+      'duck',
+      photo,
+      'image/jpeg',
+    ))!;
+    await uploader.store.blobs.deleteBlob(blobId);
+
+    for (const receiver of [hub, other]) {
+      await until(() => receiver.agent.snapshot().received === 1);
+      expect(await receiver.store.hasLocalBlob(blobId)).toBe(false);
+      expect(receiver.agent.snapshot().transfers[0]).not.toHaveProperty(
+        'blobs',
+      );
+      expect(await receiver.store.speciesImage(version._hash)).toMatchObject({
+        outcome: 'unavailable',
+        blobId,
+      });
+    }
+
+    await uploader.store.blobs.setBlob(photo);
+
+    for (const receiver of [other, hub]) {
+      expect(await receiver.store.speciesImage(version._hash)).toStrictEqual({
+        outcome: 'found',
+        image: { content: photo, mimeType: 'image/jpeg' },
+      });
+      expect(await receiver.store.hasLocalBlob(blobId)).toBe(true);
+    }
+  });
+
   it('never shows an invoice without its items while its change set arrives', async () => {
     const { hub, clients, all } = await network();
     await until(() => all.every(caughtUp));

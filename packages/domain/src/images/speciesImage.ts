@@ -1,5 +1,4 @@
-import { hshBuffer } from '@rljson/hash';
-
+import { blobIdOf } from '../blobId.ts';
 import {
   createRandomSource,
   type RandomSource,
@@ -256,4 +255,4 @@ export const speciesImage = (speciesId: string): Uint8Array => {
  * the image.
  */
 export const speciesImageBlobId = (speciesId: string): string =>
-  hshBuffer(speciesImage(speciesId));
+  blobIdOf(speciesImage(speciesId));

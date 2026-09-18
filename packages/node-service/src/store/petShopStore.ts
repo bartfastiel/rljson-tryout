@@ -21,6 +21,7 @@ import {
   animalsInsertHistoryTableCfg,
   animalsSeed,
   animalsTableCfg,
+  blobIdOf,
   breedersInsertHistoryTableCfg,
   breedersSeed,
   breedersTableCfg,
@@ -45,7 +46,7 @@ import {
   seedInvoices,
   seedPlans,
   speciesImage,
-  speciesImageMimeType,
+  speciesImageBlobId,
   personsInsertHistoryTableCfg,
   personsSeed,
   personsTableCfg,
@@ -58,6 +59,7 @@ import {
   traitsSeed,
   traitsTableCfg,
   updateAnimalChangeSetId,
+  updateSpeciesImageChangeSetId,
   versionsOf,
   type AnimalChanges,
   type ChangeSetItem,
@@ -75,6 +77,7 @@ import {
   type InvoiceStatus,
   type SeedClock,
   type SeedSize,
+  type UploadedImageMediaType,
   type VersionHistoryRow,
 } from '@rljson-tryout/domain';
 
@@ -890,6 +893,35 @@ const throwOnInvalidCommandShape = (command: IssueInvoiceCommand): void => {
  */
 const todayInUtc = (): string => new Date().toISOString().slice(0, 10);
 
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * Runs a read with a bound on the wait: a read that outlives the given
+ * milliseconds is abandoned (it settles later, ignored) and counts as a
+ * network that did not answer.
+ */
+const withinMilliseconds = <Value>(
+  milliseconds: number,
+  what: string,
+  read: () => Promise<Value>,
+): Promise<Value> =>
+  new Promise<Value>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`pull of ${what} exceeded ${milliseconds} ms`));
+    }, milliseconds);
+    read().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+
 /**
  * Resolves a breeder row's `personRef` hash to the person it currently
  * points at, the shape `PetShopStore.listBreeders` joins into
@@ -954,6 +986,61 @@ export type SpeciesImage = Readonly<{
 }>;
 
 /**
+ * What `PetShopStore.speciesImage` finds for a species version's hash:
+ * the image, or why there is none to serve. `unknown-version` when no
+ * species row of this store has the hash; `unavailable` when the row is
+ * there but its blob is held neither by this node nor by any node the
+ * network could ask, or was not served within `blobPullTimeoutMs`, with
+ * the blob id the row names and the reason.
+ */
+export type SpeciesImageLookup =
+  | { outcome: 'found'; image: SpeciesImage }
+  | { outcome: 'unknown-version' }
+  | { outcome: 'unavailable'; blobId: string; reason: string };
+
+/**
+ * A blob store the node reads through when its own store lacks a blob
+ * (slice D5): the `Bs` multi of the hub transport's `Server` or `Client`
+ * (`server.bs`, `client.bs`), asked for on every read because
+ * `@rljson/server` rebuilds it on every client join and leave, `undefined`
+ * from a client whose peer is not up, or `null` while the node has no
+ * role. A multi reads the local store first, then the `BsPeer` to the hub
+ * (on the hub: to every client), and writes what a peer served into the
+ * local store on the way (`docs/findings/blobs.md`).
+ */
+export type BlobCascade = (() => Bs | undefined) | null;
+
+/**
+ * The bytes `PetShopStore.pullBlob` found for a blob id and where: in
+ * this node's own blob store, or on another node, in which case they are
+ * in this node's store now too.
+ */
+export type PulledBlob = Readonly<{
+  content: Buffer;
+  source: 'local' | 'network';
+}>;
+
+/**
+ * Thrown by `pullBlob` when another node served bytes for a blob id that
+ * hash to a different id: the blob is refused and never lands under the
+ * id it was asked for (slice D5; the chaos slices D15 and D16 build on
+ * this check).
+ */
+export class BlobMismatchError extends Error {
+  readonly blobId: string;
+  readonly servedBlobId: string;
+
+  constructor(blobId: string, servedBlobId: string) {
+    super(
+      `the network served bytes for blob ${blobId} that hash to ${servedBlobId}, refused`,
+    );
+    this.name = 'BlobMismatchError';
+    this.blobId = blobId;
+    this.servedBlobId = servedBlobId;
+  }
+}
+
+/**
  * What `PetShopStore` can be given at construction: `blobs` is the blob
  * store the species images live in, the one `main.ts` also hands to the
  * hub transport so that a peer reads the same blobs (a fresh in-memory
@@ -963,13 +1050,16 @@ export type SpeciesImage = Readonly<{
  * invoice is dated with, replaceable in tests so that an invoice number
  * and date can be asserted exactly; `logger` receives the warning when a
  * read through the network fails (a silent default for tests that build a
- * store without one).
+ * store without one); `blobPullTimeoutMs` bounds how long `speciesImage`
+ * waits for a blob another node serves on demand (ten seconds by default,
+ * the `BsPeer` of `@rljson/bs` would wait thirty).
  */
 export type PetShopStoreOptions = Readonly<{
   blobs?: Bs;
   traitRelationMode?: TraitRelationMode;
   today?: () => string;
   logger?: Pick<FastifyBaseLogger, 'warn'>;
+  blobPullTimeoutMs?: number;
 }>;
 
 /**
@@ -1001,9 +1091,9 @@ export class PetShopStore {
    */
   readonly localIo: Io;
   /**
-   * The blob store the species images are written to at seed time and
-   * read from by `speciesImage`: `BsMem` on every node until slice C2
-   * puts the blobs of a persistent node on disk.
+   * The blob store the species images are written to at seed time and on
+   * upload and read from by `speciesImage`: `BsMem` on every node until
+   * slice C2 puts the blobs of a persistent node on disk.
    */
   readonly blobs: Bs;
   private readonly io: IoSwitch;
@@ -1011,6 +1101,7 @@ export class PetShopStore {
   private readonly traitRelationMode: TraitRelationMode;
   private readonly today: () => string;
   private readonly logger: Pick<FastifyBaseLogger, 'warn'>;
+  private readonly blobPullTimeoutMs: number;
 
   /**
    * Writes that must not interleave (issuing an invoice reads the invoice
@@ -1034,6 +1125,8 @@ export class PetShopStore {
 
   private peers: PeerStores = null;
 
+  private blobCascade: BlobCascade = null;
+
   constructor(io: Io, options: PetShopStoreOptions = {}) {
     this.localIo = io;
     this.blobs = options.blobs ?? new BsMem();
@@ -1042,6 +1135,7 @@ export class PetShopStore {
     this.traitRelationMode = options.traitRelationMode ?? 'multi-reference';
     this.today = options.today ?? todayInUtc;
     this.logger = options.logger ?? { warn: () => undefined };
+    this.blobPullTimeoutMs = options.blobPullTimeoutMs ?? 10_000;
   }
 
   /**
@@ -1069,6 +1163,15 @@ export class PetShopStore {
    */
   pullThrough(peers: PeerStores): void {
     this.peers = peers;
+  }
+
+  /**
+   * Names the blob store `pullBlob` reads through when this node's own
+   * lacks a blob (the `Bs` multi of the hub transport's `Server` or
+   * `Client`), or `null` when the node has none.
+   */
+  fetchBlobsThrough(cascade: BlobCascade): void {
+    this.blobCascade = cascade;
   }
 
   /**
@@ -1487,43 +1590,185 @@ export class PetShopStore {
 
   /**
    * The image of one species version, by the version's hash, as
-   * `GET /api/species/:hash/image` serves it; `undefined` when no species
-   * row of the local store has this hash. The bytes come from the blob
-   * store under the row's `imageBlobId`. A row whose blob the store lacks
-   * (a `sqlite` node restarted with its rows on disk but its blobs in a
-   * fresh `BsMem`, until slice C2 keeps them on disk too) gets its image
-   * rendered again from the species id and stored, which yields the same
-   * bytes under the same id because the image is a pure function of the
-   * id; a row that names another id than the renderer produces today (a
-   * species written by a node with another image algorithm) is served the
-   * freshly rendered image all the same, with a warning.
+   * `GET /api/species/:hash/image` serves it, or why there is none
+   * (`SpeciesImageLookup`). The species row is read from the local store;
+   * its bytes come from the blob store under the row's `imageBlobId`,
+   * else from the network through `pullBlob`, within `blobPullTimeoutMs`,
+   * which also caches them here; else, for a seed species alone (a row
+   * whose `imageBlobId` is what the renderer produces for its id: a
+   * `sqlite` node restarted with its rows on disk but its blobs in a fresh
+   * `BsMem`, until slice C2 keeps them on disk too), rendered again from
+   * the species id and stored, which yields the same bytes under the same
+   * id because the image is a pure function of the id. An uploaded image
+   * (slice D5) cannot be rendered again: a node that holds the species
+   * version but got the blob from nowhere answers `unavailable`, with the
+   * reason logged.
    */
-  async speciesImage(hash: string): Promise<SpeciesImage | undefined> {
+  async speciesImage(hash: string): Promise<SpeciesImageLookup> {
     if (!isSafeWhereValue(hash)) {
-      return undefined;
+      return { outcome: 'unknown-version' };
     }
     const species = (await this.localRow(speciesTableCfg.key, hash)) as
       HashedSpeciesRow | undefined;
     if (species === undefined) {
+      return { outcome: 'unknown-version' };
+    }
+    const found = (content: Buffer): SpeciesImageLookup => ({
+      outcome: 'found',
+      image: { content, mimeType: species.imageMimeType },
+    });
+    let reason: string;
+    try {
+      const pulled = await withinMilliseconds(
+        this.blobPullTimeoutMs,
+        `blob ${species.imageBlobId}`,
+        () => this.pullBlob(species.imageBlobId),
+      );
+      if (pulled !== undefined) {
+        return found(pulled.content);
+      }
+      reason = 'no node holds the blob';
+    } catch (error) {
+      reason = errorMessage(error);
+    }
+    if (species.imageBlobId === speciesImageBlobId(species.id)) {
+      const rendered = await this.storeSpeciesImage(species.id);
+      return found(rendered.content);
+    }
+    this.logger.warn(
+      {
+        speciesId: species.id,
+        speciesHash: hash,
+        imageBlobId: species.imageBlobId,
+        reason,
+      },
+      'species image is not available on this node or the network',
+    );
+    return { outcome: 'unavailable', blobId: species.imageBlobId, reason };
+  }
+
+  /** Whether this node's own blob store holds the blob with this id. */
+  async hasLocalBlob(blobId: string): Promise<boolean> {
+    return isSafeWhereValue(blobId) && this.blobs.blobExists(blobId);
+  }
+
+  /**
+   * The blob with this id from this node's own blob store or, when that
+   * lacks it, from the network: the `Bs` multi of `fetchBlobsThrough`,
+   * which asks the hub and, through the hub, every other client, and
+   * writes what it found into this node's blob store on the way
+   * (`BsMulti.getBlob` stores a hit in every writable layer that missed;
+   * `docs/findings/blobs.md`). The bytes are checked against the id,
+   * which is their content hash: bytes that hash to something else are
+   * refused with `BlobMismatchError`, and since a content-addressed store
+   * files them under their own hash they never land under the id asked
+   * for. `undefined` when no node holds the blob, when the node has no
+   * cascade, or for an id that is no id; throws when the network could
+   * not answer (a closed socket, the thirty seconds of `BsPeer`). Nothing
+   * here bounds the wait: the callers do, the `SyncAgent` with its pull
+   * deadline and `speciesImage` with `blobPullTimeoutMs`.
+   */
+  async pullBlob(blobId: string): Promise<PulledBlob | undefined> {
+    if (!isSafeWhereValue(blobId)) {
       return undefined;
     }
-    if (await this.blobs.blobExists(species.imageBlobId)) {
-      const { content } = await this.blobs.getBlob(species.imageBlobId);
-      return { content, mimeType: species.imageMimeType };
+    if (await this.blobs.blobExists(blobId)) {
+      const { content } = await this.blobs.getBlob(blobId);
+      return { content, source: 'local' };
     }
-    const rendered = await this.storeSpeciesImage(species.id);
-    if (rendered.blobId !== species.imageBlobId) {
-      this.logger.warn(
-        {
-          speciesId: species.id,
-          speciesHash: hash,
-          imageBlobId: species.imageBlobId,
-          renderedBlobId: rendered.blobId,
-        },
-        'species row names another image blob than the renderer produces, serving the rendered one',
+    const cascade = this.blobCascade?.();
+    if (cascade === undefined) {
+      return undefined;
+    }
+    let content: Buffer;
+    try {
+      // The multi answers a plain `false` for an id no node holds, while
+      // its `getBlob` for such an id fails on the way the peers serialise
+      // the not-found error (`docs/findings/blobs.md`).
+      if (!(await cascade.blobExists(blobId))) {
+        return undefined;
+      }
+      content = (await cascade.getBlob(blobId)).content;
+    } catch (error) {
+      throw new Error(
+        `the network could not serve blob ${blobId}: ${errorMessage(error)}`,
       );
     }
-    return { content: rendered.content, mimeType: speciesImageMimeType };
+    const servedBlobId = blobIdOf(content);
+    if (servedBlobId !== blobId) {
+      throw new BlobMismatchError(blobId, servedBlobId);
+    }
+    if (!(await this.blobs.blobExists(blobId))) {
+      await this.blobs.setBlob(content);
+    }
+    return { content, source: 'network' };
+  }
+
+  /**
+   * Writes a new version of one species with an uploaded image (slice
+   * D5): the bytes go into the blob store first, under their content id,
+   * then the current version is written again with `imageBlobId` and
+   * `imageMimeType` naming them, as a new `species` row whose
+   * InsertHistory row names the current version's `timeId` in `previous`
+   * (the same discipline as `updateAnimal`), together with one change
+   * set naming both rows, which the `SyncAgent` announces so that every
+   * other node pulls the version and then the blob. Returns the new
+   * version, or the current one unchanged when it names these very bytes
+   * already (the same image uploaded twice makes no second version), or
+   * `undefined` when no species has this id. The caller has checked the
+   * bytes against the media type. Concurrent uploads are serialised so
+   * that two of one species chain instead of branching.
+   */
+  async updateSpeciesImage(
+    id: string,
+    content: Buffer,
+    mimeType: UploadedImageMediaType,
+  ): Promise<HashedSpeciesRow | undefined> {
+    const write = this.pendingWrite.then(
+      () => this.updateSpeciesImageNow(id, content, mimeType),
+      () => this.updateSpeciesImageNow(id, content, mimeType),
+    );
+    this.pendingWrite = write;
+    return write;
+  }
+
+  private async updateSpeciesImageNow(
+    id: string,
+    content: Buffer,
+    mimeType: UploadedImageMediaType,
+  ): Promise<HashedSpeciesRow | undefined> {
+    const species = await this.readVersioned<HashedSpeciesRow>(speciesTableCfg);
+    const current = versionsOf(
+      species.rows,
+      species.history,
+      speciesTableCfg.key,
+      id,
+    ).find((version) => version.current);
+    if (current === undefined) {
+      return undefined;
+    }
+    const { blobId } = await this.blobs.setBlob(content);
+    if (
+      current.row.imageBlobId === blobId &&
+      current.row.imageMimeType === mimeType
+    ) {
+      return current.row;
+    }
+    const row = hashed({
+      id,
+      name: current.row.name,
+      latinName: current.row.latinName,
+      description: current.row.description,
+      imageBlobId: blobId,
+      imageMimeType: mimeType,
+    });
+    const written = await this.writeRow(speciesTableCfg, row, current.timeId);
+    await this.writeChangeSet(
+      updateSpeciesImageChangeSetId(id, written.timeId),
+      [...written.changeSetItems],
+      [id],
+    );
+    return row;
   }
 
   /**

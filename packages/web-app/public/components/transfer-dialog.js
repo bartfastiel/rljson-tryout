@@ -9,7 +9,12 @@ import {
   transferActivity,
 } from '../transfer-activity.js';
 import { applyActivityTo, transferIcon } from '../transfer-icon.js';
-import { errorState, statusMessage, timeFormat } from '../view-helpers.js';
+import {
+  errorState,
+  formatBytes,
+  statusMessage,
+  timeFormat,
+} from '../view-helpers.js';
 
 /**
  * The partner node a popup is about: its id as the transfers name it
@@ -62,12 +67,28 @@ const rowCountText = (tables) => {
   return `${rows} ${rows === 1 ? 'row' : 'rows'}`;
 };
 
+/**
+ * "blob 12.7 kB" for the one blob a pull fetched with the rows (the image
+ * of a species version), "2 blobs 25.4 kB" for several, nothing for a
+ * transfer that fetched none.
+ *
+ * @param {import('../status-feed.js').TransferredBlob[] | undefined} blobs
+ */
+const blobsText = (blobs) => {
+  if (blobs === undefined || blobs.length === 0) {
+    return '';
+  }
+  const bytes = blobs.reduce((sum, blob) => sum + blob.bytes, 0);
+  const count = blobs.length === 1 ? 'blob' : `${blobs.length} blobs`;
+  return `${count} ${formatBytes(bytes)}`;
+};
+
 let nextId = 0;
 
 /**
  * What the row's button shows: the direction icon, the tables, the
- * short hash, the row count, the time, the duration of a pull and the
- * status, then the chevron.
+ * short hash, the row count, the blobs the pull fetched, the time, the
+ * duration of a pull and the status, then the chevron.
  *
  * @param {import('../status-feed.js').SyncTransfer} transfer
  * @param {TransferPartner} partner
@@ -99,6 +120,7 @@ const rowSummary = (transfer, partner) => {
     ),
     hash,
     element('span', 'transfer-row-count', rowCountText(transfer.tables)),
+    element('span', 'transfer-row-blobs', blobsText(transfer.blobs)),
     time,
     element(
       'span',

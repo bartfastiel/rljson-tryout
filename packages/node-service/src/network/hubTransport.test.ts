@@ -217,6 +217,63 @@ describe('HubTransport as client', () => {
     expect(byHash).toMatchObject({ hash: updated!.hash, priceCents: 62_000 });
   });
 
+  it('pulls a blob only the hub holds through the client multi and caches it', async () => {
+    const hubNode = await hub();
+    const clientNode = await client(hubNode.address);
+    await until(() => clientNode.store.readsThroughNetwork);
+    const content = Buffer.from(`only on the hub ${Date.now()}`);
+    const { blobId } = await hubNode.store.blobs.setBlob(content);
+    expect(await clientNode.store.hasLocalBlob(blobId)).toBe(false);
+
+    const pulled = await clientNode.store.pullBlob(blobId);
+
+    expect(pulled).toStrictEqual({ content, source: 'network' });
+    expect(await clientNode.store.hasLocalBlob(blobId)).toBe(true);
+    expect(await clientNode.store.pullBlob(blobId)).toStrictEqual({
+      content,
+      source: 'local',
+    });
+  });
+
+  it('pulls a blob only a client holds on the hub and on the other client', async () => {
+    const hubNode = await hub();
+    const first = await client(hubNode.address);
+    const second = await client(hubNode.address);
+    await until(
+      () =>
+        (hubNode.transport.snapshot() as { connectedClients: number })
+          .connectedClients === 2,
+    );
+    const content = Buffer.from(`only on the first client ${Date.now()}`);
+    const { blobId } = await first.store.blobs.setBlob(content);
+
+    expect(await hubNode.store.pullBlob(blobId)).toStrictEqual({
+      content,
+      source: 'network',
+    });
+    expect(await hubNode.store.hasLocalBlob(blobId)).toBe(true);
+    expect(await second.store.pullBlob(blobId)).toStrictEqual({
+      content,
+      source: 'network',
+    });
+    expect(await second.store.hasLocalBlob(blobId)).toBe(true);
+  });
+
+  it('answers undefined for a blob no node holds and without a role', async () => {
+    const hubNode = await hub();
+    const clientNode = await client(hubNode.address);
+    await until(() => clientNode.store.readsThroughNetwork);
+
+    expect(
+      await clientNode.store.pullBlob('NoSuchBlobAnywhere0000'),
+    ).toBeUndefined();
+
+    const content = Buffer.from(`unreachable once standalone ${Date.now()}`);
+    const { blobId } = await hubNode.store.blobs.setBlob(content);
+    await clientNode.transport.becomeStandalone();
+    expect(await clientNode.store.pullBlob(blobId)).toBeUndefined();
+  });
+
   it('serves an invoice issued on the hub by id on the client', async () => {
     const hubNode = await hub();
     const clientNode = await client(hubNode.address);
@@ -325,6 +382,7 @@ describe('HubTransport with a client that fails to initialize', () => {
       localIo: new RefusingIo(clientNode.localIo),
       readThrough: (cascade) => clientNode.readThrough(cascade),
       pullThrough: (peers) => clientNode.pullThrough(peers),
+      fetchBlobsThrough: (cascade) => clientNode.fetchBlobsThrough(cascade),
     };
     const transport = new HubTransport(
       { hubPort: 0 },

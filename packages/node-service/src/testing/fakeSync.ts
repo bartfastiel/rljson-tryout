@@ -11,6 +11,7 @@ import type { ChannelSource, SyncStore } from '../network/syncAgent.ts';
 import type {
   ChangeSetListener,
   HeldChangeSet,
+  PulledBlob,
   ReceivedRow,
   SyncRow,
 } from '../store/petShopStore.ts';
@@ -100,24 +101,32 @@ type PullBehaviour = (
   key: string,
 ) => Promise<SyncRow | undefined> | SyncRow | undefined;
 
+type BlobPullBehaviour = (
+  blobId: string,
+) => Promise<PulledBlob | undefined> | PulledBlob | undefined;
+
 /**
  * A `SyncStore` for the agent's unit tests: the "network" is a map of
- * rows by table and hash (plus history rows by `timeId`) a test fills,
- * the local store a second map that records what the agent wrote; every
- * pull can be intercepted to fail or hang. The change sets it holds are
- * listed in the order they were written or recorded, each stamped with
- * the next `timeId` of a counter.
+ * rows by table and hash (plus history rows by `timeId`) and a map of
+ * blobs by id a test fills, the local store a second pair of maps that
+ * records what the agent wrote; every pull can be intercepted to fail or
+ * hang. The change sets it holds are listed in the order they were
+ * written or recorded, each stamped with the next `timeId` of a counter.
  */
 export class FakeSyncStore implements SyncStore {
   readonly remote = new Map<string, SyncRow>();
   readonly local = new Map<string, SyncRow>();
+  readonly remoteBlobs = new Map<string, Buffer>();
+  readonly localBlobs = new Map<string, Buffer>();
   readonly recorded: HashedChangeSetRow[] = [];
   readonly pulls: string[] = [];
+  readonly blobPulls: string[] = [];
   /** The keys of every write, one entry per `writeReceivedRows` call. */
   readonly writes: string[][] = [];
   private readonly held: HeldChangeSet[] = [];
   private readonly changeSetListeners = new Set<ChangeSetListener>();
   private behaviour: PullBehaviour | null = null;
+  private blobBehaviour: BlobPullBehaviour | null = null;
   private nextTimeId = 1_700_000_000_000;
 
   /** A key of the maps: `<table>@<hash>`. */
@@ -135,6 +144,16 @@ export class FakeSyncStore implements SyncStore {
   /** Replaces every pull with the given behaviour, or restores the map. */
   onPull(behaviour: PullBehaviour | null): void {
     this.behaviour = behaviour;
+  }
+
+  /** Puts a blob on the network, as another node's blob store would hold it. */
+  serveBlob(blobId: string, content: Buffer): void {
+    this.remoteBlobs.set(blobId, content);
+  }
+
+  /** Replaces every blob pull with the given behaviour, or restores the map. */
+  onPullBlob(behaviour: BlobPullBehaviour | null): void {
+    this.blobBehaviour = behaviour;
   }
 
   /**
@@ -235,5 +254,30 @@ export class FakeSyncStore implements SyncStore {
   async recordReceivedChangeSet(changeSet: HashedChangeSetRow): Promise<void> {
     this.recorded.push(changeSet);
     this.hold(changeSet);
+  }
+
+  async hasLocalBlob(blobId: string): Promise<boolean> {
+    return this.localBlobs.has(blobId);
+  }
+
+  /**
+   * Like the store's `pullBlob`: the local blob, else the network's, which
+   * then lands locally too.
+   */
+  async pullBlob(blobId: string): Promise<PulledBlob | undefined> {
+    this.blobPulls.push(blobId);
+    if (this.blobBehaviour !== null) {
+      return this.blobBehaviour(blobId);
+    }
+    const local = this.localBlobs.get(blobId);
+    if (local !== undefined) {
+      return { content: local, source: 'local' };
+    }
+    const remote = this.remoteBlobs.get(blobId);
+    if (remote === undefined) {
+      return undefined;
+    }
+    this.localBlobs.set(blobId, remote);
+    return { content: remote, source: 'network' };
   }
 }
