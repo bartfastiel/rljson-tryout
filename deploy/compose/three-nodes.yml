@@ -18,7 +18,9 @@
 # building from the repository; only node1 carries the build section,
 # because three services building the same tag at once collide on the
 # image store, and the other two reuse the image node1 built or the pushed
-# one.
+# one. `NODE<n>_SEED_SIZE` sets one node's `SEED_SIZE` (`small` unless
+# given), for example `none` on a node that is to receive everything over
+# the network, or `medium` on the one that provides it.
 name: rljson-tryout-three-nodes
 
 x-node: &node
@@ -43,6 +45,7 @@ services:
       <<: *node-environment
       NODE_NAME: node1
       PUBLIC_URL: http://localhost:${NODE1_PORT:-8301}
+      SEED_SIZE: ${NODE1_SEED_SIZE:-small}
     ports:
       - '${NODE1_PORT:-8301}:8080'
 
@@ -53,6 +56,7 @@ services:
       <<: *node-environment
       NODE_NAME: node2
       PUBLIC_URL: http://localhost:${NODE2_PORT:-8302}
+      SEED_SIZE: ${NODE2_SEED_SIZE:-small}
     ports:
       - '${NODE2_PORT:-8302}:8080'
 
@@ -63,6 +67,7 @@ services:
       <<: *node-environment
       NODE_NAME: node3
       PUBLIC_URL: http://localhost:${NODE3_PORT:-8303}
+      SEED_SIZE: ${NODE3_SEED_SIZE:-small}
     ports:
       - '${NODE3_PORT:-8303}:8080'
 

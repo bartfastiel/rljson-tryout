@@ -67,15 +67,13 @@ export const buildTestTransport = (
   );
 
 /**
- * The sync agent's timings for tests: pulls give up after two seconds,
- * pending change sets are retried every 200 ms and the hub repeats its
- * announcements shortly after a client joined, so that a scenario sees a
- * retry or a repeat within its own timeout.
+ * The sync agent's timings for tests: pulls give up after two seconds and
+ * pending change sets and failed catch-ups are retried every 200 ms, so
+ * that a scenario sees a retry within its own timeout.
  */
 export const testSyncAgentOptions: SyncAgentOptions = Object.freeze({
   pullTimeoutMs: 2_000,
   retryIntervalMs: 200,
-  replayDelaysMs: [100, 400],
 });
 
 /**

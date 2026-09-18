@@ -49,7 +49,6 @@ const agentOverFakes = (options: SyncAgentOptions = {}) => {
     pullTimeoutMs: 300,
     retryIntervalMs: 50,
     maxAttempts: 3,
-    replayDelaysMs: [10],
     ...options,
   });
   agent.start();
@@ -108,98 +107,96 @@ const holdReferencedRows = (store: FakeSyncStore): void => {
   store.local.set('traits@trait-loyal-hash', { _hash: 'trait-loyal-hash' });
 };
 
+/** The held list a peer reports for the given change sets, in that order. */
+const heldByPeer = (
+  changeSets: readonly HashedChangeSetRow[],
+  firstMilliseconds = 1_800_000_000_000,
+) =>
+  changeSets.map((changeSet, index) => ({
+    hash: changeSet._hash,
+    timeId: `${firstMilliseconds + index}:peer`,
+  }));
+
 describe('SyncAgent announcing', () => {
-  it('queues change sets written without a channel and announces them in order once one appears', () => {
+  it('announces a change set written while the channel is up right away', () => {
     const { store, channels, agent } = agentOverFakes();
-    const first = store.writeOwnChangeSet('first', []);
-    const second = store.writeOwnChangeSet('second', [
+    const channel = new FakeChannel();
+    channels.publish(channel);
+
+    const changeSet = store.writeOwnChangeSet('live', [
       { table: 'animals', ref: 'a' },
       { table: 'animalsInsertHistory', ref: 'b' },
     ]);
-    expect(agent.snapshot().announced).toBe(0);
 
-    const channel = new FakeChannel('hub-node');
-    channels.publish(channel);
-
-    expect(channel.sent).toStrictEqual([first._hash, second._hash]);
-    expect(agent.snapshot()).toMatchObject({ announced: 2, pending: 0 });
+    expect(channel.sent).toStrictEqual([changeSet._hash]);
+    expect(agent.snapshot()).toMatchObject({ announced: 1, pending: 0 });
     expect(agent.snapshot().transfers).toStrictEqual([
       expect.objectContaining({
         direction: 'outgoing',
         peerNodeId: 'hub-node',
-        changeSetHash: second._hash,
-        changeSetId: 'second',
+        changeSetHash: changeSet._hash,
+        changeSetId: 'live',
         tables: { animals: 1, animalsInsertHistory: 1 },
         status: 'completed',
-      }),
-      expect.objectContaining({
-        changeSetHash: first._hash,
-        changeSetId: 'first',
-        tables: {},
       }),
     ]);
   });
 
-  it('announces a change set written while the channel is up right away', () => {
-    const { store, channels } = agentOverFakes();
-    const channel = new FakeChannel();
+  it('keeps nothing for a change set written without a channel; the catch-up announces it to a peer that lacks it, in write order', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    const first = store.writeOwnChangeSet('first', []);
+    const second = store.writeOwnChangeSet('second', []);
+    expect(agent.snapshot().announced).toBe(0);
+    const channel = new FakeChannel('hub-node');
     channels.publish(channel);
+    expect(channel.sent).toStrictEqual([]);
 
-    const changeSet = store.writeOwnChangeSet('live', []);
+    channel.attachPeer('hub-node', []);
+    await until(() => channel.sent.length === 2);
 
-    expect(channel.sent).toStrictEqual([changeSet._hash]);
+    expect(channel.sent).toStrictEqual([first._hash, second._hash]);
+    expect(agent.snapshot()).toMatchObject({ announced: 2, pending: 0 });
+    expect(
+      agent.snapshot().transfers.map((it) => it.changeSetId),
+    ).toStrictEqual(['second', 'first']);
   });
 
-  it('announces everything this process wrote again on the next channel, counting each change set once', () => {
+  it('announces a change set again to a peer that lacks it, counting it once', async () => {
     const { store, channels, agent } = agentOverFakes();
-    const first = new FakeChannel();
+    const first = new FakeChannel('hub-a');
     channels.publish(first);
     const connected = store.writeOwnChangeSet('while-connected', []);
     channels.publish(null);
     const offline = store.writeOwnChangeSet('while-offline', []);
-
-    const second = new FakeChannel();
+    const second = new FakeChannel('hub-b');
     channels.publish(second);
 
+    second.attachPeer('hub-b', heldByPeer([connected]));
+    await until(() => second.sent.length === 1);
+    second.attachPeer('client-c', []);
+    await until(() => second.sent.length === 3);
+
     expect(first.sent).toStrictEqual([connected._hash]);
-    expect(second.sent).toStrictEqual([connected._hash, offline._hash]);
-    expect(agent.snapshot().announced).toBe(2);
-    expect(agent.snapshot().transfers).toHaveLength(2);
-  });
-
-  it('repeats every change set this process wrote when a peer joins, without counting them again', async () => {
-    const { store, channels, agent } = agentOverFakes();
-    const first = new FakeChannel(null);
-    channels.publish(first);
-    const early = store.writeOwnChangeSet('as-earlier-hub', []);
-    const channel = new FakeChannel(null);
-    channels.publish(channel);
-    const late = store.writeOwnChangeSet('as-current-hub', []);
-
-    channel.peerJoined();
-    await until(() => channel.sent.length === 4);
-
-    expect(channel.sent).toStrictEqual([
-      early._hash,
-      late._hash,
-      early._hash,
-      late._hash,
+    expect(second.sent).toStrictEqual([
+      offline._hash,
+      connected._hash,
+      offline._hash,
     ]);
     expect(agent.snapshot().announced).toBe(2);
     expect(agent.snapshot().transfers).toHaveLength(2);
   });
 
-  it('does not repeat for a join on a channel it left', async () => {
+  it('ignores a peer attached on a channel it left', async () => {
     const { store, channels } = agentOverFakes();
     const first = new FakeChannel(null);
     channels.publish(first);
-    store.writeOwnChangeSet('on-first', []);
+    const onFirst = store.writeOwnChangeSet('on-first', []);
     channels.publish(new FakeChannel(null));
 
-    first.peerJoined();
+    first.attachPeer('late', []);
     await settle();
 
-    expect(first.sent).toHaveLength(1);
+    expect(first.sent).toStrictEqual([onFirst._hash]);
   });
 
   it('keeps announcing nothing after stop', async () => {
@@ -211,6 +208,307 @@ describe('SyncAgent announcing', () => {
     store.writeOwnChangeSet('after-stop', []);
 
     expect(channel.sent).toStrictEqual([]);
+  });
+});
+
+describe('SyncAgent catching up', () => {
+  it('starts with no catch-up', () => {
+    const { agent } = agentOverFakes();
+
+    expect(agent.snapshot().catchUp).toStrictEqual({
+      lastStartedAt: null,
+      lastCompletedAt: null,
+      missingAtStart: 0,
+      pulled: 0,
+      durationMs: null,
+    });
+  });
+
+  it('pulls what the peer holds and this node lacks, in the order the peer learned about them, from that peer', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    holdReferencedRows(store);
+    const held = store.writeOwnChangeSet('held-here-too', []);
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const versions = ['One', 'Two', 'Three'].map((name, index) =>
+      remoteAnimalVersion(store, name, { timeId: `${1000 + index}:abcd` }),
+    );
+    // The peer lists them youngest first; the agent follows its time ids.
+    const peerList = [
+      { hash: versions[2]!.changeSet._hash, timeId: '1800000000002:peer' },
+      { hash: versions[0]!.changeSet._hash, timeId: '1800000000000:peer' },
+      { hash: held._hash, timeId: '1700000000000:peer' },
+      { hash: versions[1]!.changeSet._hash, timeId: '1800000000001:peer' },
+    ];
+
+    channel.attachPeer('node2', peerList);
+    await until(() => agent.snapshot().catchUp.lastCompletedAt !== null);
+
+    expect(store.recorded.map((changeSet) => changeSet.id)).toStrictEqual(
+      versions.map((version) => version.changeSet.id),
+    );
+    expect(agent.snapshot()).toMatchObject({
+      received: 3,
+      skipped: 0,
+      pending: 0,
+      announced: 0,
+      failed: 0,
+      catchUp: { missingAtStart: 3, pulled: 3 },
+    });
+    expect(channel.sent).toStrictEqual([]);
+    for (const transfer of agent.snapshot().transfers) {
+      expect(transfer).toMatchObject({
+        direction: 'incoming',
+        peerNodeId: 'node2',
+        status: 'completed',
+      });
+    }
+    const { catchUp } = agent.snapshot();
+    expect(catchUp.durationMs).toBeGreaterThanOrEqual(0);
+    expect(Date.parse(catchUp.lastCompletedAt!)).toBeGreaterThanOrEqual(
+      Date.parse(catchUp.lastStartedAt!),
+    );
+  });
+
+  it('announces what this node holds and the peer lacks, to that peer', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    const shared = store.writeOwnChangeSet('shared', []);
+    const mine = store.writeOwnChangeSet('mine', [
+      { table: 'invoices', ref: 'i' },
+    ]);
+    const channel = new FakeChannel(null);
+    channels.publish(channel);
+
+    channel.attachPeer('client-a', heldByPeer([shared]));
+    await until(() => channel.sent.length === 1);
+
+    expect(channel.sent).toStrictEqual([mine._hash]);
+    expect(agent.snapshot()).toMatchObject({
+      announced: 1,
+      received: 0,
+      catchUp: { missingAtStart: 0, pulled: 0 },
+    });
+    expect(agent.snapshot().transfers[0]).toMatchObject({
+      direction: 'outgoing',
+      peerNodeId: 'client-a',
+      changeSetId: 'mine',
+      tables: { invoices: 1 },
+    });
+    expect(agent.snapshot().catchUp.lastCompletedAt).not.toBeNull();
+  });
+
+  it('does nothing for a peer that holds the same change sets, and completes at once', async () => {
+    const { store, channels, agent, records } = agentOverFakes();
+    const changeSets = [
+      store.writeOwnChangeSet('a', []),
+      store.writeOwnChangeSet('b', []),
+    ];
+    const channel = new FakeChannel();
+    channels.publish(channel);
+
+    channel.attachPeer('hub-node', heldByPeer(changeSets));
+    await until(() => agent.snapshot().catchUp.lastCompletedAt !== null);
+
+    expect(channel.sent).toStrictEqual([]);
+    expect(store.pulls).toStrictEqual([]);
+    expect(agent.snapshot()).toMatchObject({
+      announced: 0,
+      received: 0,
+      skipped: 0,
+      catchUp: { missingAtStart: 0, pulled: 0 },
+    });
+    expect(agent.snapshot().catchUp.durationMs).toBeLessThan(1_000);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'info',
+        message: 'catch-up started',
+        fields: expect.objectContaining({
+          peerNodeId: 'hub-node',
+          peerHolds: 2,
+          holds: 2,
+          missing: 0,
+          announced: 0,
+        }) as Record<string, unknown>,
+      }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({ level: 'info', message: 'catch-up completed' }),
+    );
+  });
+
+  it('adds what a second peer holds to the catch-up still running', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    holdReferencedRows(store);
+    const channel = new FakeChannel(null);
+    channels.publish(channel);
+    const one = remoteAnimalVersion(store, 'One', { timeId: '1001:abcd' });
+    const two = remoteAnimalVersion(store, 'Two', { timeId: '1002:abcd' });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    store.onPull(async (table, key) => {
+      await gate;
+      return store.remote.get(FakeSyncStore.key(table, key));
+    });
+
+    channel.attachPeer('client-a', heldByPeer([one.changeSet]));
+    await until(() => agent.snapshot().catchUp.lastStartedAt !== null);
+    channel.attachPeer('client-b', heldByPeer([one.changeSet, two.changeSet]));
+    await until(() => agent.snapshot().catchUp.missingAtStart === 2);
+    expect(agent.snapshot().catchUp.lastCompletedAt).toBeNull();
+    release();
+    await until(() => agent.snapshot().catchUp.lastCompletedAt !== null);
+
+    expect(agent.snapshot()).toMatchObject({
+      received: 2,
+      catchUp: { missingAtStart: 2, pulled: 2 },
+    });
+  });
+
+  it('completes a catch-up whose missing change sets turn out to be held meanwhile', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const mine = store.writeOwnChangeSet('mine', []);
+    store.heldChangeSets = () => Promise.resolve([]);
+
+    channel.attachPeer('hub-node', heldByPeer([mine]));
+    await until(() => agent.snapshot().catchUp.lastCompletedAt !== null);
+
+    expect(agent.snapshot()).toMatchObject({
+      skipped: 1,
+      received: 0,
+      catchUp: { missingAtStart: 1, pulled: 0 },
+    });
+    expect(store.pulls).toStrictEqual([]);
+  });
+
+  it('tries a peer whose list cannot be read again, and gives up after the configured attempts', async () => {
+    const { channels, agent, records } = agentOverFakes({
+      retryIntervalMs: 20,
+      maxAttempts: 2,
+    });
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    let reads = 0;
+
+    channel.attachPeer('hub-node', () => {
+      reads += 1;
+      return Promise.reject(new Error('IoPeer: socket closed (dumpTable)'));
+    });
+    await until(() => reads === 2);
+    await settle();
+
+    expect(reads).toBe(2);
+    expect(agent.snapshot().lastError).toBe(
+      'catch-up with hub-node failed: pull of the change set list of hub-node failed: IoPeer: socket closed (dumpTable)',
+    );
+    expect(agent.snapshot().catchUp.lastStartedAt).toBeNull();
+    expect(
+      records.filter(
+        (record) =>
+          record.level === 'warn' &&
+          record.message === 'catch-up could not read what the peer holds',
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('reads the peer once its list works again', async () => {
+    const { store, channels, agent } = agentOverFakes({
+      retryIntervalMs: 20,
+      maxAttempts: 5,
+    });
+    const mine = store.writeOwnChangeSet('mine', []);
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    let reads = 0;
+
+    channel.attachPeer('hub-node', () => {
+      reads += 1;
+      return reads < 3
+        ? Promise.reject(new Error('not yet'))
+        : Promise.resolve([]);
+    });
+    await until(() => channel.sent.length === 1);
+
+    expect(channel.sent).toStrictEqual([mine._hash]);
+    expect(reads).toBe(3);
+    expect(agent.snapshot().catchUp.lastCompletedAt).not.toBeNull();
+  });
+
+  it('forgets a failed catch-up when the channel goes away', async () => {
+    const { channels } = agentOverFakes({ retryIntervalMs: 20 });
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    let reads = 0;
+
+    channel.attachPeer('hub-node', () => {
+      reads += 1;
+      return Promise.reject(new Error('gone'));
+    });
+    await until(() => reads === 1);
+    channels.publish(null);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(reads).toBe(1);
+  });
+
+  it('logs a comparison that fails on this side and leaves it to the next attach', async () => {
+    const { store, channels, agent, records } = agentOverFakes();
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    store.heldChangeSets = () => Promise.reject(new Error('store is closed'));
+
+    channel.attachPeer('hub-node', []);
+    await until(() =>
+      records.some(
+        (record) =>
+          record.message === 'catch-up could not compare the change sets',
+      ),
+    );
+
+    expect(agent.snapshot().lastError).toBe(
+      'catch-up with hub-node failed: store is closed',
+    );
+    expect(agent.snapshot().catchUp.lastStartedAt).toBeNull();
+    expect(channel.sent).toStrictEqual([]);
+  });
+
+  it('gives up on a peer list that does not arrive within the pull timeout, and stops without waiting for it', async () => {
+    const { store, channels, agent, records } = agentOverFakes({
+      pullTimeoutMs: 40,
+      retryIntervalMs: 60_000,
+    });
+    store.writeOwnChangeSet('mine', []);
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    let release: (held: never[]) => void = () => undefined;
+    channel.attachPeer(
+      'hub-node',
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await until(() =>
+      records.some(
+        (record) =>
+          record.message === 'catch-up could not read what the peer holds',
+      ),
+    );
+    expect(agent.snapshot().lastError).toBe(
+      'catch-up with hub-node failed: pull of the change set list of hub-node exceeded 40 ms',
+    );
+
+    const started = Date.now();
+    await agent.stop();
+    expect(Date.now() - started).toBeLessThan(1_000);
+    release([]);
+    await settle();
+
+    expect(channel.sent).toStrictEqual([]);
+    expect(agent.snapshot().catchUp.lastStartedAt).toBeNull();
   });
 });
 
@@ -251,6 +549,88 @@ describe('SyncAgent receiving', () => {
       status: 'completed',
     });
     expect(agent.snapshot().transfers[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(store.writes).toStrictEqual([
+      [`animals@${animal._hash}`, `animalsInsertHistory@${history._hash}`],
+    ]);
+  });
+
+  it('pulls the data rows of a change set before its history rows and writes them all at once', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    holdReferencedRows(store);
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const invoice = hashed({ id: 'invoice-1', customerRef: 'c' });
+    const invoiceHistory = hashed({
+      invoicesRef: invoice._hash,
+      timeId: '1:aaaa',
+    });
+    const item = hashed({ id: 'invoice-1-item-1', invoiceRef: invoice._hash });
+    const itemHistory = hashed({
+      invoiceItemsRef: item._hash,
+      timeId: '2:aaaa',
+    });
+    const changeSet = hashed({
+      id: 'issue-invoice-1',
+      items: [
+        { table: 'invoices', ref: invoice._hash },
+        { table: 'invoicesInsertHistory', ref: invoiceHistory._hash },
+        { table: 'invoiceItems', ref: item._hash },
+        { table: 'invoiceItemsInsertHistory', ref: itemHistory._hash },
+      ],
+    });
+    store.serve('invoices', invoice);
+    store.serve('invoicesInsertHistory', invoiceHistory);
+    store.serve('invoiceItems', item);
+    store.serve('invoiceItemsInsertHistory', itemHistory);
+    store.serve('changeSets', changeSet);
+    store.local.set('customers@c', { _hash: 'c' });
+    const localBeforeEachPull: number[] = [];
+    store.onPull((table, key) => {
+      localBeforeEachPull.push(store.local.size);
+      return store.remote.get(FakeSyncStore.key(table, key));
+    });
+
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().received === 1);
+
+    expect(store.pulls).toStrictEqual([
+      `changeSets@${changeSet._hash}`,
+      `invoices@${invoice._hash}`,
+      `invoiceItems@${item._hash}`,
+      `invoicesInsertHistory@${invoiceHistory._hash}`,
+      `invoiceItemsInsertHistory@${itemHistory._hash}`,
+    ]);
+    // Nothing landed while the rows were pulled: one write for all four.
+    expect(new Set(localBeforeEachPull).size).toBe(1);
+    expect(store.writes).toStrictEqual([
+      [
+        `invoices@${invoice._hash}`,
+        `invoiceItems@${item._hash}`,
+        `invoicesInsertHistory@${invoiceHistory._hash}`,
+        `invoiceItemsInsertHistory@${itemHistory._hash}`,
+      ],
+    ]);
+  });
+
+  it('writes nothing of a change set whose pull breaks off', async () => {
+    const { store, channels, agent } = agentOverFakes({
+      pullTimeoutMs: 40,
+      retryIntervalMs: 60_000,
+    });
+    holdReferencedRows(store);
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const { changeSet, history } = remoteAnimalVersion(store, 'Bowser');
+    store.remote.delete(`animalsInsertHistory@${history._hash}`);
+
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().transfers.length === 1);
+
+    expect(agent.snapshot()).toMatchObject({ pending: 1, received: 0 });
+    expect(store.writes).toStrictEqual([]);
+    expect(
+      [...store.local.keys()].some((key) => key.startsWith('animals@')),
+    ).toBe(false);
   });
 
   it('skips a change set the store already holds and counts it', async () => {
@@ -424,17 +804,110 @@ describe('SyncAgent receiving', () => {
       status: 'pending',
       error: expect.stringContaining('exceeded 40 ms') as string,
     });
-    expect(records).toContainEqual(
-      expect.objectContaining({
-        level: 'warn',
-        message: 'change set pending, will be pulled again',
-      }),
-    );
+    const pendingRecords = () =>
+      records.filter(
+        (record) =>
+          record.message === 'change set pending, will be pulled again',
+      );
+    await until(() => pendingRecords().length >= 2);
+    expect(
+      pendingRecords()
+        .map((record) => record.level)
+        .slice(0, 2),
+    ).toStrictEqual(['warn', 'debug']);
+    const roundAfterFailure = () =>
+      records.find(
+        (record) =>
+          record.message === 'pending change sets are pulled again' &&
+          record.fields.lastError !== null,
+      );
+    await until(() => roundAfterFailure() !== undefined);
+    const round = roundAfterFailure()!;
+    expect(round.level).toBe('info');
+    expect(round.fields).toMatchObject({
+      pending: 1,
+      lastError: expect.stringContaining('exceeded 40 ms') as string,
+    });
+    expect(round.fields.attemptsMax).toBeGreaterThanOrEqual(1);
+    expect(round.fields.oldestSinceMs).toBeGreaterThanOrEqual(0);
 
     hanging = false;
     await until(() => agent.snapshot().received === 1);
     expect(agent.snapshot().pending).toBe(0);
     expect(store.recorded).toHaveLength(1);
+    expect(
+      pendingRecords().filter((record) => record.level === 'warn'),
+    ).toHaveLength(1);
+  });
+
+  it('reports the tables of a change set on a pending transfer once its row was read', async () => {
+    const { store, channels, agent } = agentOverFakes({
+      pullTimeoutMs: 40,
+      retryIntervalMs: 60_000,
+    });
+    holdReferencedRows(store);
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const { changeSet, animal } = remoteAnimalVersion(store, 'Bowser');
+    store.remote.delete(`animals@${animal._hash}`);
+
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().transfers.length === 1);
+
+    expect(agent.snapshot().transfers[0]).toMatchObject({
+      status: 'pending',
+      changeSetId: changeSet.id,
+      tables: { animals: 1, animalsInsertHistory: 1 },
+    });
+  });
+
+  it('fails a change set naming more items than allowed without pulling any', async () => {
+    const { store, channels, agent } = agentOverFakes({
+      maxChangeSetItems: 2,
+    });
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const oversized = hashed({
+      id: 'oversized',
+      items: [
+        { table: 'animals', ref: 'a' },
+        { table: 'animals', ref: 'b' },
+        { table: 'animals', ref: 'c' },
+      ],
+    });
+    store.serve('changeSets', oversized);
+
+    channel.deliver({ changeSetHash: oversized._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().failed === 1);
+
+    expect(store.pulls).toStrictEqual([`changeSets@${oversized._hash}`]);
+    expect(agent.snapshot().lastError).toBe(
+      `row changeSets@${oversized._hash} names 3 items, more than the 2 allowed, skipped`,
+    );
+  });
+
+  it('fails a change set naming a table this store does not have without pulling any', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const strange = hashed({
+      id: 'strange',
+      items: [
+        { table: 'animals', ref: 'a' },
+        { table: 'unicorns', ref: 'u' },
+      ],
+    });
+    store.serve('changeSets', strange);
+
+    channel.deliver({ changeSetHash: strange._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().failed === 1);
+
+    expect(store.pulls).toStrictEqual([`changeSets@${strange._hash}`]);
+    expect(agent.snapshot().lastError).toBe(
+      `row changeSets@${strange._hash} names a table this store does not have: "unicorns", skipped`,
+    );
+    await settle();
+    expect(agent.snapshot()).toMatchObject({ pending: 0, failed: 1 });
   });
 
   it('retries a pending change set at once when it is announced again', async () => {

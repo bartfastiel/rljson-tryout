@@ -36,6 +36,7 @@ Slice D1 (discovery and roles) was pulled forward: every node discovers the othe
 Slice D2 (hub transport) makes the nodes talk: the hub serves its store over socket.io on the hub port, every client connects to it, and a row written on one node is readable by its hash on every other node through the read cascade of `@rljson/server`.
 Slice D3 (change set synchronisation) makes them agree: every change a node writes is announced as one change set, every other node pulls it within tens of milliseconds, an animal renamed on one node shows the new name on all of them, and the seed is deterministic, so a node seeded `medium` fills the `small` ones with its generated rows.
 Slice B13 (live updates) makes it visible: every node streams its inserts, transfers and topology changes over `GET /api/events`, and the web app refreshes what it shows the moment they arrive, with a header indicator for the connection.
+Slice D4 (bootstrap and catch-up) makes them complete: whenever a node connects to its hub, both compare the change sets they hold and pull what they lack, so a node that restarts or joins late holds everything the others wrote while it was away within moments of reconnecting, and a hub that restarts learns what its clients hold.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
@@ -192,27 +193,36 @@ InsertHistory rows, named by hash), and the node's `SyncAgent` announces
 its hash on the `changeSets` route: a client announces to the hub, the
 hub relays to every other client and takes part itself through a
 loopback connection. Every other node pulls the change set and its rows
-by hash through the read cascade, checks each row's hash against its
-content, writes the rows exactly as they came and records the change set,
-so an invoice issued on one node is listed on every node and an animal
+by hash from the hub's store (the hub from its clients'), checks each
+row's hash against its content, writes the rows exactly as they came in
+one write, so that the change set appears whole or not at all, and
+records it, so an invoice issued on one node is listed on every node and an animal
 renamed on one node is the current version on every node, its history
 chained to the seed version, within tens of milliseconds. A change set a
 node already holds is skipped by hash; one whose rows a peer cannot serve
 stays pending and is pulled again on the next announcement and every
-thirty seconds. Everything a node wrote is announced again on every
-connection it gets, and the hub repeats its announcements for every
-client that joins, so a node that seeded before it joined still tells
-the others what it holds. `/status` reports it under `sync`:
-`{ announced, received, skipped, pending, failed, lastError, transfers }`
+thirty seconds. Whenever a client connects to its hub (at its start,
+after a restart, after every reconnection) the two catch up: each lists
+the change sets the other holds, read from the other's store alone,
+pulls what it lacks in the order the other learned about them and
+announces what the other lacks. A node that seeded before it joined
+therefore tells the others what it holds, a node that restarts holds
+everything the others wrote while it was away moments after it
+reconnected, and a hub that restarts learns what its clients hold; two
+nodes that hold the same change sets exchange one table read and
+nothing else. `/status` reports it under `sync`:
+`{ announced, received, skipped, pending, failed, lastError, transfers, catchUp }`
 with the last ten transfers, each with its direction, the node it came
 from or went to, the change set, the rows per table, how long the pull
-took and how it ended; the `Network` view shows the same. The seed is
+took and how it ended, and the last catch-up
+(`{ lastStartedAt, lastCompletedAt, missingAtStart, pulled, durationMs }`);
+the `Network` view shows the counters and transfers. The seed is
 deterministic down to its history rows and change sets (the same fixed
 `timeId`s on every node, one change set per seeded entity, 44 for
-`small`), so every node seeds itself, seed announcements are no-ops, and
-a node seeded `medium` fills `small` nodes with its 400 generated change
-sets in about a second. The wire format, the timings and what the
-library does and does not do are in
+`small`), so every node seeds itself, the catch-up finds nothing to do
+between nodes of the same seed, and a node seeded `medium` fills `small`
+nodes with its 400 generated change sets in under half a second. The wire
+format, the timings and what the library does and does not do are in
 [docs/findings/change-set-sync.md](docs/findings/change-set-sync.md).
 
 `STORAGE` selects what backs the store. `memory` (the default) keeps
@@ -309,14 +319,21 @@ docker compose -f deploy/compose/three-nodes.yml down
 Within about five seconds (one broadcast interval) exactly one node
 reports `hub` and the other two `client` with the same `hubAddress`, and
 a moment later the hub's `transport` counts two connected clients and
-each client's reports `connectedToHub: true`, every node's `sync` shows
-its 44 seed change sets announced and the other nodes' skipped. An animal
+each client's reports `connectedToHub: true`, every node's `sync.catchUp`
+shows a completed catch-up with nothing missing and nothing announced,
+since all three seeded the same. An animal
 renamed on any node (`PUT /api/animals/bowser-the-guard-dog` with
 `{ "name": "Bowser the Retired Guard Dog" }`) then shows the new name on
 the other two (`GET /api/animals/bowser-the-guard-dog`) within tens of
 milliseconds, an invoice issued on any node (`POST /api/invoices`) is
 listed on the other two (`GET /api/invoices`), and `/status.sync` of the
-receivers lists the transfer with the node it came from. Like in
+receivers lists the transfer with the node it came from. Stop a client
+(`docker compose -f deploy/compose/three-nodes.yml stop node3`), write on
+the other two, start it again (`… start node3`): its `tables` match the
+others' within a second of `connectedToHub: true` and its `sync.catchUp`
+reports what it pulled. `NODE<n>_SEED_SIZE` sets one node's seed, so a
+node started with `none` next to one with `medium` shows the catch-up of
+several hundred change sets. Like in
 Kubernetes, the nodes
 carry two address lists: `NODE_URLS` names the host-side URLs
 (`http://localhost:8301` and so on), so the links in the header open from
@@ -333,8 +350,10 @@ written on the hub is readable by hash on a client") and
 `features/change-set-sync.feature` ("an invoice issued on node3 appears
 on node1 and node2 within five seconds", "an animal renamed on node2
 shows the new name on node1 and node3", "a change set announced again is
-written once", the latter two also run in-process by `pnpm test`) drive
-exactly this setup:
+written once", the latter two also run in-process by `pnpm test`) and
+`features/bootstrap.feature` ("node3 restarts and catches up"; its two
+other scenarios, a hub that restarts and a node that joins with change
+sets of its own, run in-process only) drive exactly this setup:
 
 ```sh
 pnpm --filter @rljson-tryout/node-service test:integration

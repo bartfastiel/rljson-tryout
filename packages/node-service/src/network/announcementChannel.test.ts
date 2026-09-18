@@ -7,6 +7,7 @@ import {
   AnnouncementOrigins,
   ConnectorChannel,
   type Announcement,
+  type AttachedPeer,
 } from './announcementChannel.ts';
 
 const route = Route.fromFlat('changeSets');
@@ -113,17 +114,21 @@ describe('ConnectorChannel', () => {
     ]);
   });
 
-  it('tells its join listeners when a peer joined', async () => {
+  it('tells its peer listeners about every peer that attached', async () => {
     const { channel } = await channelOverPair(null);
-    let joins = 0;
-    channel.onPeerJoined(() => {
-      joins += 1;
-    });
+    const attached: (string | null)[] = [];
+    channel.onPeerAttached((peer) => attached.push(peer.nodeId));
+    const held = [{ hash: 'HashOne', timeId: '1700000000000:abcd' }];
+    const peer: AttachedPeer = {
+      nodeId: 'node2',
+      heldChangeSets: () => Promise.resolve(held),
+    };
 
-    channel.peerJoined();
-    channel.peerJoined();
+    channel.peerAttached(peer);
+    channel.peerAttached({ nodeId: null, heldChangeSets: peer.heldChangeSets });
 
-    expect(joins).toBe(2);
+    expect(attached).toStrictEqual(['node2', null]);
+    expect(await peer.heldChangeSets()).toBe(held);
   });
 });
 

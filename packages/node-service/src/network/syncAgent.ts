@@ -8,13 +8,17 @@ import {
 import type { FastifyBaseLogger } from 'fastify';
 
 import {
+  byTimeId,
   domainTableCfgs,
+  type HeldChangeSet,
   type PetShopStore,
+  type ReceivedRow,
   type SyncRow,
 } from '../store/petShopStore.ts';
 import {
   type Announcement,
   type AnnouncementChannel,
+  type AttachedPeer,
 } from './announcementChannel.ts';
 import {
   referencesOf,
@@ -25,18 +29,21 @@ import {
 
 /**
  * What the agent needs from the node's store: the event for change sets
- * the store wrote itself, the reads through the network cascade, the
- * local checks and the writes of received rows and change sets.
+ * the store wrote itself, the lists and lookups of what it holds, the
+ * reads from the peer stores, the local checks and the writes of
+ * received rows and change sets.
  */
 export type SyncStore = Pick<
   PetShopStore,
   | 'onChangeSetWritten'
   | 'holdsChangeSet'
+  | 'heldChangeSets'
+  | 'localChangeSet'
   | 'hasLocalRow'
   | 'hasLocalHistoryRow'
   | 'pullRow'
   | 'pullHistoryRow'
-  | 'writeReceivedRow'
+  | 'writeReceivedRows'
   | 'recordReceivedChangeSet'
 >;
 
@@ -58,15 +65,16 @@ export type SyncStatus = 'completed' | 'pending' | 'failed';
  * One change set transfer as `/status` lists it under `sync.transfers`
  * and the SSE `sync` event streams it: which way it went, which node it
  * came from or went to (`peerNodeId`: on an incoming transfer the node
- * that wrote the change set, when its announcement said so; on an
- * outgoing one the hub this client announced to, `null` on the hub,
- * which announces to every connected client), the change set by hash
- * and id, how many rows per table it named, how long the pull took, when
- * it finished, and whether it completed, is still pending (the pull
- * could not finish and is retried) or failed for good, with the reason.
- * The stream additionally hears a transfer the moment its pull starts:
- * `pending` with no `error`, `durationMs` 0 and the id and tables not
- * known yet; `/status` lists outcomes only.
+ * that wrote the change set, when its announcement said so, or the peer
+ * whose store the catch-up found it in; on an outgoing one the hub this
+ * client announced to, `null` on the hub, which announces to every
+ * connected client, or the client the catch-up announced it for), the
+ * change set by hash and id, how many rows per table it named, how long
+ * the pull took, when it finished, and whether it completed, is still
+ * pending (the pull could not finish and is retried) or failed for good,
+ * with the reason. The stream additionally hears a transfer the moment
+ * its pull starts: `pending` with no `error`, `durationMs` 0 and the id
+ * and tables not known yet; `/status` lists outcomes only.
  */
 export type SyncTransfer = Readonly<{
   direction: SyncDirection;
@@ -81,11 +89,28 @@ export type SyncTransfer = Readonly<{
 }>;
 
 /**
+ * What `/status` reports under `sync.catchUp`: the last catch-up this
+ * node ran, when it started, when every change set it found missing had
+ * been pulled, skipped or given up (`null` while that is still going on),
+ * how many change sets were missing when it started (catch-ups with
+ * further peers that start meanwhile add theirs), how many of them were
+ * pulled, and how long it took. All empty before the first peer attached.
+ */
+export type CatchUpSnapshot = Readonly<{
+  lastStartedAt: string | null;
+  lastCompletedAt: string | null;
+  missingAtStart: number;
+  pulled: number;
+  durationMs: number | null;
+}>;
+
+/**
  * What `/status` reports under `sync` (roadmap section 2.5): how many
  * change sets this node announced, received completely, skipped because
- * it held them already (every seed change set another node announces,
- * since the seed is deterministic), how many are pending and how many
- * failed, the last error, and the last ten transfers, newest first.
+ * it held them already (an announcement of a change set the catch-up
+ * pulled a moment before, the hub's bootstrap of its latest reference),
+ * how many are pending and how many failed, the last error, the last ten
+ * transfers, newest first, and the last catch-up.
  */
 export type SyncSnapshot = Readonly<{
   announced: number;
@@ -95,6 +120,7 @@ export type SyncSnapshot = Readonly<{
   failed: number;
   lastError: string | null;
   transfers: readonly SyncTransfer[];
+  catchUp: CatchUpSnapshot;
 }>;
 
 /** Called with every transfer the moment the agent records or starts it. */
@@ -103,7 +129,7 @@ export type TransferListener = (transfer: SyncTransfer) => void;
 export type SyncAgentOptions = Readonly<{
   /** How long one change set may take to pull, all its rows together. */
   pullTimeoutMs?: number;
-  /** How often pending change sets are pulled again. */
+  /** How often pending change sets and failed catch-ups are tried again. */
   retryIntervalMs?: number;
   /** After how many failed pulls a pending change set counts as failed. */
   maxAttempts?: number;
@@ -111,21 +137,33 @@ export type SyncAgentOptions = Readonly<{
   dependencyBound?: number;
   /** How many change sets are pulled at the same time. */
   concurrency?: number;
-  /**
-   * When the hub repeats its announcements after a client joined, in
-   * milliseconds after the join: once early, once again for a client
-   * whose connector was not listening yet the first time.
-   */
-  replayDelaysMs?: readonly number[];
+  /** How many items a change set may name before it is rejected. */
+  maxChangeSetItems?: number;
   now?: () => number;
 }>;
 
 type PendingChangeSet = {
   fromNodeId: string | null;
   attempts: number;
+  firstFailedAt: number | null;
+  lastError: string | null;
 };
 
-type WrittenRow = { table: string; row: SyncRow };
+const isHistoryTable = (table: string): boolean =>
+  table.endsWith('InsertHistory');
+
+/**
+ * The items of a change set in the order they are pulled: the data rows
+ * first, the history rows last, so that wherever rows land one by one (the
+ * hub's cache of what it fetched for a client) a version becomes current
+ * only after the rows it consists of are there.
+ */
+const dataRowsFirst = (
+  items: readonly ChangeSetItem[],
+): readonly ChangeSetItem[] => [
+  ...items.filter((item) => !isHistoryTable(item.table)),
+  ...items.filter((item) => isHistoryTable(item.table)),
+];
 
 /** What a pull knows about itself, for the transfer it ends in. */
 type PullOutcome = {
@@ -134,6 +172,19 @@ type PullOutcome = {
   changeSetId: string | null;
   tables: Record<string, number>;
   started: number;
+};
+
+/**
+ * The catch-up in progress or the last one: when it started, the change
+ * sets it found missing and has not settled yet, how many it found and
+ * how many of those it pulled, and when the last of them settled.
+ */
+type CatchUp = {
+  startedAt: number;
+  completedAt: number | null;
+  missingAtStart: number;
+  pulled: number;
+  outstanding: Set<string>;
 };
 
 /**
@@ -180,15 +231,16 @@ class PullIncomplete extends Error {
 }
 
 /**
- * A row whose `_hash` does not match its content, or a change set row
- * without a list of items: the change set is dropped for good, since
- * nothing the announcing node serves can be trusted for it (slice D15
- * hardens this further).
+ * A change set that is dropped for good, since nothing the announcing
+ * node serves can be trusted for it (slices D15 and D16 harden this
+ * further): a row whose `_hash` does not match its content, a change set
+ * row without a list of items, with more items than allowed, or naming a
+ * table this store does not have.
  */
-class HashMismatch extends Error {
+class ChangeSetRejected extends Error {
   constructor(table: string, hash: string, reason: string) {
     super(`row ${table}@${hash} ${reason}, skipped`);
-    this.name = 'HashMismatch';
+    this.name = 'ChangeSetRejected';
   }
 }
 
@@ -196,15 +248,28 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * `IoMulti.readRows` hashes what a peer returned before it caches it
- * locally (`hip` with `throwOnWrongHashes`, `@rljson/io` 0.0.78), so a
- * row whose hash does not match its content fails the read itself, with
- * this message, before it reaches the agent's own check
- * (`docs/findings/change-set-sync.md`). Such a read is not worth
- * repeating.
+ * The two ways `@rljson/hash` 0.0.19 words a hash that does not match its
+ * content. `IoMulti.readRows` runs `hip` over what a peer returned before
+ * it caches it locally (`@rljson/io` 0.0.78); `hip` keeps existing hashes
+ * and validates them afterwards, so a tampered row fails the read itself
+ * with `Hash "…" is wrong. Should be "…".` before it reaches the agent's
+ * own check. `Io.write` of both stores runs `hsh`, which recomputes the
+ * hashes and fails with `Hash "…" does not match the newly calculated one
+ * "…"` (`docs/findings/change-set-sync.md`). Neither read is worth
+ * repeating. `syncAgent.cascade.test.ts` holds both texts against the
+ * real cascade and store, so that an upgrade of either package that
+ * changes them fails there instead of turning a tampered row into twenty
+ * retries.
  */
-const isRejectedByCascade = (error: unknown): boolean =>
-  errorMessage(error).includes('does not match the newly calculated one');
+const hashRejectionMessages = [
+  'is wrong. Should be',
+  'does not match the newly calculated one',
+];
+
+export const isRejectedByCascade = (error: unknown): boolean => {
+  const message = errorMessage(error);
+  return hashRejectionMessages.some((text) => message.includes(text));
+};
 
 const isChangeSetItem = (value: unknown): value is ChangeSetItem =>
   typeof value === 'object' &&
@@ -231,38 +296,57 @@ const tableCfgsByKey = (): ReadonlyMap<string, TableCfg> => {
   return byKey;
 };
 
+const isoTime = (milliseconds: number): string =>
+  new Date(milliseconds).toISOString();
+
 /**
- * The change set synchronisation of roadmap slice D3 and section 3.4.
+ * The change set synchronisation of roadmap slices D3 and D4 and section
+ * 3.4.
  *
  * Outgoing: every change set the store writes on its own account (an
- * invoice issued, an animal edited, the seed) is announced by hash on the
- * channel of the current role, and every channel the node gets later
- * hears everything this process wrote again, in write order: a node that
- * seeded before it joined still tells the others what it holds, and a
- * node that announced as a short-lived hub at a cold start (to nobody, or
- * to clients that left with it) tells its next hub too. On the hub the
- * announcements are repeated for every client that joins later as well,
- * because the hub's `Server` forwards an announcement only to the clients
- * connected at that moment. A repeat costs the receivers one lookup each:
- * their connectors drop a reference they received before, and the agent
- * skips a change set it holds.
+ * invoice issued, an animal edited) is announced by hash on the channel
+ * of the current role. A change set written while the node has no
+ * channel, or announced to nobody (a node that seeded before it joined,
+ * a short-lived hub at a cold start), is not kept in a queue: the
+ * catch-up below finds every change set a peer lacks and announces it
+ * then.
+ *
+ * Catch-up: whenever a peer attaches (the hub, once a client is connected
+ * to it and after every reconnection; every client, once the hub added
+ * it), the agent lists the change sets that peer holds through the peer's
+ * store alone, never the read cascade, compares them by hash with what
+ * this node holds, queues every change set it lacks for a pull in the
+ * order the peer learned about them, and announces every change set the
+ * peer lacks. Both sides of a connection do this, so a node that restarts
+ * learns what the others wrote while it was away, a hub that restarts
+ * learns what its clients hold, and a node that joins with a populated
+ * store fills the others; a peer that holds the same change sets costs
+ * one table read and nothing else. A list that could not be read is
+ * tried again every `retryIntervalMs`.
  *
  * Incoming: for every hash that arrives the agent pulls the change set
- * row through the read cascade of the store, then every row the change
- * set names, verifies each row's hash against its content before it is
- * written, writes it exactly as received and, once every row is there,
- * records the change set locally, which is what makes it count as held.
- * A change set the store already holds is skipped by hash. Rows the
+ * row from the peer stores, then every row the change set names, data
+ * rows before history rows, verifies each row's hash against its content,
+ * and writes them all in one write exactly as received, so that a reader
+ * of this store sees the change set either not at all or complete, never
+ * a version without the rows it consists of (a pull that breaks off
+ * leaves nothing behind); then it records the change set locally, which
+ * is what makes it count as held. The order of the pulls matters for the
+ * hub in between too: the hub's `IoServer` caches what it fetched from a
+ * third node for a client row by row, in the client's order, so its own
+ * readers see a version only after that version's rows. A change set
+ * the store already holds is skipped by hash. Rows the
  * received rows point at but this node lacks (a reference to a version
  * from a change set that has not arrived yet, a `previous` of a version
  * from an earlier edit) are pulled too, recursively, up to a bound. A
  * pull whose peer could not answer within `pullTimeoutMs`, or whose rows
  * no node has yet, leaves the change set pending: it is tried again on
  * the next announcement of the same hash and every `retryIntervalMs`,
- * `maxAttempts` times, then counts as failed. A row whose hash does not
- * match fails the change set at once. Several change sets are pulled at
- * a time, `concurrency` of them; the order of arrival is kept for the
- * rest.
+ * `maxAttempts` times, then counts as failed. A change set is rejected at
+ * once when a row does not hash to its content, when it names more than
+ * `maxChangeSetItems` items or a table this store does not have. Several
+ * change sets are pulled at a time, `concurrency` of them; the order of
+ * arrival is kept for the rest.
  */
 export class SyncAgent {
   private readonly store: SyncStore;
@@ -273,13 +357,11 @@ export class SyncAgent {
   private readonly maxAttempts: number;
   private readonly dependencyBound: number;
   private readonly concurrency: number;
-  private readonly replayDelaysMs: readonly number[];
+  private readonly maxChangeSetItems: number;
   private readonly now: () => number;
   private readonly tableCfgs = tableCfgsByKey();
 
   private channel: AnnouncementChannel | null = null;
-  /** Everything the store wrote in this process, in write order. */
-  private readonly own: HashedChangeSetRow[] = [];
   private readonly announcedHashes = new Set<string>();
   private readonly pending = new Map<string, PendingChangeSet>();
   private readonly queue: string[] = [];
@@ -293,8 +375,9 @@ export class SyncAgent {
     failed: 0,
   };
   private lastError: string | null = null;
+  private catchUp: CatchUp | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
-  private replayTimers: NodeJS.Timeout[] = [];
+  private readonly catchUpRetries = new Set<NodeJS.Timeout>();
   private unsubscribeStore: (() => void) | null = null;
   private unsubscribeChannels: (() => void) | null = null;
   private running = false;
@@ -313,7 +396,7 @@ export class SyncAgent {
     this.maxAttempts = options.maxAttempts ?? 20;
     this.dependencyBound = options.dependencyBound ?? 200;
     this.concurrency = options.concurrency ?? 4;
-    this.replayDelaysMs = options.replayDelaysMs ?? [1_000, 5_000];
+    this.maxChangeSetItems = options.maxChangeSetItems ?? 10_000;
     this.now = options.now ?? Date.now;
   }
 
@@ -342,7 +425,9 @@ export class SyncAgent {
   /**
    * Stops listening and waits for the pulls in flight to settle; pending
    * change sets are forgotten, since the next start of this process
-   * (slice D4) catches up on what it missed.
+   * catches up on what it missed. A catch-up still waiting for a peer's
+   * list is not waited for: it touches nothing once the agent stopped,
+   * and a peer that never answers must not hold a shutdown.
    */
   async stop(): Promise<void> {
     if (!this.running) {
@@ -357,7 +442,7 @@ export class SyncAgent {
       clearInterval(this.retryTimer);
       this.retryTimer = null;
     }
-    this.clearReplays();
+    this.clearCatchUpRetries();
     this.channel = null;
     this.queue.length = 0;
     await Promise.allSettled(this.active.values());
@@ -369,6 +454,31 @@ export class SyncAgent {
       pending: this.pending.size,
       lastError: this.lastError,
       transfers: [...this.transfers],
+      catchUp: this.catchUpSnapshot(),
+    };
+  }
+
+  private catchUpSnapshot(): CatchUpSnapshot {
+    const catchUp = this.catchUp;
+    if (catchUp === null) {
+      return {
+        lastStartedAt: null,
+        lastCompletedAt: null,
+        missingAtStart: 0,
+        pulled: 0,
+        durationMs: null,
+      };
+    }
+    return {
+      lastStartedAt: isoTime(catchUp.startedAt),
+      lastCompletedAt:
+        catchUp.completedAt === null ? null : isoTime(catchUp.completedAt),
+      missingAtStart: catchUp.missingAtStart,
+      pulled: catchUp.pulled,
+      durationMs:
+        catchUp.completedAt === null
+          ? null
+          : catchUp.completedAt - catchUp.startedAt,
     };
   }
 
@@ -385,24 +495,25 @@ export class SyncAgent {
   }
 
   /**
-   * Announces a change set the store wrote on the current channel, or
-   * keeps it for the first channel when the node has none.
+   * Announces a change set the store wrote on the current channel. Without
+   * one, nothing is done: the catch-up on the next attach finds the peer
+   * lacks it.
    */
   private announce(changeSet: HashedChangeSetRow): void {
-    this.own.push(changeSet);
     if (this.channel !== null) {
-      this.send(this.channel, changeSet);
+      this.send(this.channel, changeSet, this.channel.peerNodeId);
     }
   }
 
   /**
    * Sends a change set's hash. The counter and the transfer list record
-   * a change set the first time it goes out; a repeat on a later channel
-   * or for a client that joined is not a new transfer.
+   * a change set the first time it goes out; a repeat for a peer the
+   * catch-up found lacking it is not a new transfer.
    */
   private send(
     channel: AnnouncementChannel,
     changeSet: HashedChangeSetRow,
+    toNodeId: string | null,
   ): void {
     channel.send(changeSet._hash);
     if (this.announcedHashes.has(changeSet._hash)) {
@@ -412,87 +523,208 @@ export class SyncAgent {
     this.counters.announced += 1;
     this.record({
       direction: 'outgoing',
-      peerNodeId: channel.peerNodeId,
+      peerNodeId: toNodeId,
       changeSetHash: changeSet._hash,
       changeSetId: changeSet.id,
       tables: countByTable(changeSet.items),
       durationMs: 0,
-      at: new Date(this.now()).toISOString(),
+      at: isoTime(this.now()),
       status: 'completed',
     });
     this.logger.debug(
       {
         changeSetHash: changeSet._hash,
         changeSetId: changeSet.id,
-        peerNodeId: channel.peerNodeId,
+        peerNodeId: toNodeId,
       },
       'change set announced',
     );
   }
 
   /**
-   * Takes the channel of the current role: listens on it, announces
-   * everything this process wrote so far, and on the hub repeats that for
-   * every client that joins.
+   * Takes the channel of the current role: listens on it and catches up
+   * with every peer that attaches through it.
    */
   private attach(channel: AnnouncementChannel | null): void {
-    this.clearReplays();
+    this.clearCatchUpRetries();
     this.channel = channel;
     if (channel === null) {
       return;
     }
     channel.listen((announcement) => this.receive(announcement));
-    channel.onPeerJoined(() => this.scheduleReplays(channel));
-    const before = this.counters.announced;
-    for (const changeSet of this.own) {
-      this.send(channel, changeSet);
+    channel.onPeerAttached((peer) => void this.catchUpWith(channel, peer, 1));
+  }
+
+  /**
+   * Compares what the peer holds with what this node holds, both read
+   * from the respective store alone, queues the change sets this node
+   * lacks and announces the ones the peer lacks. The peer's list is given
+   * `pullTimeoutMs` like a pull; a peer whose list cannot be read is tried
+   * again after `retryIntervalMs`, `maxAttempts` times, and a comparison
+   * that fails on this node's side (a store closing under a shutdown) is
+   * logged and left to the next attach. Never throws, since nothing
+   * awaits it.
+   */
+  private async catchUpWith(
+    channel: AnnouncementChannel,
+    peer: AttachedPeer,
+    attempt: number,
+  ): Promise<void> {
+    if (!this.running || this.channel !== channel) {
+      return;
     }
-    if (this.own.length > 0) {
-      this.logger.info(
-        {
-          count: this.own.length,
-          firstTime: this.counters.announced - before,
-          peerNodeId: channel.peerNodeId,
-        },
-        'announced the change sets this node wrote',
+    const startedAt = this.now();
+    let peerHeld: readonly HeldChangeSet[];
+    try {
+      peerHeld = await this.within(
+        startedAt + this.pullTimeoutMs,
+        `the change set list of ${peer.nodeId ?? 'a peer'}`,
+        () => peer.heldChangeSets(),
+      );
+    } catch (error) {
+      this.lastError = `catch-up with ${peer.nodeId ?? 'a peer'} failed: ${errorMessage(error)}`;
+      this.logger.warn(
+        { err: error, peerNodeId: peer.nodeId, attempt },
+        'catch-up could not read what the peer holds',
+      );
+      if (attempt < this.maxAttempts && this.channel === channel) {
+        const timer = setTimeout(() => {
+          this.catchUpRetries.delete(timer);
+          void this.catchUpWith(channel, peer, attempt + 1);
+        }, this.retryIntervalMs);
+        timer.unref();
+        this.catchUpRetries.add(timer);
+      }
+      return;
+    }
+    try {
+      await this.compareWith(channel, peer, peerHeld, startedAt, attempt);
+    } catch (error) {
+      this.lastError = `catch-up with ${peer.nodeId ?? 'a peer'} failed: ${errorMessage(error)}`;
+      this.logger.warn(
+        { err: error, peerNodeId: peer.nodeId, attempt },
+        'catch-up could not compare the change sets',
       );
     }
   }
 
-  private scheduleReplays(channel: AnnouncementChannel): void {
-    for (const delayMs of this.replayDelaysMs) {
-      const timer = setTimeout(() => {
-        this.replayTimers = this.replayTimers.filter((it) => it !== timer);
-        this.replay(channel);
-      }, delayMs);
-      timer.unref();
-      this.replayTimers.push(timer);
+  private async compareWith(
+    channel: AnnouncementChannel,
+    peer: AttachedPeer,
+    peerHeld: readonly HeldChangeSet[],
+    startedAt: number,
+    attempt: number,
+  ): Promise<void> {
+    if (!this.running || this.channel !== channel) {
+      return;
     }
-  }
+    const held = await this.store.heldChangeSets();
+    const heldHashes = new Set(held.map((entry) => entry.hash));
+    const peerHashes = new Set(peerHeld.map((entry) => entry.hash));
+    const missing = peerHeld
+      .filter((entry) => !heldHashes.has(entry.hash))
+      .sort(byTimeId);
+    const lacking = held
+      .filter((entry) => !peerHashes.has(entry.hash))
+      .sort(byTimeId);
 
-  private clearReplays(): void {
-    for (const timer of this.replayTimers) {
-      clearTimeout(timer);
+    this.beginCatchUp(
+      startedAt,
+      missing.map((entry) => entry.hash),
+    );
+    for (const entry of missing) {
+      this.receive({ changeSetHash: entry.hash, fromNodeId: peer.nodeId });
     }
-    this.replayTimers = [];
+    let announced = 0;
+    for (const entry of lacking) {
+      if (!this.running || this.channel !== channel) {
+        break;
+      }
+      const changeSet = await this.store.localChangeSet(entry.hash);
+      if (changeSet !== undefined) {
+        this.send(channel, changeSet, peer.nodeId ?? channel.peerNodeId);
+        announced += 1;
+      }
+    }
+    this.logger.info(
+      {
+        peerNodeId: peer.nodeId,
+        peerHolds: peerHeld.length,
+        holds: held.length,
+        missing: missing.length,
+        announced,
+        attempt,
+      },
+      'catch-up started',
+    );
+    this.settleCatchUp();
   }
 
   /**
-   * Repeats every change set this process wrote on the hub's channel, for
-   * a client that connected after they went out. Every other client drops
-   * the repeats as already received; the new one pulls what it lacks.
+   * Opens a catch-up for the given missing change sets, or adds them to
+   * the one still running when several peers attach in a row.
    */
-  private replay(channel: AnnouncementChannel): void {
-    if (this.channel !== channel || this.own.length === 0) {
+  private beginCatchUp(startedAt: number, missing: readonly string[]): void {
+    const running = this.runningCatchUp();
+    if (running === null) {
+      this.catchUp = {
+        startedAt,
+        completedAt: null,
+        missingAtStart: missing.length,
+        pulled: 0,
+        outstanding: new Set(missing),
+      };
       return;
     }
-    for (const changeSet of this.own) {
-      channel.send(changeSet._hash);
+    for (const changeSetHash of missing) {
+      if (!running.outstanding.has(changeSetHash)) {
+        running.outstanding.add(changeSetHash);
+        running.missingAtStart += 1;
+      }
     }
+  }
+
+  /** The catch-up still waiting for change sets, `null` when none is. */
+  private runningCatchUp(): CatchUp | null {
+    return this.catchUp?.completedAt === null ? this.catchUp : null;
+  }
+
+  /**
+   * Notes that a change set the catch-up was waiting for settled: pulled,
+   * skipped or given up. The catch-up completes with the last one.
+   */
+  private settled(changeSetHash: string, pulled: boolean): void {
+    const running = this.runningCatchUp();
+    if (!running?.outstanding.delete(changeSetHash)) {
+      return;
+    }
+    if (pulled) {
+      running.pulled += 1;
+    }
+    this.settleCatchUp();
+  }
+
+  private settleCatchUp(): void {
+    const catchUp = this.runningCatchUp();
+    if (catchUp === null || catchUp.outstanding.size > 0) {
+      return;
+    }
+    catchUp.completedAt = this.now();
     this.logger.info(
-      { count: this.own.length },
-      'repeated the announcements of this node for a client that joined',
+      {
+        missingAtStart: catchUp.missingAtStart,
+        pulled: catchUp.pulled,
+        durationMs: catchUp.completedAt - catchUp.startedAt,
+      },
+      'catch-up completed',
     );
+  }
+
+  private clearCatchUpRetries(): void {
+    for (const timer of this.catchUpRetries) {
+      clearTimeout(timer);
+    }
+    this.catchUpRetries.clear();
   }
 
   /**
@@ -509,6 +741,8 @@ export class SyncAgent {
       this.pending.set(changeSetHash, {
         fromNodeId: announcement.fromNodeId,
         attempts: 0,
+        firstFailedAt: null,
+        lastError: null,
       });
     } else {
       pending.fromNodeId ??= announcement.fromNodeId;
@@ -524,10 +758,37 @@ export class SyncAgent {
     this.drain();
   }
 
+  /**
+   * Queues every pending change set again and logs one line for the
+   * round: how many are pending, for how long the oldest has been, the
+   * most attempts any of them took, and the last error seen.
+   */
   private retryPending(): void {
-    for (const changeSetHash of this.pending.keys()) {
+    if (this.pending.size === 0) {
+      return;
+    }
+    let oldestFailedAt = Number.POSITIVE_INFINITY;
+    let attemptsMax = 0;
+    let lastError: string | null = null;
+    for (const [changeSetHash, pending] of this.pending) {
+      if (pending.firstFailedAt !== null) {
+        oldestFailedAt = Math.min(oldestFailedAt, pending.firstFailedAt);
+      }
+      attemptsMax = Math.max(attemptsMax, pending.attempts);
+      lastError ??= pending.lastError;
       this.enqueue(changeSetHash);
     }
+    this.logger.info(
+      {
+        pending: this.pending.size,
+        oldestSinceMs: Number.isFinite(oldestFailedAt)
+          ? this.now() - oldestFailedAt
+          : 0,
+        attemptsMax,
+        lastError,
+      },
+      'pending change sets are pulled again',
+    );
   }
 
   private drain(): void {
@@ -552,6 +813,7 @@ export class SyncAgent {
     if (await this.store.holdsChangeSet(changeSetHash)) {
       this.pending.delete(changeSetHash);
       this.counters.skipped += 1;
+      this.settled(changeSetHash, false);
       this.logger.debug(
         { changeSetHash, fromNodeId: pending.fromNodeId },
         'change set already held, skipped',
@@ -587,6 +849,7 @@ export class SyncAgent {
       this.pending.delete(changeSetHash);
       this.counters.received += 1;
       this.finish(outcome, 'completed');
+      this.settled(changeSetHash, true);
       this.logger.info(
         { ...outcome, durationMs: this.now() - started },
         'change set received',
@@ -597,9 +860,10 @@ export class SyncAgent {
   }
 
   /**
-   * Pulls the change set row, then every item, writes them, pulls what
-   * they depend on and records the change set. Fills the outcome as it
-   * goes, so that a failure reports what was known by then.
+   * Pulls the change set row, then every item (data rows first), writes
+   * them all at once, pulls what they depend on and records the change
+   * set. Fills the outcome as it goes, so that a failure reports what was
+   * known by then.
    */
   private async pullChangeSet(
     changeSetHash: string,
@@ -608,21 +872,22 @@ export class SyncAgent {
   ): Promise<void> {
     const changeSet = await this.pullChangeSetRow(changeSetHash, deadline);
     outcome.changeSetId = changeSet.id;
-    const written: WrittenRow[] = [];
-    for (const item of changeSet.items) {
-      const row = await this.pullVerified(item.table, item.ref, deadline);
-      await this.store.writeReceivedRow(item.table, row);
-      written.push({ table: item.table, row });
-    }
     outcome.tables = countByTable(changeSet.items);
-    await this.pullDependencies(written, deadline);
+    const received: ReceivedRow[] = [];
+    for (const item of dataRowsFirst(changeSet.items)) {
+      const row = await this.pullVerified(item.table, item.ref, deadline);
+      received.push({ table: item.table, row });
+    }
+    await this.store.writeReceivedRows(received);
+    await this.pullDependencies(received, deadline);
     await this.store.recordReceivedChangeSet(changeSet);
   }
 
   /**
-   * A pull that threw: given up (failed) for a row that does not hash to
-   * its content, a read the cascade rejected for its hash, or the last
-   * allowed attempt; kept pending otherwise.
+   * A pull that threw: given up (failed) for a rejected change set, a
+   * read the cascade rejected for its hash, or the last allowed attempt;
+   * kept pending otherwise. The first failure of a change set is logged
+   * as a warning, later ones at debug, and `retryPending` sums them up.
    */
   private settleFailedPull(
     pending: PendingChangeSet,
@@ -632,7 +897,7 @@ export class SyncAgent {
     const message = errorMessage(error);
     this.lastError = message;
     const givenUp =
-      error instanceof HashMismatch ||
+      error instanceof ChangeSetRejected ||
       isRejectedByCascade(error) ||
       pending.attempts >= this.maxAttempts;
     const fields = {
@@ -646,10 +911,18 @@ export class SyncAgent {
       this.pending.delete(outcome.changeSetHash);
       this.counters.failed += 1;
       this.finish(outcome, 'failed', message);
+      this.settled(outcome.changeSetHash, false);
       this.logger.error(fields, 'change set failed');
+      return;
+    }
+    pending.firstFailedAt ??= this.now();
+    pending.lastError = message;
+    this.finish(outcome, 'pending', message);
+    const pendingMessage = 'change set pending, will be pulled again';
+    if (pending.attempts === 1) {
+      this.logger.warn(fields, pendingMessage);
     } else {
-      this.finish(outcome, 'pending', message);
-      this.logger.warn(fields, 'change set pending, will be pulled again');
+      this.logger.debug(fields, pendingMessage);
     }
   }
 
@@ -661,12 +934,17 @@ export class SyncAgent {
       changeSetId: outcome.changeSetId,
       tables: outcome.tables,
       durationMs: Math.max(0, this.now() - outcome.started),
-      at: new Date(this.now()).toISOString(),
+      at: isoTime(this.now()),
       status,
       ...(error === undefined ? {} : { error }),
     });
   }
 
+  /**
+   * The change set row by hash, checked for its shape before anything of
+   * it is pulled: a list of items, not more than `maxChangeSetItems`, each
+   * naming a table this store has.
+   */
   private async pullChangeSetRow(
     changeSetHash: string,
     deadline: number,
@@ -678,10 +956,25 @@ export class SyncAgent {
     );
     const items = row.items;
     if (!Array.isArray(items) || !items.every(isChangeSetItem)) {
-      throw new HashMismatch(
+      throw new ChangeSetRejected(
         changeSetsTableCfg.key,
         changeSetHash,
         'is not a change set with a list of items',
+      );
+    }
+    if (items.length > this.maxChangeSetItems) {
+      throw new ChangeSetRejected(
+        changeSetsTableCfg.key,
+        changeSetHash,
+        `names ${items.length} items, more than the ${this.maxChangeSetItems} allowed`,
+      );
+    }
+    const unknown = items.find((item) => !this.tableCfgs.has(item.table));
+    if (unknown !== undefined) {
+      throw new ChangeSetRejected(
+        changeSetsTableCfg.key,
+        changeSetHash,
+        `names a table this store does not have: "${unknown.table}"`,
       );
     }
     return {
@@ -692,8 +985,8 @@ export class SyncAgent {
   }
 
   /**
-   * One row by hash through the cascade, within the deadline, with its
-   * hash checked against its content.
+   * One row by hash from the local store or the peers, within the
+   * deadline, with its hash checked against its content.
    */
   private async pullVerified(
     table: string,
@@ -711,10 +1004,10 @@ export class SyncAgent {
 
   private verified(table: string, hash: string, row: SyncRow): SyncRow {
     if (row._hash !== hash) {
-      throw new HashMismatch(table, hash, `came back as ${row._hash}`);
+      throw new ChangeSetRejected(table, hash, `came back as ${row._hash}`);
     }
     if (!hashMatches(row)) {
-      throw new HashMismatch(table, hash, 'does not hash to its content');
+      throw new ChangeSetRejected(table, hash, 'does not hash to its content');
     }
     return row;
   }
@@ -728,7 +1021,7 @@ export class SyncAgent {
    * without it.
    */
   private async pullDependencies(
-    written: readonly WrittenRow[],
+    written: readonly ReceivedRow[],
     deadline: number,
   ): Promise<void> {
     const walk = new DependencyWalk();
@@ -751,7 +1044,7 @@ export class SyncAgent {
         if (missing === undefined) {
           continue;
         }
-        await this.store.writeReceivedRow(missing.table, missing.row);
+        await this.store.writeReceivedRows([missing]);
         pulled += 1;
         walk.add(referencesOf(this.tableCfgs, missing.table, missing.row));
       } catch (error) {
@@ -770,7 +1063,7 @@ export class SyncAgent {
   private async pullMissing(
     reference: RowReference | HistoryReference,
     deadline: number,
-  ): Promise<WrittenRow | undefined> {
+  ): Promise<ReceivedRow | undefined> {
     if ('hash' in reference) {
       if (await this.store.hasLocalRow(reference.table, reference.hash)) {
         return undefined;

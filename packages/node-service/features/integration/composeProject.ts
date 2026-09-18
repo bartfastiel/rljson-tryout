@@ -50,7 +50,12 @@ export const composeNodes = [
 export class ComposeProject {
   private readonly projectName = 'rljson-tryout-integration';
 
-  async up(): Promise<void> {
+  /**
+   * Starts every service, or only the named ones: a scenario that needs a
+   * particular node to be a client starts the others first, since the
+   * election keeps the earliest node as hub.
+   */
+  async up(services: readonly string[] = []): Promise<void> {
     const image = process.env.NODE_SERVICE_IMAGE;
     await this.compose([
       'up',
@@ -59,6 +64,7 @@ export class ComposeProject {
       '--wait-timeout',
       '180',
       image === undefined ? '--build' : '--no-build',
+      ...services,
     ]);
   }
 
@@ -68,6 +74,21 @@ export class ComposeProject {
    */
   async restart(service: string): Promise<void> {
     await this.compose(['restart', service]);
+    await this.awaitHealthy(service);
+  }
+
+  /** Stops one service; the container and its file system stay. */
+  async stop(service: string): Promise<void> {
+    await this.compose(['stop', service]);
+  }
+
+  /** Starts a stopped service again and waits for its health check. */
+  async start(service: string): Promise<void> {
+    await this.compose(['start', service]);
+    await this.awaitHealthy(service);
+  }
+
+  private async awaitHealthy(service: string): Promise<void> {
     await this.compose([
       'up',
       '--detach',

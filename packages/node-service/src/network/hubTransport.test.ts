@@ -324,6 +324,7 @@ describe('HubTransport with a client that fails to initialize', () => {
     const store: TransportStore = {
       localIo: new RefusingIo(clientNode.localIo),
       readThrough: (cascade) => clientNode.readThrough(cascade),
+      pullThrough: (peers) => clientNode.pullThrough(peers),
     };
     const transport = new HubTransport(
       { hubPort: 0 },

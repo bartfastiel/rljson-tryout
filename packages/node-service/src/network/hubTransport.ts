@@ -22,11 +22,16 @@ import {
 
 import type { Configuration } from '../configuration.ts';
 import { BorrowedIo } from '../store/borrowedIo.ts';
-import { domainTableCfgs, type PetShopStore } from '../store/petShopStore.ts';
+import {
+  domainTableCfgs,
+  heldChangeSetsOf,
+  type PetShopStore,
+} from '../store/petShopStore.ts';
 import {
   AnnouncementOrigins,
   ConnectorChannel,
   type AnnouncementChannel,
+  type AttachedPeer,
 } from './announcementChannel.ts';
 
 /**
@@ -92,10 +97,13 @@ export type TransportSnapshot =
 
 /**
  * What the transport needs from the node's store: the `Io` to lend to
- * `@rljson/server` and the switch that routes the store's reads through
- * the active multi.
+ * `@rljson/server`, the switch that routes the store's reads through the
+ * active multi, and the peer stores the synchronisation pulls from.
  */
-export type TransportStore = Pick<PetShopStore, 'localIo' | 'readThrough'>;
+export type TransportStore = Pick<
+  PetShopStore,
+  'localIo' | 'readThrough' | 'pullThrough'
+>;
 
 /**
  * The part of `HubTransport` the orchestrator drives, so that its unit
@@ -112,11 +120,18 @@ export type HubTransportOptions = Readonly<{
   /** How often a busy hub port is retried, and how long between tries. */
   bindAttempts?: number;
   bindRetryDelayMs?: number;
+  /**
+   * How long the hub waits for a client it added to answer the ready
+   * handshake; the same bound `@rljson/server` puts on a peer's
+   * initialization.
+   */
+  peerInitTimeoutMs?: number;
 }>;
 
 type HubState = {
   role: 'hub';
   hubAddress: string | null;
+  context: RoleContext;
   httpServer: HttpServer;
   socketServer: SocketIoServer;
   server: Server;
@@ -132,6 +147,9 @@ type ClientState = {
   bridge: SocketIoBridge;
   origins: AnnouncementOrigins;
   client: Client | null;
+  channel: ConnectorChannel | null;
+  /** The hub's ready handshake, answered once the `Client` exists. */
+  pendingReady: (() => void) | null;
   connected: boolean;
 };
 
@@ -139,6 +157,25 @@ type TransportState = { role: 'standalone' } | HubState | ClientState;
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * The one event this project adds to the socket next to the library's:
+ * the hub emits it to a client once `Server.addSocket` completed, with
+ * the hub's node id, and the client acknowledges it, with its own node
+ * id, once its `Client` is initialized. Only then do both sides list each
+ * other's change sets: a peer request emitted before the other end
+ * registered its handlers is lost, and `IoPeer` waits thirty seconds for
+ * an answer that never comes, so neither side may ask before the other is
+ * listening (`docs/findings/change-set-sync.md`).
+ */
+const readyEvent = 'petshop:ready';
+
+type ReadyPayload = { nodeId: string | null };
+
+const nodeIdIn = (payload: unknown): string | null => {
+  const nodeId = (payload as Partial<ReadyPayload> | null)?.nodeId;
+  return typeof nodeId === 'string' && nodeId.length > 0 ? nodeId : null;
+};
 
 /**
  * `@rljson/server` logs every socket, refresh and peer at `info`; that is
@@ -162,7 +199,10 @@ const serverLoggerOver = (logger: FastifyBaseLogger): ServerLogger => ({
  * local stores; standalone, neither. In both roles the store's row reads
  * are routed through the active `IoMulti` (`TransportStore.readThrough`),
  * so a read the local store cannot answer falls through to the hub and,
- * through the hub, to every other client, while writes stay local. Every
+ * through the hub, to every other client, while writes stay local, and
+ * the synchronisation pulls from the `IoPeer`s alone
+ * (`TransportStore.pullThrough`), so that nothing lands in the store
+ * before a whole change set does. Every
  * domain table is created on the `Server` or `Client` as
  * `docs/roadmap.md` section 3.2 asks, a no-op after the store created
  * them. The hub port is bound by the socket.io server itself, which also
@@ -172,7 +212,12 @@ const serverLoggerOver = (logger: FastifyBaseLogger): ServerLogger => ({
  * the hub a `Connector` over a loopback socket pair the `Server` holds as
  * a broadcast-only client, on a client the `Connector` of its `Client`;
  * `subscribe` hands the channel of the current role to the `SyncAgent`
- * and `null` when the node has none.
+ * and `null` when the node has none. Through the channel the agent also
+ * learns about every peer whose store became readable (slice D4): the hub
+ * once a client is connected and after every reconnection of its socket,
+ * every client once the hub added it, each with the `IoPeer` the library
+ * built towards it, so that the agent can compare change set lists
+ * without the read cascade.
  *
  * Transitions are queued: a role flapping faster than a bind, a connect or
  * a teardown completes still ends in the state of the last call, and the
@@ -186,6 +231,7 @@ export class HubTransport {
   private readonly connectTimeoutMs: number;
   private readonly bindAttempts: number;
   private readonly bindRetryDelayMs: number;
+  private readonly peerInitTimeoutMs: number;
   private state: TransportState = { role: 'standalone' };
   private lastError: string | null = null;
   private queue: Promise<void> = Promise.resolve();
@@ -207,6 +253,7 @@ export class HubTransport {
     this.connectTimeoutMs = options.connectTimeoutMs ?? 5_000;
     this.bindAttempts = options.bindAttempts ?? 5;
     this.bindRetryDelayMs = options.bindRetryDelayMs ?? 200;
+    this.peerInitTimeoutMs = options.peerInitTimeoutMs ?? 30_000;
   }
 
   /**
@@ -325,6 +372,35 @@ export class HubTransport {
       .length;
   }
 
+  /**
+   * A client the `Server` just added, as a peer the sync agent can list
+   * change sets from: the `IoPeer` the server built over the client's
+   * socket, which talks to the client's `IoPeerBridge` over the client's
+   * own store, so a table dump through it is that client's table and
+   * nothing else. Looked up by the socket the server registered, since
+   * the server names its clients itself.
+   */
+  private static clientPeer(
+    server: Server,
+    bridge: SocketIoBridge,
+    nodeId: string | null,
+  ): AttachedPeer {
+    const entry = [...server.clients.values()].find(
+      (client) => client.ioUp === bridge,
+    );
+    return {
+      nodeId,
+      heldChangeSets: () => {
+        if (entry === undefined) {
+          return Promise.reject(
+            new Error('the server does not list the socket of this client'),
+          );
+        }
+        return heldChangeSetsOf(entry.io);
+      },
+    };
+  }
+
   private boundPortOf(httpServer: HttpServer): number | null {
     const address = httpServer.address();
     return address === null || typeof address === 'string'
@@ -375,6 +451,7 @@ export class HubTransport {
     this.state = {
       role: 'hub',
       hubAddress,
+      context,
       httpServer,
       socketServer,
       server,
@@ -383,6 +460,11 @@ export class HubTransport {
     };
     this.lastError = null;
     this.store.readThrough(() => server.io);
+    this.store.pullThrough(() =>
+      [...server.clients.values()]
+        .filter((client) => client.io !== null)
+        .map((client) => client.io),
+    );
     this.logger.info(
       { port: this.boundPort(), hubAddress },
       'hub transport serving',
@@ -475,8 +557,10 @@ export class HubTransport {
       socket.disconnect(true);
       return;
     }
+    const bridge = new SocketIoBridge(socket);
+    const { context } = this.state;
     try {
-      await server.addSocket(new SocketIoBridge(socket));
+      await server.addSocket(bridge);
       this.logger.info(
         {
           socketId: socket.id,
@@ -485,9 +569,6 @@ export class HubTransport {
         },
         'client connected to hub',
       );
-      if (this.state.role === 'hub' && this.state.server === server) {
-        this.state.channel.peerJoined();
-      }
     } catch (error) {
       this.lastError = `client ${address} could not be added: ${errorMessage(error)}`;
       this.logger.error(
@@ -495,7 +576,51 @@ export class HubTransport {
         'client could not be added to the hub',
       );
       socket.disconnect(true);
+      return;
     }
+    const nodeId = await this.awaitClientReady(socket, context);
+    if (
+      nodeId !== undefined &&
+      this.state.role === 'hub' &&
+      this.state.server === server
+    ) {
+      this.logger.info(
+        { socketId: socket.id, address, nodeId },
+        'client ready, catching up with it',
+      );
+      this.state.channel.peerAttached(
+        HubTransport.clientPeer(server, bridge, nodeId),
+      );
+    }
+  }
+
+  /**
+   * Runs the ready handshake with a client the server just added:
+   * resolves with the node id the client answered with once its `Client`
+   * exists, or with `undefined` when it did not answer within
+   * `peerInitTimeoutMs` (a client whose initialization failed drops the
+   * socket and connects again, which starts over).
+   */
+  private awaitClientReady(
+    socket: HubSideSocket,
+    context: RoleContext,
+  ): Promise<string | null | undefined> {
+    const payload: ReadyPayload = { nodeId: context.selfNodeId };
+    return new Promise((resolve) => {
+      socket
+        .timeout(this.peerInitTimeoutMs)
+        .emit(readyEvent, payload, (error: Error | null, answer: unknown) => {
+          if (error !== null) {
+            this.logger.warn(
+              { socketId: socket.id, err: error },
+              'client did not answer the ready handshake',
+            );
+            resolve(undefined);
+            return;
+          }
+          resolve(nodeIdIn(answer));
+        });
+    });
   }
 
   private async startClient(
@@ -519,6 +644,8 @@ export class HubTransport {
       bridge,
       origins: new AnnouncementOrigins(bridge, changeSetsEvents),
       client: null,
+      channel: null,
+      pendingReady: null,
       connected: false,
     };
     this.state = state;
@@ -530,6 +657,30 @@ export class HubTransport {
         void this.transition(() => this.attachClient(state));
       }
     });
+    // The hub runs the ready handshake after every `addSocket`, on the
+    // first connection and on every reconnection alike; the answer waits
+    // until the `Client` exists, and each answer is followed by a
+    // catch-up with the hub, since whatever the hub relayed while the
+    // socket was down was missed.
+    socket.on(
+      readyEvent,
+      (payload: unknown, acknowledge: (answer: ReadyPayload) => void) => {
+        const ready = (): void => {
+          acknowledge({ nodeId: state.context.selfNodeId });
+          state.channel?.peerAttached(
+            HubTransport.hubPeer(
+              state.client!,
+              nodeIdIn(payload) ?? state.context.hubNodeId,
+            ),
+          );
+        };
+        if (state.client !== null && state.channel !== null) {
+          ready();
+        } else {
+          state.pendingReady = ready;
+        }
+      },
+    );
     socket.on('disconnect', (reason) => {
       state.connected = false;
       this.noteError(`disconnected from hub ${hubAddress}: ${reason}`);
@@ -601,16 +752,46 @@ export class HubTransport {
     state.client = client;
     this.lastError = null;
     this.store.readThrough(() => client.io ?? this.store.localIo);
+    this.store.pullThrough(() => {
+      const peer = client.peerStores.io;
+      return peer === undefined ? [] : [peer];
+    });
     this.logger.info({ hubAddress: state.hubAddress }, 'connected to hub');
     if (client.connector !== undefined) {
-      this.publishChannel(
-        new ConnectorChannel(
-          client.connector,
-          state.origins,
-          state.context.hubNodeId,
-        ),
+      const channel = new ConnectorChannel(
+        client.connector,
+        state.origins,
+        state.context.hubNodeId,
       );
+      state.channel = channel;
+      this.publishChannel(channel);
     }
+    const ready = state.pendingReady;
+    state.pendingReady = null;
+    ready?.();
+  }
+
+  /**
+   * The hub as a peer the sync agent can list change sets from: the
+   * `IoPeer` of the `Client` towards the hub (`peerStores`, the hub alone
+   * without this node's own store in front), over which a table dump is
+   * answered by the hub's `IoServer` from the hub's own store, never from
+   * the other clients.
+   */
+  private static hubPeer(
+    client: Client,
+    hubNodeId: string | null,
+  ): AttachedPeer {
+    const peer = client.peerStores.io;
+    return {
+      nodeId: hubNodeId,
+      heldChangeSets: () => {
+        if (peer === undefined) {
+          return Promise.reject(new Error('the client has no peer to the hub'));
+        }
+        return heldChangeSetsOf(peer);
+      },
+    };
   }
 
   /** Records a transport failure once per distinct message. */
@@ -629,6 +810,7 @@ export class HubTransport {
     const state = this.state;
     this.state = { role: 'standalone' };
     this.store.readThrough(null);
+    this.store.pullThrough(null);
     if (this.channel !== null) {
       this.publishChannel(null);
     }
