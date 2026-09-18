@@ -32,8 +32,10 @@ export type World = {
  * store (`memory` or `sqlite`; every feature runs over both through
  * `describe.each(storageKinds)`), where a SQLite file goes, which
  * animal-trait relation the store reads (`multi-reference` by default,
- * `docs/findings/n-to-m.md`), which `SEED_SIZE` the node reports, and the
- * node's name.
+ * `docs/findings/n-to-m.md`), which `SEED_SIZE` the node reports, the
+ * node's name, and the hub port its transport binds when it becomes hub
+ * (`0`, an ephemeral one, unless a scenario restarts a hub on the port
+ * its clients still follow).
  */
 export type WorldOptions = {
   storage: StorageKind;
@@ -41,6 +43,7 @@ export type WorldOptions = {
   traitRelationMode?: TraitRelationMode;
   seedSize?: SeedSize;
   nodeName?: string;
+  hubPort?: number;
 };
 
 /**
@@ -56,6 +59,7 @@ export const createWorld = async ({
   traitRelationMode = 'multi-reference',
   seedSize = 'small',
   nodeName = 'node-under-test',
+  hubPort = 0,
 }: WorldOptions): Promise<World> => {
   const store = await testStore(
     { storage, dataDirectory },
@@ -67,6 +71,7 @@ export const createWorld = async ({
     dataDirectory,
     traitRelationMode,
     seedSize,
+    hubPort,
   };
   const transport = buildTestTransport(store, overrides);
   const server = buildTestServer(store, overrides, transport);

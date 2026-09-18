@@ -123,12 +123,13 @@ What a client only hears while it is connected:
   that announced as a short-lived hub at a cold start (node2 elected
   itself for one broadcast interval and announced its 44 change sets to
   nobody, then became node3's client with an empty queue) had told
-  nobody. The agent therefore announces everything this process wrote on
-  every channel it gets and repeats it on the hub 1 s and 5 s after every
+  nobody. Slice D3 therefore announced everything this process wrote on
+  every channel it got and repeated it on the hub 1 s and 5 s after every
   join (the client's `Connector` exists only after its `Client.init()`
   resolved, which follows the hub's `addSocket` by one round trip; the
-  library's bootstrap repeats for the same reason). The repeats cost the
-  receivers a lookup each.
+  library's bootstrap repeats for the same reason), at the cost of a
+  lookup per repeat on every receiver; slice D4 replaced the repeats by a
+  comparison of the two nodes' change set lists on every attach (below).
 
 Pulling through the cascade:
 
@@ -136,19 +137,28 @@ Pulling through the cascade:
   layer when it has the row and from the peers otherwise, and writes what
   a peer returned into every writable layer that did not answer, the
   local store (`docs/findings/hub-transport.md`). Before the write-back
-  it runs `hip({ _data, _type })` with the defaults of `@rljson/hash`
-  (`updateExistingHashes: true, throwOnWrongHashes: true`), so a row
-  whose `_hash` does not match its content fails the read itself with
-  `Hash "<given>" does not match the newly calculated one "<computed>"`
-  and never lands. `IoMem._write` and `IoSqliteNode.write` run `hsh` on
-  what they are given too, so a tampered row cannot be written at all.
-  The agent still checks every pulled row with `hashMatches` (a copy
-  re-hashed with every nested hash renewed, so a changed change set item
-  changes the row's hash) and writes it through `writeReceivedRow`, a
-  local `Io.write` that is a no-op for a row the cascade already cached;
-  with a store that does not verify, the agent's check is the one that
-  counts, and the message above is classified as a hash rejection so the
-  change set fails at once instead of being retried.
+  it runs `hip({ _data, _type })`, whose defaults are
+  `updateExistingHashes: false, throwOnWrongHashes: true` (`applyInPlace`
+  overrides the `true` of `defaultApplyConfig`): rows that carry a
+  `_hash` are left as they are and validated afterwards, so a row whose
+  `_hash` does not match its content fails the read itself with
+  `Hash "<table hash>" is wrong. Should be "<computed>".` (the validator
+  compares the outermost object first, so the message names the table's
+  hash, not the row's) and never lands. `IoMem._write` and
+  `IoSqliteNode.write` run `hsh` on what they are given, with
+  `updateExistingHashes: true`, and fail with the other wording,
+  `Hash "<given>" does not match the newly calculated one "<computed>"`,
+  so a tampered row cannot be written at all. Slice D3 matched the second
+  message only, which the cascade never produces; the test slice D4 added
+  against the real cascade (`syncAgent.cascade.test.ts`) showed it on its
+  first run, and the agent now recognises both. The agent still checks
+  every pulled row with `hashMatches` (a copy re-hashed with every nested
+  hash renewed, so a changed change set item changes the row's hash) and
+  writes it through `writeReceivedRow`, a local `Io.write` that is a
+  no-op for a row the cascade already cached; with a store that does not
+  verify, the agent's check is the one that counts, and both messages are
+  classified as a hash rejection so the change set fails at once instead
+  of being retried.
 - A change set names its InsertHistory rows (`docs/findings/change-sets.md`),
   so pulling the items is enough for the version rule: the received
   history row carries the writer's `timeId` and `previous`, and the
@@ -253,10 +263,10 @@ Timings (Windows development machine, Docker Desktop, three containers,
   who announced it, read the socket event before the connector does,
   and set `clientIdentity` to something meaningful (the node id here);
   the default `includeClientIdentity` generates `client_<nanoid>`.
-- A reference only reaches the clients connected when it went out. Keep
-  what you announced and repeat it: for every new channel a node gets
-  and, on the hub, for every client that joins, a moment after the join.
-  Repeats are cheap because every connector drops what it has received.
+- A reference only reaches the clients connected when it went out.
+  Repeating what you announced (slice D3) covers the nodes that were
+  listening at some point; comparing what the two ends of a connection
+  hold (slice D4, below) covers the ones that were not.
 - `send` drops a reference you sent or received before; call
   `invalidateSent` when a repeat is intended.
 - The cascade's write-back verifies hashes before it caches and refuses
@@ -305,5 +315,281 @@ Timings (Windows development machine, Docker Desktop, three containers,
 - `IoMulti.readRows` fails a read by hash with the `@rljson/hash`
   message when a peer serves a tampered row, indistinguishable by type
   from a transport failure. Reproduction: a peer whose `readRows` returns
-  a row with a wrong `_hash`; the multi rejects with `Hash "..." does not
-match the newly calculated one "..."`.
+  a row with a wrong `_hash`; the multi rejects with `Hash "..." is wrong.
+Should be "..."` (slice D4 corrected the wording, see below).
+
+## Slice D4: bootstrap and catch-up
+
+### What we tried
+
+- Measured what the library's own bootstrap pieces deliver to a late
+  joiner with a throwaway script over `Server`, `Client` and `Connector`
+  (`@rljson/server` 0.0.64, `@rljson/db` 0.0.42) on real socket.io:
+  the bootstrap on `addSocket` with its repeats, `bootstrapHeartbeatMs`
+  (300 ms), `seedLatestRef`, and the gap fill of `causalOrdering` for a
+  client that lost its socket for two announcements and for a client that
+  joined after five.
+- Replaced the D3 replay (every change set this process wrote, re-sent on
+  every channel and repeated by the hub 1 s and 5 s after each join) by a
+  catch-up on every attach: `SyncAgent.catchUpWith` compares the change
+  sets a peer holds with the local ones, both lists read from the
+  respective store alone (`PetShopStore.heldChangeSets` locally,
+  `heldChangeSetsOf(peerIo)` through the peer's `IoPeer`), queues what is
+  missing in the peer's `changeSetsInsertHistory` order and announces what
+  the peer lacks. The hub transport hands the agent the peers
+  (`AttachedPeer`): on a client the hub, through `client.peerStores.io`;
+  on the hub every client, through the `IoPeer` in `server.clients`.
+- Added a ready handshake to the socket (`petshop:ready`), tried the
+  catch-up without it first, and measured the hub reading a client's
+  table right after `addSocket` resolved.
+- Moved the pulls off the cascade: `pullRow` and `pullHistoryRow` read
+  from the `IoPeer`s alone and the agent writes a whole change set in
+  one `Io.write` (`writeReceivedRows`), after a CI run showed a client
+  answering an invoice without its items in the middle of a pull.
+- Tested the diff and the queueing with fakes (`syncAgent.test.ts`), the
+  hash rejection against the real `IoMulti`, `IoMem` and `@rljson/hash`
+  (`syncAgent.cascade.test.ts`), two real stores over linked channels
+  (`petShopStore.sync.test.ts`), a hub and clients over real socket.io
+  with a late client, an empty client, a client with a populated store
+  and a hub that restarts (`syncAgent.transport.test.ts`), and the Gherkin
+  feature `features/bootstrap.feature` in-process over both stores and,
+  for the restart scenario, against the three containers.
+- Ran the three containers by hand (host ports 8461 to 8463): stopped a
+  client, wrote on the other two, started it again; stopped the hub for
+  longer than the broadcast timeout, wrote on the two survivors, started
+  it again; then started a `medium` hub alone, issued a hundred invoices
+  on it and started a node with `SEED_SIZE=none` and one with `small`
+  next to it while polling `/health` every 20 ms.
+
+### What happened
+
+What the library's bootstrap delivers (measured, one route, refs as
+`r1..r3`, `s1..s5`, `t1..t4`, `u1..u2`):
+
+- A client that joins after `r1`, `r2`, `r3` were announced hears `r3`,
+  once, 284 ms after its connector started listening (the heartbeat of
+  300 ms; without it the 1 s bootstrap repeat), and nothing else. The
+  client that announced them hears nothing back. `server.latestRef` is
+  `r3`, `server.refLog` holds all three. The heartbeat repeats the same
+  payload to every client on every interval; a connector drops it as
+  received. `seedLatestRef('seeded-ref')` on a fresh hub makes the first
+  client hear `seeded-ref` after 1 015 ms, the first repeat, because the
+  bootstrap sent on `addSocket` arrives before the client's connector
+  exists. So bootstrap, heartbeat and `seedLatestRef` all carry exactly
+  one reference, the latest one the hub saw, and nothing of the history.
+- With `causalOrdering`: a client that lost its socket while `s3` and
+  `s4` went out hears `s4` on reconnection (the bootstrap), and `s3` only
+  when `s5` arrives: the gap is detected against the sender's sequence
+  (`seq` 5 after 2), the client asks `afterSeq: 2` and the hub answers
+  from its ref log with `s3`, `s4`, `s5`, delivering `s4` and `s5` a
+  second time. A client that joined after `s1..s5` hears `s5` from the
+  bootstrap and nothing more; the bootstrap payload carries the hub's own
+  announce id and count, not the sender's, so it never advances a
+  per-sender counter. The moment such a late joiner hears one live
+  announcement (`t4` from client-a) it asks `afterSeq: 0` and receives the
+  hub's whole ref log, every sender's payloads (`t1`, `t2`, `t3`, `u1`,
+  `u2`, `t4`), the request's `afterSeq` filtering the other senders'
+  payloads by their unrelated sequence numbers. The ref log is bounded to
+  1 000 payloads, lives in the hub's memory and is empty after a hub
+  restart. So the gap fill is a traffic-triggered replay of what the hub
+  relayed recently, not a catch-up: nothing happens on joining, nothing
+  covers a restarted hub, and the receiver gets duplicates.
+- `bootstrapHeartbeatMs` therefore stays off. The `Server` runs without a
+  `syncConfig` (setting one also switches the ref log on), the catch-up
+  covers the latest reference with everything else, and a heartbeat
+  would cost every client a lookup per interval, counted as `skipped`,
+  for a reference it already holds.
+
+Reading what a peer holds:
+
+- A whole-table `readRows` through the peer is the wrong read: on the
+  client it reaches the hub's `IoServer`, which runs it on the hub's
+  `IoMulti`, and `IoMulti.readRows` answers a `where: {}` from the first
+  layer that holds any row and writes the answer into the layers that did
+  not (`docs/findings/hub-transport.md`). A hub with an empty
+  `changeSetsInsertHistory` (nothing seeded, nothing written yet) would
+  cache a client's history rows and count every change set of that client
+  as held without holding a single row of them. `IoPeer.dumpTable` is
+  served by `IoMulti.dumpTable`, which merges the dumpable members only,
+  the node's own store, and writes nothing back; on the hub the client's
+  `IoPeer` talks to the client's `IoPeerBridge` over the client's raw
+  store. Both ends therefore dump `changeSetsInsertHistory` (hash and
+  `timeId` per change set, 444 rows for `medium`), which on `IoMem` costs
+  a refresh of the dirty table hashes before the copy
+  (`docs/findings/seed-generator.md`); the local list is read with
+  `readRows({ where: {} })`, which skips that refresh
+  (`petShopStore.sync.test.ts`, "a cascade answers from its own store
+  alone").
+- The hub's request right after `Server.addSocket` resolved never came
+  back: `addSocket` waits for nothing on the client side (`IoPeer.init`
+  and `isReady` only look at the socket's `connected` flag), so the
+  `dumpTable` was emitted before the client's `Client.init()` had
+  registered its `IoPeerBridge` handlers, socket.io dropped the event on
+  the client, and the hub's `IoPeer` waited its hard-wired 30 s. The same
+  window exists in the other direction between the client's `init()` and
+  the hub's `_refreshServers`, and for the library's own bootstrap, which
+  is why it repeats. Hence the handshake: the hub emits `petshop:ready`
+  with its node id after `addSocket`, the client acknowledges with its
+  node id once its `Client` exists (a handler registered before the
+  socket connects, the answer deferred until then), and only then do both
+  sides list each other; a socket.io reconnection is a new `addSocket`
+  and a new handshake. The client's node id in the acknowledgement also
+  tells the hub which node a socket belongs to, which the library's
+  `client_<n>_<random>` ids do not.
+
+The catch-up itself:
+
+- Three containers seeded `small`: every catch-up completed with nothing
+  missing in 2 to 3 ms, `announced: 0` on every node, where D3 announced
+  44 hashes per node and repeated them per join. Two `medium` nodes would
+  exchange one 444 row dump each instead of 7 771 sends for `large`.
+- A client stopped, a rename on the other client and an invoice on the
+  hub while it was down, then started again (`docker compose start`, the
+  same identity file, a new `startedAt`): healthy after 660 ms, connected
+  to the hub 8.8 s after the start (discovery, one to two broadcast
+  intervals), holding both writes 31 ms after that, `catchUp:
+{ missingAtStart: 2, pulled: 2, durationMs: 11 }`, 46 change sets on
+  every node. The integration feature measured 5.5 s to the connection
+  and 15 ms from there to holding both.
+- The hub stopped for 25 s (longer than the 15 s broadcast timeout, so
+  the survivors forgot it and its new `startedAt` counts when it returns,
+  `docs/findings/network-discovery.md`): the two clients elected the
+  earlier survivor hub about 4 s later and kept writing (a rename on the
+  new hub, an invoice on the other client, both visible on both within
+  the second). The old hub came back reseeded, joined the new hub 1.25 s
+  after its start and held everything 31 ms later: `missingAtStart: 4,
+pulled: 4, durationMs: 16` (the two writes it had missed before it
+  stopped were the two it had itself relayed while it was hub, gone with
+  its memory store). All three at 48 change sets. The in-process feature
+  and the transport test cover the other case, a hub that comes back on
+  the same port while its clients still follow that address: the clients'
+  sockets reconnect, the handshake runs again, and the hub pulls what
+  each client wrote in the meantime while the clients get each other's
+  writes through the hub's announcements.
+- A node with an empty store (`SEED_SIZE=none`) joining a hub seeded
+  `medium` plus 103 invoices issued in a burst: connected 1.9 to 3.7 s
+  after the start, `catchUp: { missingAtStart: 547, pulled: 547 }` in
+  466 ms with the pulls still going through the cascade and in 401 ms
+  with the peer-only pulls and one write per change set, every table
+  equal to the hub's afterwards (110 animals, 309 invoices, 514 items,
+  547 change sets), RSS 99.5 to 99.9 MiB before and 111.2 to 111.8 MiB
+  after. `/health`, polled every 20 ms from the host during the run:
+  median 17 to 18 ms (the Docker Desktop port forward), p99 19 to 24 ms,
+  maximum 24 ms, no call over 100 ms; `/status` answered throughout. A
+  `small` node joining the same hub afterwards: 503 missing, pulled in
+  434 ms, `/health` maximum 55 ms. The pulls run four at a time with one
+  15 s deadline
+  each, every step an awaited socket round trip, so the event loop stays
+  free between them; the hub, meanwhile, announced every one of the 547
+  hashes to the joiner as well (its own catch-up found the joiner lacked
+  them), all of which the joiner's agent folded into the pulls already
+  pending. That symmetry costs one message per missing change set and is
+  what makes a restarted hub learn from its clients without a special
+  case.
+- The catch-up snapshot counts one catch-up at a time: peers that attach
+  while one is running add their missing change sets to it, peers that
+  attach after it completed start a new one, so a hub that restarts with
+  two clients reports the last client's catch-up in `/status` while
+  `received` counts both.
+
+Applying a change set at once:
+
+- The first CI run of this slice caught a race D3 had left: right after
+  an invoice was issued on the hub, a client answered `GET
+/api/invoices/<id>` with the invoice and `items: []`. The client's pull
+  had read the invoice row and its history row through the cascade,
+  which cached both locally at once, and `getInvoice` found a current
+  invoice whose items were still on their way. Every pull through
+  `IoMulti` lands row by row, so a reader of a store could see any
+  prefix of a change set.
+- The agent now pulls from the peer stores alone (`PetShopStore.pullRow`
+  and `pullHistoryRow` ask the `IoPeer`s the transport registered with
+  `pullThrough`, the local store first, and write nothing back), collects
+  the rows of a change set, data rows before history rows, and writes
+  them in one `Io.write` (`writeReceivedRows`). `IoMem` inserts the rows
+  of every table of one write in a single synchronous pass and
+  `IoSqliteNode` in one transaction, so a node's own store shows a change
+  set either not at all or whole, and a pull that breaks off leaves
+  nothing behind, not even the change set row. Measured in
+  `syncAgent.transport.test.ts`: eight invoices of two items issued on
+  the hub, each read on a client the moment the `POST` returned, all
+  complete; the read either still went through the hub, which holds the
+  invoice whole, or found the client's own copy, which is whole by then.
+- What stays: the hub's `IoServer` serves a client's pull from the hub's
+  own `IoMulti`, which caches what it fetched from a third node row by
+  row, in the pulling client's order. Data rows before history rows means
+  a version becomes current on the hub only after its rows are there,
+  but a detail read on the hub that goes through its cascade while such
+  a pull is being relayed (an invoice with several items, some already
+  cached, the invoice itself not yet current) can still answer with the
+  cached part, for the milliseconds the pull takes; the library's
+  first-layer-with-rows rule answers from the partial cache without
+  asking the node that holds everything. The hub's own agent completes
+  the change set with one write a moment later. The Compose step reads
+  the invoice again until its items are there, for the same reason.
+
+The review items of D3:
+
+- A pending transfer now carries the change set's `tables` and id as
+  soon as its row was read; the first failure of a change set is a
+  warning, later ones debug, and every retry round logs one line with the
+  count, the age of the oldest, the most attempts and the last error.
+- A change set naming more than `maxChangeSetItems` (10 000; the biggest
+  seed change set has 9 items) or a table this store does not have is
+  rejected before any item is pulled, the way a malformed row is;
+  `recordReceivedChangeSet` leaves a change set the store already holds
+  alone and logs it, so the "held once" invariant does not depend on the
+  caller.
+
+### What it means for rljson users
+
+- The bootstrap tells a joining client the latest reference and nothing
+  else, and the heartbeat repeats that reference. A node that joins late
+  or restarts has to find out what it missed by comparing states; the
+  reference stream cannot tell it.
+- The gap fill (`causalOrdering`) replays the hub's recent ref log to a
+  client that notices a hole in a sender's sequence, only when the next
+  live reference arrives, to every client that asks with its own counter,
+  with duplicates, and with nothing after a hub restart. Treat it as a
+  repair of short outages under traffic, not as a join protocol.
+- To learn what a peer holds, dump its table through the `IoPeer`
+  (`dumpTable`); a whole-table `readRows` through a multi is answered
+  from the first layer that has rows and cached in the ones that have
+  none.
+- Do not replicate through the cascade. `IoMulti` caches every row the
+  moment it arrives, so a reader sees a change set arrive row by row;
+  read the rows from the peer alone and write them in one `Io.write`,
+  which both `IoMem` and `IoSqliteNode` apply atomically. Whatever the
+  hub caches while relaying a pull for a client still lands row by row;
+  pull data rows before history rows so that at least no version shows
+  before the rows it consists of.
+- Nothing in `Server.addSocket` or `Client.init` tells you that the other
+  end is listening; a request that arrives before the handlers exist is
+  lost and the `IoPeer` waits its full timeout. Add a handshake of your
+  own before the first request in either direction.
+- `hip` and `hsh` word a wrong hash differently (`is wrong. Should be`
+  from the validator that `hip` runs over existing hashes, `does not
+match the newly calculated one` when `hsh` recomputes them), and the
+  first names the outermost object. Match both, and test the match
+  against the real library rather than a fake.
+
+### Candidates for upstream issues
+
+- `IoPeer`'s request timeout (30 s) cannot be configured through `Server`
+  or `Client`, and a request emitted before the other end registered its
+  handlers is neither answered nor failed early. Reproduction: call
+  `server.clients.get(id).io.dumpTable(...)` right after `addSocket`
+  resolved for a client whose `Client.init()` has not run yet.
+- The gap fill answers with every payload of the ref log whose `seq`
+  exceeds the requested `afterSeq`, across senders, although sequences
+  are per sender. Reproduction: two senders with three and two
+  announcements, a late joiner hearing one live reference, `gapFillRes`
+  carrying all six payloads.
+- The bootstrap payload names the server's announce id as `c`, so with
+  `causalOrdering` a client's per-sender counters never learn from it and
+  the first live reference from any sender triggers a full ref log
+  replay. Reproduction: the late joiner above asks `afterSeq: 0`.
+- `@rljson/hash` reports a wrong hash with two different messages
+  depending on whether existing hashes are updated
+  (`_addHashesToObject`) or validated (`_validate`). Reproduction: `hip`
+  and `hsh` over the same tampered row.

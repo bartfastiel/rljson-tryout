@@ -77,8 +77,9 @@ try {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
   await store.initialize();
-  // The agent listens before the seed runs, so that the seed's change
-  // sets queue up and are announced once the node has joined the network.
+  // The seed is written before the node has a channel; the agent's
+  // catch-up announces it to whichever peer lacks it once the node has
+  // joined the network.
   syncAgent.start();
   const seedingStarted = performance.now();
   const seeded = await store.seedIfEmpty(configuration.seedSize);

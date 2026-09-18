@@ -24,18 +24,26 @@ type Node = {
 };
 
 /**
- * A node as `main.ts` wires it, in this process: a seeded store, the hub
- * transport over it and the sync agent listening to both, with the agent
- * started before the seed so that the seed's change sets queue up.
+ * A node as `main.ts` wires it, in this process: a store seeded `small`
+ * unless told otherwise, the hub transport over it and the sync agent
+ * listening to both, with the agent started before the seed as in
+ * `main.ts`.
  */
-const node = async (nodeId: string): Promise<Node> => {
+const node = async (
+  nodeId: string,
+  options: { seed?: boolean; hubPort?: number } = {},
+): Promise<Node> => {
   const store = await memoryStore();
   cleanups.push(() => store.close());
-  const transport = buildTestTransport(store);
+  const transport = buildTestTransport(store, {
+    hubPort: options.hubPort ?? 0,
+  });
   cleanups.push(() => transport.stop());
   const agent = buildTestSyncAgent(store, transport);
   cleanups.push(() => agent.stop());
-  await store.seedIfEmpty();
+  if (options.seed ?? true) {
+    await store.seedIfEmpty();
+  }
   return { nodeId, store, transport, agent };
 };
 
@@ -55,6 +63,21 @@ const until = async (
 const connectedClients = (hub: Node): number =>
   (hub.transport.snapshot() as { connectedClients: number }).connectedClients;
 
+const connectedToHub = (client: Node): boolean =>
+  (client.transport.snapshot() as { connectedToHub?: boolean })
+    .connectedToHub === true;
+
+const caughtUp = (member: Node): boolean =>
+  member.agent.snapshot().catchUp.lastCompletedAt !== null &&
+  member.agent.snapshot().pending === 0;
+
+const join = async (client: Node, hub: Node): Promise<void> => {
+  await client.transport.becomeClient(
+    `127.0.0.1:${hub.transport.boundPort()}`,
+    { selfNodeId: client.nodeId, hubNodeId: hub.nodeId },
+  );
+};
+
 /** A hub and two clients connected to it, every transport connected. */
 const network = async () => {
   const hub = await node('hub-node');
@@ -62,14 +85,10 @@ const network = async () => {
     selfNodeId: hub.nodeId,
     hubNodeId: hub.nodeId,
   });
-  const address = `127.0.0.1:${hub.transport.boundPort()}`;
   const clients: Node[] = [];
   for (const name of ['client-a', 'client-b']) {
     const client = await node(name);
-    await client.transport.becomeClient(address, {
-      selfNodeId: client.nodeId,
-      hubNodeId: hub.nodeId,
-    });
+    await join(client, hub);
     clients.push(client);
   }
   await until(
@@ -86,33 +105,24 @@ const network = async () => {
  * so each scenario gets three times the time.
  */
 describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
-  it('announces the seed on connect and every other node skips it by hash', async () => {
-    const { hub, clients, all } = await network();
+  it('finds nothing to transfer between nodes that seeded the same and announces nothing', async () => {
+    const { all } = await network();
 
-    await until(() =>
-      all.every(
-        (member) =>
-          member.agent.snapshot().announced === 44 &&
-          member.agent.snapshot().pending === 0,
-      ),
-    );
+    await until(() => all.every(caughtUp));
 
-    // The hub announced before any client connected and repeats for each
-    // join; each client announced on connect. Nothing was pulled: every
-    // node holds the same seed. The hub hears every hash once, since its
-    // connector drops a reference it received before (the second client's
-    // announcements repeat the first client's); each client hears the
-    // hub's repeats and the other client's announcements.
-    await until(() =>
-      clients.every((client) => client.agent.snapshot().skipped >= 44),
-    );
-    await until(() => hub.agent.snapshot().skipped === 44);
+    // Every catch-up compared the lists and found them equal: nothing was
+    // announced, pulled or skipped on any side, and each node's catch-up
+    // completed with nothing missing.
     for (const member of all) {
       expect(member.agent.snapshot()).toMatchObject({
+        announced: 0,
         received: 0,
+        skipped: 0,
         failed: 0,
         lastError: null,
+        catchUp: { missingAtStart: 0, pulled: 0 },
       });
+      expect(member.agent.snapshot().catchUp.durationMs).toBeLessThan(1_000);
       expect(await member.store.tableRowCounts()).toMatchObject({
         changeSets: 44,
         changeSetsInsertHistory: 44,
@@ -121,9 +131,9 @@ describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
   });
 
   it('brings an invoice issued on a client to the hub and the other client', async () => {
-    const { hub, clients } = await network();
+    const { hub, clients, all } = await network();
     const [issuer, other] = clients;
-    await until(() => other!.agent.snapshot().skipped >= 44);
+    await until(() => all.every(caughtUp));
 
     const issued = await issuer!.store.issueInvoice({
       customerId: 'scrooge-mcduck',
@@ -164,6 +174,55 @@ describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
       status: 'completed',
     });
   });
+
+  it('never shows an invoice without its items while its change set arrives', async () => {
+    const { hub, clients, all } = await network();
+    await until(() => all.every(caughtUp));
+    const [first, second] = clients as [Node, Node];
+
+    const everyoneHolds = (changeSetHash: string) =>
+      until(async () => {
+        for (const member of all) {
+          if (!(await member.store.holdsChangeSet(changeSetHash))) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+    // Written on the hub, read at once on a client, which either still
+    // lacks the change set (and reads it through the hub, which holds it
+    // whole) or holds it whole itself; written on a client, read at once
+    // on the hub and the other client, whose reads may pass through the
+    // hub's cache of the other client's pull, so one item there. Every
+    // node holds an invoice before the next one is issued, since invoice
+    // numbers are only unique across nodes once all of them count the
+    // same invoices (slice D9).
+    for (let round = 0; round < 8; round += 1) {
+      const onHub = await hub.store.issueInvoice({
+        customerId: 'scrooge-mcduck',
+        items: [
+          { animalId: 'donald-the-third', quantity: 1 },
+          { animalId: 'quackmore-junior', quantity: 2 },
+        ],
+      });
+      const seenOnClient = await first.store.getInvoice(onHub.id);
+      expect(seenOnClient?.items).toHaveLength(2);
+      await everyoneHolds(onHub.changeSetHash!);
+      const onClient = await second.store.issueInvoice({
+        customerId: 'donald-duck',
+        items: [{ animalId: 'donald-the-third', quantity: 1 }],
+      });
+      for (const reader of [hub, first]) {
+        const seen = await reader.store.getInvoice(onClient.id);
+        expect(seen?.items).toHaveLength(1);
+      }
+      await everyoneHolds(onClient.changeSetHash!);
+    }
+    for (const member of all) {
+      expect(await member.store.listInvoices()).toHaveLength(6 + 16);
+    }
+  }, 30_000);
 
   it('brings an animal renamed on the hub to both clients as the current version', async () => {
     const { hub, clients } = await network();
@@ -210,7 +269,7 @@ describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
     });
   });
 
-  it('repeats the announcements of the hub for a client that joins later and writes each once', async () => {
+  it('catches a client that joins later up with what the hub holds, and writes each change set once', async () => {
     const { hub, clients } = await network();
     const issued = await hub.store.issueInvoice({
       customerId: 'donald-duck',
@@ -225,22 +284,24 @@ describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
       clients.map((client) => client.store.tableRowCounts()),
     );
 
-    // The hub repeats every announcement of its session on every join
-    // (the seed and the invoice), to every client: the late one pulls the
-    // invoice, the others hear the repeat and leave their stores as they
-    // are.
     const late = await node('client-c');
-    cleanups.push(() => late.transport.stop());
-    await late.transport.becomeClient(
-      `127.0.0.1:${hub.transport.boundPort()}`,
-      { selfNodeId: late.nodeId, hubNodeId: hub.nodeId },
-    );
+    await join(late, hub);
     await until(async () => late.store.holdsChangeSet(issued.changeSetHash!));
-    await until(() => late.agent.snapshot().skipped >= 44);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await until(() => caughtUp(late) && caughtUp(hub));
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     expect(await late.store.getInvoice(issued.id)).toStrictEqual(issued);
-    expect(late.agent.snapshot()).toMatchObject({ received: 1, failed: 0 });
+    expect(late.agent.snapshot()).toMatchObject({
+      received: 1,
+      failed: 0,
+      catchUp: { missingAtStart: 1, pulled: 1 },
+    });
+    expect(late.agent.snapshot().transfers[0]).toMatchObject({
+      direction: 'incoming',
+      peerNodeId: hub.nodeId,
+      changeSetHash: issued.changeSetHash,
+      status: 'completed',
+    });
     for (const [index, client] of clients.entries()) {
       expect(await client.store.tableRowCounts()).toStrictEqual(
         countsBefore[index],
@@ -253,4 +314,132 @@ describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
       ).toHaveLength(1);
     }
   });
+
+  it('fills a client that joins with an empty store from the hub, in the hub order', async () => {
+    const { hub, all } = await network();
+    await until(() => all.every(caughtUp));
+    const renamed = (await hub.store.updateAnimal('bowser-the-guard-dog', {
+      name: 'Bowser the Retired Guard Dog',
+    }))!;
+    const hubCounts = await hub.store.tableRowCounts();
+
+    const empty = await node('client-empty', { seed: false });
+    expect(await empty.store.tableRowCounts()).toMatchObject({ animals: 0 });
+    await join(empty, hub);
+    await until(() => caughtUp(empty), 15_000);
+
+    expect(await empty.store.tableRowCounts()).toStrictEqual(hubCounts);
+    expect(empty.agent.snapshot()).toMatchObject({
+      received: 45,
+      announced: 0,
+      failed: 0,
+      pending: 0,
+      catchUp: { missingAtStart: 45, pulled: 45 },
+    });
+    expect((await empty.store.getAnimal('bowser-the-guard-dog'))?.hash).toBe(
+      renamed.hash,
+    );
+    expect(
+      (await empty.store.getAnimalHistory('bowser-the-guard-dog'))!.map(
+        (version) => version.current,
+      ),
+    ).toStrictEqual([true, false]);
+    expect(await empty.store.listInvoices()).toStrictEqual(
+      await hub.store.listInvoices(),
+    );
+    expect(hub.agent.snapshot()).toMatchObject({ received: 0, failed: 0 });
+  });
+
+  it('lets a node that joins with a populated store fill the hub and the other clients', async () => {
+    const { hub, all } = await network();
+    await until(() => all.every(caughtUp));
+    const alone = await node('client-alone');
+    const issued = await alone.store.issueInvoice({
+      customerId: 'scrooge-mcduck',
+      items: [{ animalId: 'donald-the-third', quantity: 1 }],
+    });
+    expect(alone.agent.snapshot().announced).toBe(0);
+
+    await join(alone, hub);
+
+    for (const receiver of all) {
+      await until(async () =>
+        receiver.store.holdsChangeSet(issued.changeSetHash!),
+      );
+      expect(await receiver.store.getInvoice(issued.id)).toStrictEqual(issued);
+      expect(receiver.agent.snapshot().transfers[0]).toMatchObject({
+        direction: 'incoming',
+        peerNodeId: alone.nodeId,
+        changeSetHash: issued.changeSetHash,
+        status: 'completed',
+      });
+    }
+    expect(alone.agent.snapshot()).toMatchObject({
+      announced: 1,
+      received: 0,
+      catchUp: { missingAtStart: 0 },
+    });
+    expect(alone.agent.snapshot().transfers[0]).toMatchObject({
+      direction: 'outgoing',
+      peerNodeId: hub.nodeId,
+      changeSetHash: issued.changeSetHash,
+    });
+    // The hub heard the announcement and, in its own catch-up against the
+    // new client, found the same change set; it was pulled once.
+    await until(() => caughtUp(hub));
+    expect(hub.agent.snapshot()).toMatchObject({ received: 1, failed: 0 });
+  });
+
+  it('lets a hub that restarts with an empty store learn what its clients hold, and the clients each other', async () => {
+    const { hub, clients } = await network();
+    const [first, second] = clients as [Node, Node];
+    await until(() => [hub, first, second].every(caughtUp));
+    const port = hub.transport.boundPort()!;
+    await hub.transport.becomeStandalone();
+    await until(() => !connectedToHub(first) && !connectedToHub(second));
+
+    const renamed = (await first.store.updateAnimal('bowser-the-guard-dog', {
+      name: 'Bowser the Returned Guard Dog',
+    }))!;
+    const issued = await second.store.issueInvoice({
+      customerId: 'scrooge-mcduck',
+      items: [{ animalId: 'donald-the-third', quantity: 1 }],
+    });
+    const returned = await node('hub-node', { hubPort: port });
+    await returned.transport.becomeHub(`127.0.0.1:${port}`, {
+      selfNodeId: returned.nodeId,
+      hubNodeId: returned.nodeId,
+    });
+    await until(() => connectedClients(returned) === 2, 15_000);
+
+    for (const member of [returned, first, second]) {
+      await until(
+        async () =>
+          (await member.store.getAnimal('bowser-the-guard-dog'))?.hash ===
+            renamed.hash && member.store.holdsChangeSet(issued.changeSetHash!),
+        15_000,
+      );
+      expect(await member.store.getInvoice(issued.id)).toStrictEqual(issued);
+    }
+    await until(() => caughtUp(returned));
+    // One catch-up per client: each brought what that client had written
+    // while the hub was away, so the last one reports one of the two.
+    expect(returned.agent.snapshot()).toMatchObject({
+      received: 2,
+      failed: 0,
+      pending: 0,
+    });
+    expect(returned.agent.snapshot().catchUp.pulled).toBeGreaterThanOrEqual(1);
+    // The current version shows as soon as the animal's rows landed; the
+    // junction rows and the change set record of the same pull follow.
+    const hubCounts = await returned.store.tableRowCounts();
+    for (const client of [first, second]) {
+      await until(
+        async () =>
+          JSON.stringify(await client.store.tableRowCounts()) ===
+          JSON.stringify(hubCounts),
+      );
+      expect(await client.store.tableRowCounts()).toStrictEqual(hubCounts);
+    }
+  }, 30_000);
 });

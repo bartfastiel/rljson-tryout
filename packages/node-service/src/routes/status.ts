@@ -28,8 +28,8 @@ export type StatusNode = DirectoryEntry & { seenInTopology: boolean };
  * and role, the hub it follows or is, the peers discovery knows, every
  * node of the environment with one flag from discovery and one from the
  * server-side probe, the state of the hub transport, the change set
- * synchronisation (counters and the last transfers), and the row counts
- * of the store.
+ * synchronisation (counters, the last transfers and the last catch-up),
+ * and the row counts of the store.
  */
 export type StatusReport = {
   nodeName: string;

@@ -2,6 +2,8 @@ import type { Connector } from '@rljson/db';
 import type { Socket } from '@rljson/io';
 import type { ConnectorPayload, SyncEventNames } from '@rljson/rljson';
 
+import type { HeldChangeSet } from '../store/petShopStore.ts';
+
 /**
  * One change set hash as it arrived on the `changeSets` route, with the
  * client identity the announcing connector attached to its payload
@@ -20,6 +22,21 @@ export type Announcement = Readonly<{
 export type AnnouncementListener = (announcement: Announcement) => void;
 
 /**
+ * A node whose store this node can list change sets from without the read
+ * cascade, the moment the two are connected: the hub on a client, each
+ * client on the hub. `nodeId` is that node's id as it introduced itself
+ * (`null` when it did not), `heldChangeSets` reads the change sets it
+ * holds from its store alone, so the catch-up of slice D4 can compare
+ * them with what this node holds.
+ */
+export type AttachedPeer = Readonly<{
+  nodeId: string | null;
+  heldChangeSets(): Promise<readonly HeldChangeSet[]>;
+}>;
+
+export type PeerListener = (peer: AttachedPeer) => void;
+
+/**
  * Where a node announces its change sets and hears the announcements of
  * the others while it has a role in the network: on a client the
  * `Connector` of its `Client` (a `send` goes to the hub, which relays it
@@ -28,15 +45,16 @@ export type AnnouncementListener = (announcement: Announcement) => void;
  * broadcast-only client (a `send` reaches every client, every client's
  * announcement reaches it). `peerNodeId` is the node a `send` goes to:
  * the hub's id on a client, `null` on the hub, whose announcements go to
- * every connected client. `onPeerJoined` fires on the hub when a client
- * was added, so that the agent can repeat what it announced before that
- * client was there.
+ * every connected client. `onPeerAttached` fires with every node whose
+ * store becomes readable through this channel: on a client the hub, once
+ * connected and again after every reconnection; on the hub every client
+ * that was added. The agent catches up with each of them.
  */
 export type AnnouncementChannel = {
   readonly peerNodeId: string | null;
   send(changeSetHash: string): void;
   listen(listener: AnnouncementListener): void;
-  onPeerJoined(listener: () => void): void;
+  onPeerAttached(listener: PeerListener): void;
 };
 
 /**
@@ -81,14 +99,14 @@ export class AnnouncementOrigins {
  * first forgets that the connector already sent the hash: the connector
  * drops a reference it has sent or received before, which is right for a
  * state that is never announced twice and wrong here, where the agent
- * repeats its announcements for a client that joined later and decides
- * about duplicates itself, by looking at what the store holds.
+ * announces a change set again to a peer that lacks it and decides about
+ * duplicates itself, by looking at what the store holds.
  */
 export class ConnectorChannel implements AnnouncementChannel {
   readonly peerNodeId: string | null;
   private readonly connector: Connector;
   private readonly origins: AnnouncementOrigins;
-  private readonly joinListeners: (() => void)[] = [];
+  private readonly peerListeners: PeerListener[] = [];
 
   constructor(
     connector: Connector,
@@ -115,14 +133,17 @@ export class ConnectorChannel implements AnnouncementChannel {
     });
   }
 
-  onPeerJoined(listener: () => void): void {
-    this.joinListeners.push(listener);
+  onPeerAttached(listener: PeerListener): void {
+    this.peerListeners.push(listener);
   }
 
-  /** Called by the hub transport once a client socket was added. */
-  peerJoined(): void {
-    for (const listener of this.joinListeners) {
-      listener();
+  /**
+   * Called by the hub transport with the hub once a client is connected
+   * to it, and on the hub with every client socket that was added.
+   */
+  peerAttached(peer: AttachedPeer): void {
+    for (const listener of this.peerListeners) {
+      listener(peer);
     }
   }
 }

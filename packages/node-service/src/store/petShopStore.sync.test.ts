@@ -13,6 +13,7 @@ import type {
   Announcement,
   AnnouncementChannel,
   AnnouncementListener,
+  PeerListener,
 } from '../network/announcementChannel.ts';
 import { SyncAgent } from '../network/syncAgent.ts';
 import { FakeChannelSource } from '../testing/fakeSync.ts';
@@ -23,7 +24,11 @@ import {
   testStore,
   useTemporaryDataDirectories,
 } from '../testing/testStores.ts';
-import { domainTableCfgs, type PetShopStore } from './petShopStore.ts';
+import {
+  domainTableCfgs,
+  heldChangeSetsOf,
+  type PetShopStore,
+} from './petShopStore.ts';
 
 const dataDirectories = useTemporaryDataDirectories();
 
@@ -80,17 +85,23 @@ const hashesOf = (content: Record<string, StoredRow[]>) =>
 
 /**
  * A channel that hands every announcement straight to the other node's
- * agent, the way the hub relays it, with the announcing node's id.
+ * agent, the way the hub relays it, with the announcing node's id, and
+ * attaches the other node as a peer on request, its held change sets read
+ * from the other store the way the hub transport reads them through an
+ * `IoPeer`.
  */
 class LinkedChannel implements AnnouncementChannel {
   readonly peerNodeId: string | null;
   private readonly nodeId: string;
+  private readonly store: PetShopStore;
   private other: LinkedChannel | null = null;
   private listener: AnnouncementListener | null = null;
+  private readonly peerListeners: PeerListener[] = [];
 
-  constructor(nodeId: string, peerNodeId: string | null) {
+  constructor(nodeId: string, peerNodeId: string | null, store: PetShopStore) {
     this.nodeId = nodeId;
     this.peerNodeId = peerNodeId;
+    this.store = store;
   }
 
   link(other: LinkedChannel): void {
@@ -105,8 +116,18 @@ class LinkedChannel implements AnnouncementChannel {
     this.listener = listener;
   }
 
-  onPeerJoined(): void {
-    // Nobody joins a linked pair; the agent registers, nothing fires.
+  onPeerAttached(listener: PeerListener): void {
+    this.peerListeners.push(listener);
+  }
+
+  attachOther(): void {
+    const other = this.other!;
+    for (const listener of this.peerListeners) {
+      listener({
+        nodeId: other.nodeId,
+        heldChangeSets: () => heldChangeSetsOf(other.store.localIo),
+      });
+    }
   }
 
   deliver(announcement: Announcement): void {
@@ -117,8 +138,9 @@ class LinkedChannel implements AnnouncementChannel {
 /**
  * Two nodes in this process: each store reads through a cascade into the
  * other (the local store first, the other read-only behind it, as the
- * `Client` and `Server` multis of `@rljson/server` are built), and each
- * agent announces to the other over a linked channel.
+ * `Client` and `Server` multis of `@rljson/server` are built), pulls from
+ * the other's store directly, as from an `IoPeer`, and each agent
+ * announces to the other over a linked channel.
  */
 const linkedNodes = async (first: PetShopStore, second: PetShopStore) => {
   const cascadeInto = async (own: Io, other: Io): Promise<IoMulti> => {
@@ -133,8 +155,10 @@ const linkedNodes = async (first: PetShopStore, second: PetShopStore) => {
   const secondCascade = await cascadeInto(second.localIo, first.localIo);
   first.readThrough(() => firstCascade);
   second.readThrough(() => secondCascade);
-  const firstChannel = new LinkedChannel('first', 'second');
-  const secondChannel = new LinkedChannel('second', 'first');
+  first.pullThrough(() => [second.localIo]);
+  second.pullThrough(() => [first.localIo]);
+  const firstChannel = new LinkedChannel('first', 'second', first);
+  const secondChannel = new LinkedChannel('second', 'first', second);
   firstChannel.link(secondChannel);
   secondChannel.link(firstChannel);
   const agentOver = (store: PetShopStore, channel: LinkedChannel) => {
@@ -333,6 +357,57 @@ describe('synchronising a small and a medium store both ways', () => {
     }
   }, 60_000);
 
+  it('catches the small store up with the medium one from the peer lists alone, without announcing the seed', async () => {
+    const small = await memoryStore();
+    const medium = await memoryStore();
+    cleanups.push(
+      () => small.close(),
+      () => medium.close(),
+    );
+    await small.seedIfEmpty('small');
+    await medium.seedIfEmpty('medium');
+    const mediumBefore = await contentOf(medium);
+    const { firstAgent, secondAgent, firstChannel, secondChannel } =
+      await linkedNodes(small, medium);
+
+    // Both sides attach the other, as both ends of a hub connection do.
+    firstChannel.attachOther();
+    secondChannel.attachOther();
+    await until(
+      () =>
+        firstAgent.snapshot().catchUp.lastCompletedAt !== null &&
+        secondAgent.snapshot().catchUp.lastCompletedAt !== null &&
+        firstAgent.snapshot().pending === 0,
+    );
+
+    expect(firstAgent.snapshot()).toMatchObject({
+      received: 400,
+      announced: 0,
+      failed: 0,
+      lastError: null,
+      catchUp: { missingAtStart: 400, pulled: 400 },
+    });
+    expect(firstAgent.snapshot().catchUp.durationMs).toBeGreaterThanOrEqual(0);
+    // The medium side pulls nothing and announces exactly the 400 change
+    // sets the small side lacked, not the 44 both hold.
+    expect(secondAgent.snapshot()).toMatchObject({
+      received: 0,
+      announced: 400,
+      failed: 0,
+      catchUp: { missingAtStart: 0, pulled: 0 },
+    });
+    expect(await contentOf(medium)).toStrictEqual(mediumBefore);
+    expect(hashesOf(await contentOf(small))).toStrictEqual(
+      hashesOf(mediumBefore),
+    );
+    expect(await conflictsOf(small)).toStrictEqual({});
+    expect((await small.heldChangeSets()).map((entry) => entry.hash)).toEqual(
+      expect.arrayContaining(
+        (await medium.heldChangeSets()).map((entry) => entry.hash),
+      ),
+    );
+  }, 60_000);
+
   it('brings an edit made on one side to the other as the current version, chained to the seed version', async () => {
     const small = await memoryStore();
     const medium = await memoryStore();
@@ -371,7 +446,7 @@ describe('the store primitives of the synchronisation', () => {
     const changeSet = hashed({ id: 'x', items: [] });
 
     expect(await store.holdsChangeSet(changeSet._hash)).toBe(false);
-    await store.writeReceivedRow('changeSets', changeSet);
+    await store.writeReceivedRows([{ table: 'changeSets', row: changeSet }]);
     expect(await store.holdsChangeSet(changeSet._hash)).toBe(false);
     await store.recordReceivedChangeSet(changeSet);
     expect(await store.holdsChangeSet(changeSet._hash)).toBe(true);
@@ -425,6 +500,86 @@ describe('the store primitives of the synchronisation', () => {
     ]);
   });
 
+  it('keeps a change set recorded twice once, and says so', async () => {
+    const warnings: string[] = [];
+    const store = await memoryStore({
+      logger: {
+        warn: (_fields: unknown, message?: string) =>
+          warnings.push(message ?? ''),
+      },
+    });
+    cleanups.push(() => store.close());
+    const changeSet = hashed({ id: 'twice', items: [] });
+
+    await store.recordReceivedChangeSet(changeSet);
+    await store.recordReceivedChangeSet(changeSet);
+
+    expect(await store.tableRowCounts()).toMatchObject({
+      changeSets: 1,
+      changeSetsInsertHistory: 1,
+    });
+    expect(warnings).toStrictEqual([
+      'received change set is held already, kept once',
+    ]);
+  });
+
+  it('lists the change sets it holds oldest first, with their history time ids', async () => {
+    const store = await memoryStore();
+    cleanups.push(() => store.close());
+    await store.seedIfEmpty('small');
+    const issued = await store.issueInvoice({
+      customerId: 'scrooge-mcduck',
+      items: [{ animalId: 'donald-the-third', quantity: 1 }],
+    });
+
+    const held = await store.heldChangeSets();
+
+    expect(held).toHaveLength(45);
+    expect(held[0]!.timeId).toMatch(/:seed$/);
+    expect(held.at(-1)).toMatchObject({ hash: issued.changeSetHash });
+    expect(new Set(held.map((entry) => entry.hash)).size).toBe(45);
+    for (let index = 1; index < held.length; index += 1) {
+      expect(Number(held[index]!.timeId.split(':')[0])).toBeGreaterThanOrEqual(
+        Number(held[index - 1]!.timeId.split(':')[0]),
+      );
+    }
+    expect(await store.localChangeSet(issued.changeSetHash!)).toMatchObject({
+      _hash: issued.changeSetHash,
+      id: 'issue-invoice-2026-0007',
+    });
+    expect(await store.localChangeSet('NobodyWroteThis')).toBeUndefined();
+    expect(await store.localChangeSet("x' OR '1'='1")).toBeUndefined();
+  });
+
+  it('reads what a peer holds through a table dump, which a cascade answers from its own store alone', async () => {
+    const empty = await memoryStore();
+    const seeded = await memoryStore();
+    cleanups.push(
+      () => empty.close(),
+      () => seeded.close(),
+    );
+    await seeded.seedIfEmpty('small');
+    const cascade = new IoMulti([
+      { io: empty.localIo, priority: 1, read: true, write: true, dump: true },
+      {
+        io: seeded.localIo,
+        priority: 2,
+        read: true,
+        write: false,
+        dump: false,
+      },
+    ]);
+    await cascade.init();
+
+    expect(await heldChangeSetsOf(seeded.localIo)).toStrictEqual(
+      await seeded.heldChangeSets(),
+    );
+    expect(await heldChangeSetsOf(cascade)).toStrictEqual([]);
+    expect(await empty.tableRowCounts()).toMatchObject({
+      changeSetsInsertHistory: 0,
+    });
+  });
+
   it('does not announce a received change set', async () => {
     const store = await memoryStore();
     cleanups.push(() => store.close());
@@ -443,7 +598,7 @@ describe('the store primitives of the synchronisation', () => {
     expect(announced).toStrictEqual([]);
   });
 
-  it('reads a row through the cascade and lands it locally, and answers undefined for what nobody has', async () => {
+  it('pulls a row from the peers without landing it locally, and answers undefined for what nobody has', async () => {
     const small = await memoryStore();
     const medium = await memoryStore();
     cleanups.push(
@@ -463,16 +618,31 @@ describe('the store primitives of the synchronisation', () => {
     const pulled = await small.pullRow('animals', generatedAnimal.hash);
 
     expect(pulled).toMatchObject({ _hash: generatedAnimal.hash });
-    expect(await small.hasLocalRow('animals', generatedAnimal.hash)).toBe(true);
+    expect(await small.hasLocalRow('animals', generatedAnimal.hash)).toBe(
+      false,
+    );
     expect(
       await small.pullRow('animals', 'NoSuchHash0123456789ab'),
     ).toBeUndefined();
     expect(await small.pullRow('nobody', generatedAnimal.hash)).toBeUndefined();
     expect(await small.pullRow('animals', 'a b')).toBeUndefined();
     expect(await small.hasLocalRow('nobody', generatedAnimal.hash)).toBe(false);
+    // A row this store holds is answered without asking the peers.
+    const seeded = (await small.getAnimal('bowser-the-guard-dog'))!;
+    small.pullThrough(() => [
+      { readRows: () => Promise.reject(new Error('not asked')) },
+    ]);
+    expect(await small.pullRow('animals', seeded.hash)).toMatchObject({
+      _hash: seeded.hash,
+    });
+    // Without peers nothing can be pulled.
+    small.pullThrough(null);
+    expect(
+      await small.pullRow('animals', generatedAnimal.hash),
+    ).toBeUndefined();
   });
 
-  it('reads a history row by timeId through the cascade', async () => {
+  it('pulls a history row by timeId from the peers', async () => {
     const small = await memoryStore();
     const medium = await memoryStore();
     cleanups.push(
@@ -497,7 +667,7 @@ describe('the store primitives of the synchronisation', () => {
       timeId: version!.timeId,
     });
     expect(await small.hasLocalHistoryRow('animals', version!.timeId)).toBe(
-      true,
+      false,
     );
     expect(await small.pullHistoryRow('animals', '1:nope')).toBeUndefined();
     expect(
@@ -509,38 +679,86 @@ describe('the store primitives of the synchronisation', () => {
     );
   });
 
-  it('throws when the cascade cannot answer a pull', async () => {
+  it('throws when no peer could answer a pull, and answers from the peers that could', async () => {
     const store = await memoryStore();
-    cleanups.push(() => store.close());
+    const other = await memoryStore();
+    cleanups.push(
+      () => store.close(),
+      () => other.close(),
+    );
     await store.seedIfEmpty();
-    const failing: Io = {
-      ...store.localIo,
+    await other.seedIfEmpty('medium');
+    const failing: Pick<Io, 'readRows'> = {
       readRows: () => Promise.reject(new Error('Io "io-1" is closed')),
     };
-    store.readThrough(() => failing);
+    const generatedAnimal = (
+      await other.listAnimals({}, { limit: 200, offset: 0 })
+    ).items.find((animal) => animal.id.endsWith('-1'))!;
 
+    store.pullThrough(() => [failing]);
     await expect(store.pullRow('animals', 'SomeHash')).rejects.toThrow(
       'Io "io-1" is closed',
     );
+    await expect(store.pullHistoryRow('animals', '1:abcd')).rejects.toThrow(
+      'Io "io-1" is closed',
+    );
+
+    store.pullThrough(() => [failing, other.localIo]);
+    expect(await store.pullRow('animals', generatedAnimal.hash)).toMatchObject({
+      _hash: generatedAnimal.hash,
+    });
+    // A read by hash that nobody had while a peer failed cannot say
+    // "nobody has it"; a read by another column answers with what the
+    // reachable peers had.
+    await expect(
+      store.pullRow('animals', 'NoSuchHash0123456789ab'),
+    ).rejects.toThrow('Io "io-1" is closed');
+    expect(await store.pullHistoryRow('animals', '1:nope')).toBeUndefined();
   });
 
-  it('writes a received row as it is and refuses a tampered one or an unknown table', async () => {
+  it('writes received rows as they are, all at once, and refuses a tampered one or an unknown table', async () => {
     const store = await memoryStore();
-    cleanups.push(() => store.close());
+    const other = await memoryStore();
+    cleanups.push(
+      () => store.close(),
+      () => other.close(),
+    );
     await store.seedIfEmpty();
-    const animal = (await store.getAnimal('bowser-the-guard-dog'))!;
-    const row = (await store.pullRow('animals', animal.hash))!;
+    await other.seedIfEmpty();
+    const renamed = (await other.updateAnimal('bowser-the-guard-dog', {
+      name: 'Bowser II',
+    }))!;
+    const [version] = (await other.getAnimalHistory('bowser-the-guard-dog'))!;
+    store.pullThrough(() => [other.localIo]);
+    const animal = (await store.pullRow('animals', renamed.hash))!;
+    const history = (await store.pullHistoryRow('animals', version!.timeId))!;
     const before = await store.tableRowCounts();
 
-    await store.writeReceivedRow('animals', row);
-    expect(await store.tableRowCounts()).toStrictEqual(before);
+    await store.writeReceivedRows([
+      { table: 'animals', row: animal },
+      { table: 'animalsInsertHistory', row: history },
+    ]);
+
+    expect(await store.tableRowCounts()).toMatchObject({
+      animals: before.animals + 1,
+      animalsInsertHistory: before.animalsInsertHistory + 1,
+    });
+    expect((await store.getAnimal('bowser-the-guard-dog'))?.hash).toBe(
+      renamed.hash,
+    );
+    const after = await store.tableRowCounts();
+    await store.writeReceivedRows([{ table: 'animals', row: animal }]);
+    await store.writeReceivedRows([]);
+    expect(await store.tableRowCounts()).toStrictEqual(after);
     await expect(
-      store.writeReceivedRow('animals', { ...row, name: 'Tampered' }),
+      store.writeReceivedRows([
+        { table: 'animals', row: { ...animal, name: 'Tampered' } },
+      ]),
     ).rejects.toThrow('does not match');
     await expect(
-      store.writeReceivedRow('nobody', { _hash: 'x' }),
+      store.writeReceivedRows([{ table: 'nobody', row: { _hash: 'x' } }]),
     ).rejects.toThrow('This store has no table "nobody".');
-    expect(await store.tableRowCounts()).toStrictEqual(before);
+    expect(await store.tableRowCounts()).toStrictEqual(after);
   });
 
   it('keeps the whole-table reads local and validates as one document after a sync', async () => {

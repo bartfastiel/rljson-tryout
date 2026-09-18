@@ -178,6 +178,13 @@ describe('GET /status', () => {
         failed: 0,
         lastError: null,
         transfers: [],
+        catchUp: {
+          lastStartedAt: null,
+          lastCompletedAt: null,
+          missingAtStart: 0,
+          pulled: 0,
+          durationMs: null,
+        },
       },
       storage: 'memory',
       seedSize: 'small',

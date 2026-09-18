@@ -559,10 +559,75 @@ const handWrittenSeedPart: SeedPart = {
  * A row of any table as the synchronisation of slice D3 pulls it from
  * another node and writes it into this one: its content hash plus
  * whatever columns the table has. The store writes it exactly as received
- * (`writeReceivedRow`), never re-hashed and never with a new InsertHistory
+ * (`writeReceivedRows`), never re-hashed and never with a new InsertHistory
  * row, because the history rows of a change set are among its items.
  */
 export type SyncRow = { _hash: string } & Record<string, unknown>;
+
+/**
+ * One change set a store holds completely, as the catch-up of slice D4
+ * lists them: the change set's hash and the `timeId` of the history row
+ * the store recorded it with, which orders the change sets the way that
+ * store learned about them (its own in write order, received ones in the
+ * order they arrived).
+ */
+export type HeldChangeSet = Readonly<{ hash: string; timeId: string }>;
+
+/**
+ * The stores of the nodes this node is connected to, as the hub transport
+ * hands them to the store for the pulls of the synchronisation: a function
+ * returning the current `IoPeer`s (one per client on the hub, the hub's on
+ * a client), or `null` while the node has no role. A peer store answers
+ * from that node's store, or, on the hub's `IoServer`, from the hub's own
+ * cascade; nothing read this way is written into this node's store, which
+ * is the point (`writeReceivedRows` does that, for a whole change set at
+ * once).
+ */
+export type PeerStores = (() => readonly Pick<Io, 'readRows'>[]) | null;
+
+/**
+ * One row as `writeReceivedRows` takes it: the table it belongs to and the
+ * row as another node served it.
+ */
+export type ReceivedRow = Readonly<{ table: string; row: SyncRow }>;
+
+const millisecondsOf = (historyTimeId: string): number =>
+  Number(historyTimeId.split(':')[0]);
+
+/** Orders held change sets by their history `timeId`, oldest first. */
+export const byTimeId = (left: HeldChangeSet, right: HeldChangeSet): number =>
+  millisecondsOf(left.timeId) - millisecondsOf(right.timeId) ||
+  left.timeId.localeCompare(right.timeId);
+
+type ChangeSetHistoryRow = { changeSetsRef: string; timeId: string };
+
+const heldChangeSetsIn = (rljson: Rljson): HeldChangeSet[] => {
+  const table = rljson[
+    changeSetsInsertHistoryTableCfg.key
+  ] as InsertHistoryTable<string>;
+  return (table._data as unknown as ChangeSetHistoryRow[])
+    .map((row) => ({ hash: row.changeSetsRef, timeId: row.timeId }))
+    .sort(byTimeId);
+};
+
+/**
+ * The change sets another node holds, read from that node's store through
+ * the given `Io` (the `IoPeer` of `@rljson/server` towards it), oldest
+ * first. A table dump rather than a row read on purpose: `IoMulti` answers
+ * a whole-table `readRows` from the first layer that holds any row and
+ * caches the answer in the layers that did not, so a client reading the
+ * hub's table that way through the hub's `IoServer` would, on a hub with an
+ * empty table, pull another client's history rows into the hub's store and
+ * make the hub count change sets as held that it never pulled. A dump is
+ * served from a multi's dumpable members alone, the node's own store, and
+ * writes nothing back (`docs/findings/change-set-sync.md`).
+ */
+export const heldChangeSetsOf = async (
+  peer: Pick<Io, 'dumpTable'>,
+): Promise<HeldChangeSet[]> =>
+  heldChangeSetsIn(
+    await peer.dumpTable({ table: changeSetsInsertHistoryTableCfg.key }),
+  );
 
 /**
  * Called with every change set this store writes on its own account (an
@@ -904,6 +969,8 @@ export class PetShopStore {
 
   private readonly changeSetListeners = new Set<ChangeSetListener>();
 
+  private peers: PeerStores = null;
+
   constructor(io: Io, options: PetShopStoreOptions = {}) {
     this.localIo = io;
     this.io = new IoSwitch(io);
@@ -927,6 +994,17 @@ export class PetShopStore {
   /** Whether row reads currently fall through to the network. */
   get readsThroughNetwork(): boolean {
     return this.io.cascading;
+  }
+
+  /**
+   * Names the peer stores `pullRow` and `pullHistoryRow` read from (the
+   * `IoPeer`s of the hub transport's `Server` towards its clients, or of
+   * its `Client` towards the hub, asked for on every pull because the
+   * server's list changes with every join and leave), or `null` when the
+   * node has none.
+   */
+  pullThrough(peers: PeerStores): void {
+    this.peers = peers;
   }
 
   /**
@@ -2134,9 +2212,11 @@ export class PetShopStore {
   /**
    * Whether this store holds the change set with this hash completely:
    * written by itself or received with every item, which is when a
-   * change set gets its InsertHistory row here. The change set row alone
-   * proves nothing, since a pull that broke off after the change set row
-   * leaves that row behind. Read from the local store only.
+   * change set gets its InsertHistory row here. The history row is the
+   * proof, not the change set row: the row of a change set another node
+   * wrote arrives together with its items, but the read cascade of the
+   * API caches rows it fetched for a detail without any history. Read
+   * from the local store only.
    */
   async holdsChangeSet(hash: string): Promise<boolean> {
     if (!isSafeWhereValue(hash)) {
@@ -2147,6 +2227,41 @@ export class PetShopStore {
       where: { changeSetsRef: hash },
     });
     return rljson[changeSetsInsertHistoryTableCfg.key]._data.length > 0;
+  }
+
+  /**
+   * Every change set this store holds completely, oldest first by the
+   * `timeId` of its history row: what the catch-up of slice D4 compares
+   * with the list of a peer. Read from the local store only, as a
+   * whole-table row read, which `IoMem` answers without refreshing its
+   * table hashes (`docs/findings/seed-generator.md`).
+   */
+  async heldChangeSets(): Promise<HeldChangeSet[]> {
+    return heldChangeSetsIn(
+      await this.localIo.readRows({
+        table: changeSetsInsertHistoryTableCfg.key,
+        where: {},
+      }),
+    );
+  }
+
+  /**
+   * The change set row with this hash from the local store, `undefined`
+   * when this store does not hold it: what the catch-up announces to a
+   * peer that lacks it.
+   */
+  async localChangeSet(hash: string): Promise<HashedChangeSetRow | undefined> {
+    if (!isSafeWhereValue(hash)) {
+      return undefined;
+    }
+    const rljson = await this.localIo.readRows({
+      table: changeSetsTableCfg.key,
+      where: { _hash: hash },
+    });
+    const table = rljson[changeSetsTableCfg.key] as BuffetsTable;
+    return (table._data as HashedChangeSetRow[]).find(
+      (row) => row._hash === hash,
+    );
   }
 
   /**
@@ -2187,12 +2302,17 @@ export class PetShopStore {
   }
 
   /**
-   * The row with this hash in this table, read through the cascade: the
-   * local store first, then the hub and through the hub every other
-   * client, the row cached locally on the way back
-   * (`docs/findings/hub-transport.md`). `undefined` when no node holds it
-   * or the table is not one of this store's; throws when a peer could not
-   * answer (a closed socket, a timeout), which is the difference between
+   * The row with this hash in this table, from the local store when it is
+   * there, else from the peer stores of `pullThrough`: the hub's, which
+   * answers from the hub's own cascade (the hub's store, then every other
+   * client), or on the hub every client's. Nothing is written into this
+   * store on the way: the `SyncAgent` collects the rows of a change set
+   * and writes them together (`writeReceivedRows`), so that a reader never
+   * sees a version without the rows it consists of; the read cascade of
+   * the API (`readThrough`) would cache each row the moment it arrived.
+   * `undefined` when no node holds it or the table is not one of this
+   * store's; throws when a peer could not answer (a closed socket, a
+   * timeout) and none had the row, which is the difference between
    * "nobody has it" and "nobody could say", the difference the
    * `SyncAgent` needs to decide between giving a change set up and
    * retrying it. Unlike `readMatching`, this read is not silenced.
@@ -2201,18 +2321,25 @@ export class PetShopStore {
     if (!this.tableCfgsByKey.has(table) || !isSafeWhereValue(hash)) {
       return undefined;
     }
-    const rljson = await this.io.readRows({ table, where: { _hash: hash } });
-    return (rljson[table]._data as SyncRow[]).find((row) => row._hash === hash);
+    const matches = (row: SyncRow): boolean => row._hash === hash;
+    const local = await this.localIo.readRows({
+      table,
+      where: { _hash: hash },
+    });
+    return (
+      (local[table]._data as SyncRow[]).find(matches) ??
+      this.readFromPeers(table, { _hash: hash }, matches, true)
+    );
   }
 
   /**
    * The InsertHistory row with this `timeId` in the history table of
-   * `table`, read through the cascade like `pullRow`; the way a received
+   * `table`, from the peer stores like `pullRow`; the way a received
    * version's `previous` is followed to a version this node has not
    * received yet. A read by a column other than `_hash` answers with what
-   * the reachable layers had rather than throwing when one could not
-   * answer (`docs/findings/hub-transport.md`), so a missing predecessor
-   * reads as `undefined` here.
+   * the reachable peers had rather than throwing when one could not
+   * answer, the way `IoMulti` does (`docs/findings/hub-transport.md`), so
+   * a missing predecessor reads as `undefined` here.
    */
   async pullHistoryRow(
     table: string,
@@ -2225,48 +2352,114 @@ export class PetShopStore {
     ) {
       return undefined;
     }
-    const rljson = await this.io.readRows({
+    const matches = (row: SyncRow): boolean => row.timeId === historyTimeId;
+    const local = await this.localIo.readRows({
       table: historyTableKey,
       where: { timeId: historyTimeId },
     });
-    return (rljson[historyTableKey]._data as SyncRow[]).find(
-      (row) => row.timeId === historyTimeId,
+    return (
+      (local[historyTableKey]._data as SyncRow[]).find(matches) ??
+      this.readFromPeers(
+        historyTableKey,
+        { timeId: historyTimeId },
+        matches,
+        false,
+      )
     );
   }
 
   /**
-   * Writes a row another node wrote into the local store exactly as
-   * received: no new hash, no new InsertHistory row, since the history
-   * rows of a change set are among its items and a received version must
-   * keep the `timeId` and `previous` its writer gave it, or the version
-   * rule of roadmap section 2.6 would see two versions where the network
-   * has one. A row the store already holds is left as it is (rows are
-   * content addressed), so writing what the read cascade already cached
-   * costs nothing but the write. The store checks the hash of the row on
-   * the way in (`hsh` inside `IoMem.write` and `IoSqliteNode.write`) and
-   * refuses a row whose hash does not match its content; the `SyncAgent`
-   * checks before it calls. Throws for a table this store does not have.
+   * Asks every peer store for the rows matching `where`, all at once, and
+   * answers with the first row that matches. Peers that could not answer
+   * are ignored while another one could; when every peer failed, or when
+   * `strict` (a read by hash) and none had the row while some failed, the
+   * first failure is thrown. Without peers (no role in the network) the
+   * answer is `undefined`.
    */
-  async writeReceivedRow(table: string, row: SyncRow): Promise<void> {
-    const tableCfg = this.tableCfgsByKey.get(table);
-    if (tableCfg === undefined) {
-      throw new Error(`This store has no table "${table}".`);
+  private async readFromPeers(
+    table: string,
+    where: Record<string, string>,
+    matches: (row: SyncRow) => boolean,
+    strict: boolean,
+  ): Promise<SyncRow | undefined> {
+    const peers = this.peers?.() ?? [];
+    if (peers.length === 0) {
+      return undefined;
     }
-    await this.localIo.write({
-      data: {
-        [table]: { _type: tableCfg.type, _data: [row] },
-      } as unknown as Rljson,
-    });
+    const answers = await Promise.allSettled(
+      peers.map((peer) => peer.readRows({ table, where })),
+    );
+    const failures = answers.filter(
+      (answer): answer is PromiseRejectedResult => answer.status === 'rejected',
+    );
+    for (const answer of answers) {
+      if (answer.status === 'fulfilled') {
+        const found = (
+          answer.value[table]?._data as SyncRow[] | undefined
+        )?.find(matches);
+        if (found !== undefined) {
+          return found;
+        }
+      }
+    }
+    if (failures.length === answers.length || (strict && failures.length > 0)) {
+      throw failures[0]!.reason;
+    }
+    return undefined;
+  }
+
+  /**
+   * Writes rows other nodes wrote into the local store exactly as
+   * received, all in one `Io.write`: no new hashes, no new InsertHistory
+   * rows, since the history rows of a change set are among its items and
+   * a received version must keep the `timeId` and `previous` its writer
+   * gave it, or the version rule of roadmap section 2.6 would see two
+   * versions where the network has one. One write for a whole change set
+   * is what makes the change set appear at once: `IoMem` inserts the rows
+   * of every table in one synchronous pass and `IoSqliteNode` in one
+   * transaction, so a reader sees either none of the rows or all of them.
+   * Rows the store already holds are left as they are (rows are content
+   * addressed). The store checks the hash of every row on the way in
+   * (`hsh` inside `IoMem.write` and `IoSqliteNode.write`) and refuses a
+   * row whose hash does not match its content; the `SyncAgent` checks
+   * before it calls. Throws for a table this store does not have.
+   */
+  async writeReceivedRows(rows: readonly ReceivedRow[]): Promise<void> {
+    if (rows.length === 0) {
+      return;
+    }
+    const data: Record<string, { _type: string; _data: SyncRow[] }> = {};
+    for (const { table, row } of rows) {
+      const tableCfg = this.tableCfgsByKey.get(table);
+      if (tableCfg === undefined) {
+        throw new Error(`This store has no table "${table}".`);
+      }
+      const tableData = data[table] ?? { _type: tableCfg.type, _data: [] };
+      tableData._data.push(row);
+      data[table] = tableData;
+    }
+    await this.localIo.write({ data: data as unknown as Rljson });
   }
 
   /**
    * Records a change set received from another node once every item of
-   * it is in the local store: the change set row (a no-op when the read
-   * cascade already cached it) and a history row stamped now with the
-   * origin `sync`, which is what makes `holdsChangeSet` true. Not
-   * announced: the node that wrote it did that.
+   * it is in the local store: the change set row and a history row
+   * stamped now with the origin `sync`, which is what makes
+   * `holdsChangeSet` true. Not announced: the node that wrote it did
+   * that. A change set the store
+   * holds already is left as it is, so that every change set has exactly
+   * one history row here whatever the caller does (`recordChangeSet`
+   * would append a second one); the `SyncAgent` checks before it pulls,
+   * so a second call is logged as the anomaly it is.
    */
   async recordReceivedChangeSet(changeSet: HashedChangeSetRow): Promise<void> {
+    if (await this.holdsChangeSet(changeSet._hash)) {
+      this.logger.warn(
+        { changeSetHash: changeSet._hash, changeSetId: changeSet.id },
+        'received change set is held already, kept once',
+      );
+      return;
+    }
     await this.recordChangeSet(changeSet, {
       timeId: timeId(),
       origin: syncOrigin,
