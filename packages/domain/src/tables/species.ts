@@ -14,6 +14,13 @@ export type SpeciesRow = {
   name: string;
   latinName: string;
   description: string;
+  /**
+   * The id of the species image in the node's blob store (`@rljson/bs`):
+   * the content hash of the PNG bytes, which `speciesImageBlobId` computes
+   * from the species id before any store has seen the image.
+   */
+  imageBlobId: string;
+  imageMimeType: string;
 };
 
 /**
@@ -44,6 +51,8 @@ export const speciesTableCfg: TableCfg = {
     stringColumn('name', 'Name', 'Name'),
     stringColumn('latinName', 'Latin name', 'Latin'),
     stringColumn('description', 'Description', 'Description'),
+    stringColumn('imageBlobId', 'Image blob id', 'Image'),
+    stringColumn('imageMimeType', 'Image media type', 'Image type'),
   ],
 };
 

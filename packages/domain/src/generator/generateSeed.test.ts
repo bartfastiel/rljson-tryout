@@ -381,12 +381,12 @@ describe('generatedSeedFor', () => {
     ).toMatchInlineSnapshot(`
       {
         "animalTraits": {
-          "first": "Z-AFULrm4iA1SKDP_3GrIt",
-          "table": "wBVPU-VNkXO7plcDkskOtI",
+          "first": "RSM7IKasX1s9VCfFvsS-Zb",
+          "table": "2mF4lxC2KWoiNb61WSub2z",
         },
         "animals": {
-          "first": "83S46KyR_M4-SkZDVTrL13",
-          "table": "pDbTGk22gQj_UKmqq2dWDF",
+          "first": "XfEB_qN5tOctOASD7WjTEu",
+          "table": "9X44XdoR798gOsC0ShXrm7",
         },
         "breeders": {
           "first": "8GT-_byx4jUaaRFWbzyKaj",
@@ -397,8 +397,8 @@ describe('generatedSeedFor', () => {
           "table": "vSKTojRzrGzTDuDhga8Vn2",
         },
         "invoiceItems": {
-          "first": "OcK9_HeODUEW-Eh9Y4ddkp",
-          "table": "rHH_H8yEfwXSw9PIaqh2WL",
+          "first": "RoUkOFVZIxq4g2vrs-dycI",
+          "table": "UXtV0xz4f-TAKI3SAE0WjM",
         },
         "invoices": {
           "first": "ogYnCYmn_umRvXQjZkuC56",
@@ -409,8 +409,8 @@ describe('generatedSeedFor', () => {
           "table": "t5VQbXWlc_pvCAwzKW_ORF",
         },
         "species": {
-          "first": "FqOHsIwMHV50ScFls23kmc",
-          "table": "6d8GEyHRorVIVKsaizTTeO",
+          "first": "9fmPgNK8hYM5NcQ117ZpmD",
+          "table": "lwu0X_Uz7njv8Uwz8Hdya6",
         },
         "traits": {
           "first": "co85HYwjuuE6VYQuziFgoF",
@@ -436,12 +436,12 @@ describe('generatedSeedFor', () => {
     ).toMatchInlineSnapshot(`
       {
         "animalTraits": {
-          "first": "IeOxIPCx0BQEcVXRalkWvn",
-          "table": "gwTanwgkWJ6LBnQreQbW0P",
+          "first": "vCFe7PWriCBRwSsh-YHJUe",
+          "table": "p93eVuJJDfOlZX7-3C1CFK",
         },
         "animals": {
-          "first": "yO2TC-CRHY8XGYSEY4iO0G",
-          "table": "Bu0BvZtiDRlI-Dz2kkq8vT",
+          "first": "TYYPAhopR979iHSe7wR1PG",
+          "table": "gq5gdqCTCq1Wx4gY9CqyOl",
         },
         "breeders": {
           "first": "Pyv2pgKvTTMYpvX0oWieNc",
@@ -452,8 +452,8 @@ describe('generatedSeedFor', () => {
           "table": "-SDY5pX0vtGtW-TseZSjZU",
         },
         "invoiceItems": {
-          "first": "-HAvA5CV-VQI6KBYQGs2-U",
-          "table": "qNvJDv-_T14vWmXLj26Cup",
+          "first": "ffgfWc_y_NABYG5vNLbDrw",
+          "table": "uTA8GexSuMY8A5tsaOeO3C",
         },
         "invoices": {
           "first": "wzwRmDyHoxc_ZgA_0y7AL8",
@@ -464,8 +464,8 @@ describe('generatedSeedFor', () => {
           "table": "PqZjThEacXnWN7vQzg0rre",
         },
         "species": {
-          "first": "FqOHsIwMHV50ScFls23kmc",
-          "table": "umNF5MmXqcvyM07cYq84C5",
+          "first": "9fmPgNK8hYM5NcQ117ZpmD",
+          "table": "c-qKZTokqSyXIe8DbBpq56",
         },
         "traits": {
           "first": "co85HYwjuuE6VYQuziFgoF",
