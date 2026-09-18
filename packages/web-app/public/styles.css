@@ -20,6 +20,7 @@
   --color-cancelled-tint: #ebebef;
   --color-seen: #1a7f37;
   --color-unseen: #c62828;
+  --color-reconnecting: #b26a00;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -64,6 +65,7 @@
     --color-cancelled-tint: #2f2f36;
     --color-seen: #57d27a;
     --color-unseen: #ff8a80;
+    --color-reconnecting: #f5b953;
   }
 }
 
@@ -197,6 +199,41 @@ a {
   .node-bar:has(.node-link) > :first-child {
     margin-left: 0;
   }
+}
+
+/*
+ * The live updates indicator sits next to the title: a dot in the colour
+ * of the connection state (green live, amber while (re)connecting, grey
+ * offline) and the state as a word, so that the colour never stands
+ * alone. It never shrinks or wraps; the node bar next to it takes the
+ * remaining room.
+ */
+.live-indicator {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tap-target);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.live-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.live-indicator-live .live-dot {
+  background: var(--color-seen);
+}
+
+.live-indicator-reconnecting .live-dot {
+  background: var(--color-reconnecting);
 }
 
 .node-badge,

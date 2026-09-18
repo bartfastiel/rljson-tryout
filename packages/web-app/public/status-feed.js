@@ -1,5 +1,6 @@
 // @ts-check
 import { fetchJson } from './api.js';
+import { liveEvents } from './live-events.js';
 
 /**
  * One node of the environment as `GET /status` lists it under `nodes`:
@@ -113,7 +114,13 @@ import { fetchJson } from './api.js';
 
 /** @typedef {(update: StatusUpdate) => void} StatusListener */
 
-const refreshIntervalMs = 5000;
+/**
+ * The poll is the fallback for a stream that is down and the schedule of
+ * the browser probes; the events of the stream refresh the status within
+ * `eventDebounceMs`, so a burst of transfers ends in one request.
+ */
+const refreshIntervalMs = 30000;
+const eventDebounceMs = 300;
 const probeTimeoutMs = 3000;
 
 /**
@@ -137,24 +144,36 @@ const probeFromBrowser = async (url) => {
 };
 
 /**
- * Polls `GET /status` of this node every five seconds while anyone
- * listens, probes every other node of the environment from the browser
- * after each poll, and hands the result to every subscriber. The header's
- * node bar and the network view share one feed, so the page never polls
- * twice. (Slice B13 replaces the polling by server-sent events.)
+ * Reads `GET /status` of this node while anyone listens and hands the
+ * result to every subscriber: right away on the `topology` and `sync`
+ * events of the live stream (the status carries the same topology plus
+ * the transfer list and counters, so one read serves every view), and
+ * every thirty seconds as the fallback while the stream is down and as
+ * the schedule of the browser's own `GET /health` probes of the other
+ * nodes, which take up to three seconds for an unreachable node and would
+ * hold an event-driven refresh up; those refreshes reuse the last probe
+ * results. The header's node bar and the network view share one feed, so
+ * the page never reads the status twice for one change.
  */
 class StatusFeed {
   /** @type {Set<StatusListener>} */
   #listeners = new Set();
   /** @type {ReturnType<typeof setTimeout> | null} */
   #timer = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  #eventTimer = null;
+  /** @type {(() => void)[]} */
+  #unsubscribeEvents = [];
   /** @type {StatusUpdate | null} */
   #latest = null;
+  /** @type {Map<string, boolean>} */
+  #browserProbes = new Map();
   /** @type {Promise<void> | null} */
   #refreshing = null;
+  #again = false;
 
   /**
-   * Starts polling with the first subscriber and stops with the last one.
+   * Starts reading with the first subscriber and stops with the last one.
    * A new subscriber receives the latest update right away when there is
    * one. Returns the function that unsubscribes.
    *
@@ -166,31 +185,89 @@ class StatusFeed {
       listener(this.#latest);
     }
     if (this.#listeners.size === 1) {
+      this.#followEvents();
       void this.refresh();
     }
     return () => {
       this.#listeners.delete(listener);
-      if (this.#listeners.size === 0 && this.#timer !== null) {
-        clearTimeout(this.#timer);
-        this.#timer = null;
+      if (this.#listeners.size === 0) {
+        this.#stop();
       }
     };
   }
 
   /**
-   * Refreshes now instead of at the next tick, for example after the user
-   * pressed Retry. Concurrent calls share one refresh.
+   * Refreshes now, probes included, instead of at the next tick, for
+   * example after the user pressed Retry. Concurrent calls share one
+   * refresh.
    */
   refresh() {
-    if (this.#refreshing === null) {
-      this.#refreshing = this.#cycle().finally(() => {
-        this.#refreshing = null;
-      });
+    return this.#refresh(true);
+  }
+
+  #followEvents() {
+    const onEvent = () => this.#scheduleEventRefresh();
+    this.#unsubscribeEvents = [
+      liveEvents.on('topology', onEvent),
+      liveEvents.on('sync', onEvent),
+      liveEvents.onState((state) => {
+        if (state === 'live') {
+          onEvent();
+        }
+      }),
+    ];
+  }
+
+  #scheduleEventRefresh() {
+    if (this.#eventTimer !== null) {
+      clearTimeout(this.#eventTimer);
     }
+    this.#eventTimer = setTimeout(() => {
+      this.#eventTimer = null;
+      void this.#refresh(false);
+    }, eventDebounceMs);
+  }
+
+  #stop() {
+    for (const unsubscribe of this.#unsubscribeEvents.splice(0)) {
+      unsubscribe();
+    }
+    for (const timer of [this.#timer, this.#eventTimer]) {
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    }
+    this.#timer = null;
+    this.#eventTimer = null;
+    this.#again = false;
+  }
+
+  /**
+   * Runs one cycle, or notes that another one is due when a cycle is
+   * running: an event that arrives while the status is being read may
+   * postdate the answer, so the read is repeated once the cycle is done.
+   *
+   * @param {boolean} probe whether to run the browser probes again
+   */
+  #refresh(probe) {
+    if (this.#refreshing !== null) {
+      this.#again = true;
+      return this.#refreshing;
+    }
+    this.#refreshing = this.#cycle(probe).finally(() => {
+      this.#refreshing = null;
+      if (this.#again && this.#listeners.size > 0) {
+        this.#again = false;
+        void this.#refresh(false);
+      }
+    });
     return this.#refreshing;
   }
 
-  async #cycle() {
+  /**
+   * @param {boolean} probe
+   */
+  async #cycle(probe) {
     if (this.#timer !== null) {
       clearTimeout(this.#timer);
       this.#timer = null;
@@ -200,18 +277,15 @@ class StatusFeed {
     const update = {
       status: null,
       error: null,
-      browserProbes: new Map(),
+      browserProbes: this.#browserProbes,
       at: new Date(),
     };
     try {
       update.status = /** @type {Status} */ (await fetchJson('/status'));
-      const others = update.status.nodes.filter((node) => !node.self);
-      const results = await Promise.all(
-        others.map((node) => probeFromBrowser(node.url)),
-      );
-      others.forEach((node, index) => {
-        update.browserProbes.set(node.url, results[index]);
-      });
+      if (probe) {
+        this.#browserProbes = await this.#probeOthers(update.status);
+        update.browserProbes = this.#browserProbes;
+      }
     } catch (error) {
       update.error = error;
     }
@@ -224,6 +298,17 @@ class StatusFeed {
     if (this.#listeners.size > 0) {
       this.#timer = setTimeout(() => void this.refresh(), refreshIntervalMs);
     }
+  }
+
+  /**
+   * @param {Status} status
+   */
+  async #probeOthers(status) {
+    const others = status.nodes.filter((node) => !node.self);
+    const results = await Promise.all(
+      others.map((node) => probeFromBrowser(node.url)),
+    );
+    return new Map(others.map((node, index) => [node.url, results[index]]));
   }
 }
 

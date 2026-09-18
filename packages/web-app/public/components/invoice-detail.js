@@ -1,5 +1,6 @@
 // @ts-check
 import { element } from '../dom.js';
+import { LiveContent } from '../live-content.js';
 import { notFoundView } from '../not-found-view.js';
 import {
   applicationName,
@@ -188,17 +189,53 @@ const detailView = (invoice) => {
 };
 
 /**
+ * The tables the detail reads from; a change set naming one of them
+ * refreshes it. An invoice read through the cascade before its change set
+ * arrived shows no change set hash until that refresh.
+ */
+const shownTables = ['invoices', 'invoiceItems'];
+
+/** An invoice the node does not have: the not-found view takes over. */
+class InvoiceNotFound extends Error {}
+
+/**
+ * @param {string} id
+ */
+const fetchInvoice = async (id) => {
+  const response = await fetch(`/api/invoices/${encodeURIComponent(id)}`, {
+    headers: { accept: 'application/json' },
+  });
+  if (response.status === 404) {
+    throw new InvoiceNotFound(`There is no invoice with id "${id}".`);
+  }
+  if (!response.ok) {
+    throw new Error(
+      `The node answered ${response.status} ${response.statusText} for /api/invoices/${id}.`,
+    );
+  }
+  return /** @type {InvoiceDetail} */ (await response.json());
+};
+
+/**
  * Shows one invoice: its number as the heading, customer, issue date and
  * status, its items with the animal linked, quantity, unit price and line
  * total, the total and, in small print, the hash of the change set that
  * wrote it. Reached from an invoice card or right after issuing one, at
  * `#/invoices/<id>`. Fetches `GET /api/invoices/<id>` when it enters the
  * document; shows a loading, a not-found (unknown id) or an error state
- * with a retry button until the invoice is there.
+ * with a retry button until the invoice is there, and follows every
+ * change set of the node that touches an invoice from then on.
  */
 class InvoiceDetailElement extends HTMLElement {
+  /** @type {LiveContent | null} */
+  #detail = null;
+
   connectedCallback() {
     void this.load();
+  }
+
+  disconnectedCallback() {
+    this.#detail?.stop();
   }
 
   async load() {
@@ -206,31 +243,26 @@ class InvoiceDetailElement extends HTMLElement {
     if (id === null) {
       throw new Error('invoice-detail requires an invoice-id attribute.');
     }
+    this.#detail ??= new LiveContent(shownTables, async () => {
+      const invoice = await fetchInvoice(id);
+      document.title = `Invoice ${invoice.invoiceNumber} · ${applicationName}`;
+      return detailView(invoice);
+    });
 
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(backLink(), statusMessage('Loading invoice…'));
     try {
-      const response = await fetch(`/api/invoices/${encodeURIComponent(id)}`, {
-        headers: { accept: 'application/json' },
-      });
-      if (response.status === 404) {
+      this.replaceChildren(backLink(), await this.#detail.show());
+    } catch (error) {
+      if (error instanceof InvoiceNotFound) {
         this.replaceChildren(
-          notFoundView(`There is no invoice with id "${id}".`, {
+          notFoundView(error.message, {
             href: listHref,
             text: 'Back to Invoices',
           }),
         );
         return;
       }
-      if (!response.ok) {
-        throw new Error(
-          `The node answered ${response.status} ${response.statusText} for /api/invoices/${id}.`,
-        );
-      }
-      const invoice = /** @type {InvoiceDetail} */ (await response.json());
-      document.title = `Invoice ${invoice.invoiceNumber} · ${applicationName}`;
-      this.replaceChildren(backLink(), detailView(invoice));
-    } catch (error) {
       this.replaceChildren(
         backLink(),
         errorState(

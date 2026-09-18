@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
+import { LiveContent } from '../live-content.js';
 import {
   dateFormat,
   errorState,
@@ -104,27 +105,44 @@ const invoiceCards = (invoices) => {
   return list;
 };
 
+const fetchInvoices = () =>
+  /** @type {Promise<InvoiceSummary[]>} */ (fetchJson('/api/invoices'));
+
+/**
+ * The tables an invoice card reads from; a change set naming one of them
+ * refreshes the list.
+ */
+const shownTables = ['invoices', 'invoiceItems', 'customers', 'persons'];
+
 /**
  * Lists the invoices of this node as cards (number, status badge, customer,
  * issue date, item count, total), newest first as the API serves them,
  * each linking to the invoice's detail page (`#/invoices/<id>`), with a
  * "New invoice" button leading to the form. Fetches `/api/invoices` when it
  * enters the document and shows a loading, an empty or an error state with
- * a retry button until the list is there.
+ * a retry button until the list is there; from then on the cards are
+ * swapped in place whenever the node reports a change set that touches
+ * them, so an invoice issued in another tab or on another node appears
+ * without a reload.
  */
 class InvoicesList extends HTMLElement {
+  #cards = new LiveContent(shownTables, async () =>
+    invoiceCards(await fetchInvoices()),
+  );
+
   connectedCallback() {
     void this.load();
+  }
+
+  disconnectedCallback() {
+    this.#cards.stop();
   }
 
   async load() {
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(viewHeader(), statusMessage('Loading invoices…'));
     try {
-      const invoices = /** @type {InvoiceSummary[]} */ (
-        await fetchJson('/api/invoices')
-      );
-      this.replaceChildren(viewHeader(), invoiceCards(invoices));
+      this.replaceChildren(viewHeader(), await this.#cards.show());
     } catch (error) {
       this.replaceChildren(
         viewHeader(),

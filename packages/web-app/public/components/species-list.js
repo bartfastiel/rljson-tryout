@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
+import { LiveContent } from '../live-content.js';
 import { errorState, statusMessage } from '../view-helpers.js';
 
 /**
@@ -57,21 +58,27 @@ const speciesCards = (species) => {
 /**
  * Lists the species of this node as cards. Fetches `/api/species` when it
  * enters the document and shows a loading, an empty or an error state with
- * a retry button until the list is there.
+ * a retry button until the list is there; from then on the cards follow
+ * every change set of the node that touches the species.
  */
 class SpeciesList extends HTMLElement {
+  #cards = new LiveContent(['species'], async () =>
+    speciesCards(/** @type {Species[]} */ (await fetchJson('/api/species'))),
+  );
+
   connectedCallback() {
     void this.load();
+  }
+
+  disconnectedCallback() {
+    this.#cards.stop();
   }
 
   async load() {
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(viewTitle(), statusMessage('Loading species…'));
     try {
-      const species = /** @type {Species[]} */ (
-        await fetchJson('/api/species')
-      );
-      this.replaceChildren(viewTitle(), speciesCards(species));
+      this.replaceChildren(viewTitle(), await this.#cards.show());
     } catch (error) {
       this.replaceChildren(
         viewTitle(),

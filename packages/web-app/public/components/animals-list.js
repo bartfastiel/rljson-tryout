@@ -2,6 +2,7 @@
 import { fetchJson } from '../api.js';
 import { element } from '../dom.js';
 import { hashQuery, hrefWithParams } from '../hash-route.js';
+import { refreshOnChange } from '../live-events.js';
 import {
   dateFormat,
   errorState,
@@ -85,6 +86,14 @@ import {
  */
 const pageSize = 50;
 const searchDebounceMilliseconds = 300;
+
+/**
+ * The tables the filter chips read from, and those the cards read from
+ * on top of them; a change set naming one of the latter refreshes the
+ * cards, one naming one of the former the chips as well.
+ */
+const filterTables = ['species', 'traits', 'breeders', 'persons'];
+const shownTables = [...filterTables, 'animals', 'animalTraits'];
 
 const countFormat = new Intl.NumberFormat(undefined);
 
@@ -396,6 +405,18 @@ const countLine = (shown, total) => {
 };
 
 /**
+ * The species, traits and breeders the filter chips are built from.
+ */
+const fetchFilterOptions = async () => {
+  const [species, traits, breeders] = await Promise.all([
+    /** @type {Promise<FilterSpecies[]>} */ (fetchJson('/api/species')),
+    /** @type {Promise<FilterTrait[]>} */ (fetchJson('/api/traits')),
+    /** @type {Promise<FilterBreeder[]>} */ (fetchJson('/api/breeders')),
+  ]);
+  return { species, traits, breeders };
+};
+
+/**
  * Lists the animals of this node as cards, with a search field, a species
  * filter, a trait filter and, while a breeder is selected, a compact
  * breeder filter summary above them, all reading from and writing to the
@@ -410,7 +431,11 @@ const countLine = (shown, total) => {
  * reloads only the cards; a filter chip is a navigation that replaces
  * this element with a fresh instance (see `app.js`), which re-reads the
  * whole query, search text included. Shows a loading, an empty or an
- * error state with a retry button until the lists are there.
+ * error state with a retry button until the lists are there. From then
+ * on the view follows the node's change sets: the cards of every page
+ * loaded so far are fetched again and swapped in place, the chips too
+ * when a species, trait or breeder changed, and the search text, the
+ * selection, the "Load more" position and the scroll position stay.
  */
 class AnimalsList extends HTMLElement {
   /** @type {Selection} */
@@ -429,8 +454,16 @@ class AnimalsList extends HTMLElement {
 
   results = element('div', 'animal-results');
 
+  /** @type {(() => void) | null} */
+  #unsubscribe = null;
+
   connectedCallback() {
     void this.load();
+  }
+
+  disconnectedCallback() {
+    this.#unsubscribe?.();
+    this.#unsubscribe = null;
   }
 
   async load() {
@@ -438,15 +471,13 @@ class AnimalsList extends HTMLElement {
     this.selection = selectionFromHash();
     this.replaceChildren(viewTitle(), statusMessage('Loading animals…'));
     try {
-      const [species, traits, breeders, page] = await Promise.all([
-        /** @type {Promise<FilterSpecies[]>} */ (fetchJson('/api/species')),
-        /** @type {Promise<FilterTrait[]>} */ (fetchJson('/api/traits')),
-        /** @type {Promise<FilterBreeder[]>} */ (fetchJson('/api/breeders')),
+      const [filterOptions, page] = await Promise.all([
+        fetchFilterOptions(),
         /** @type {Promise<AnimalPage>} */ (
           fetchJson(animalsApiPath(this.selection, 0))
         ),
       ]);
-      this.filterOptions = { species, traits, breeders };
+      this.filterOptions = filterOptions;
       this.filters = this.buildFilters();
       this.replaceChildren(
         viewTitle(),
@@ -455,6 +486,10 @@ class AnimalsList extends HTMLElement {
         this.results,
       );
       this.showPage(page, []);
+      this.#unsubscribe ??= refreshOnChange(
+        shownTables,
+        (changed) => void this.refresh(changed),
+      );
     } catch (error) {
       this.replaceChildren(
         viewTitle(),
@@ -472,6 +507,68 @@ class AnimalsList extends HTMLElement {
   buildFilters() {
     const { species, traits, breeders } = this.filterOptions;
     return animalFilters(species, traits, breeders, this.selection);
+  }
+
+  /**
+   * Brings the view up to date with the node after a change set: the
+   * chips when a table they read from changed (`changed` is `null` after
+   * a reconnection, when anything may have), and the cards of every page
+   * loaded so far, fetched again page by page and swapped in place. What
+   * came back is dropped when the selection moved on or a page was added
+   * meanwhile, since the next change refreshes again; a failed refresh
+   * keeps the cards that are there, at worst a moment old.
+   *
+   * @param {ReadonlySet<string> | null} changed
+   */
+  async refresh(changed) {
+    const selection = this.selection;
+    const loadedBefore = this.loaded.length;
+    const pagesLoaded = Math.max(1, Math.ceil(loadedBefore / pageSize));
+    const refreshFilters =
+      changed === null || filterTables.some((table) => changed.has(table));
+    /** @type {Awaited<ReturnType<typeof fetchFilterOptions>> | null} */
+    let filterOptions;
+    /** @type {AnimalPage[]} */
+    let pages;
+    try {
+      [filterOptions, pages] = await Promise.all([
+        refreshFilters ? fetchFilterOptions() : null,
+        Promise.all(
+          Array.from(
+            { length: pagesLoaded },
+            (_, page) =>
+              /** @type {Promise<AnimalPage>} */ (
+                fetchJson(animalsApiPath(selection, page * pageSize))
+              ),
+          ),
+        ),
+      ]);
+    } catch {
+      return;
+    }
+    if (
+      selection !== this.selection ||
+      this.loaded.length !== loadedBefore ||
+      !this.results.isConnected
+    ) {
+      return;
+    }
+    if (filterOptions !== null) {
+      this.filterOptions = filterOptions;
+      const filters = this.buildFilters();
+      this.filters.replaceWith(filters);
+      this.filters = filters;
+    }
+    const last = pages[pages.length - 1];
+    this.showPage(
+      {
+        items: pages.flatMap((page) => page.items),
+        total: last?.total ?? 0,
+        limit: pageSize,
+        offset: 0,
+      },
+      [],
+    );
   }
 
   /**
