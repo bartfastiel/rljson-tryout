@@ -12,6 +12,7 @@ type AnimalListEntry = {
   name: string;
   speciesId: string | null;
   speciesName: string | null;
+  speciesImageUrl: string | null;
   breederId: string | null;
   breederFarmName: string | null;
   bornOn: string;
@@ -94,6 +95,7 @@ describe('GET /api/animals', () => {
         'name',
         'priceCents',
         'speciesId',
+        'speciesImageUrl',
         'speciesName',
       ]);
     }
@@ -111,6 +113,9 @@ describe('GET /api/animals', () => {
       const expectedSpecies = speciesById.get(seedRow.speciesRef);
       const listed = items.find((animal) => animal.id === seedRow.id);
       expect(listed?.speciesName).toBe(expectedSpecies?.name);
+      expect(listed?.speciesImageUrl).toBe(
+        `/api/species/${seedRow.speciesRef}/image`,
+      );
     }
   });
 
@@ -348,6 +353,7 @@ describe('GET /api/animals/:id', () => {
       'name',
       'priceCents',
       'speciesId',
+      'speciesImageUrl',
       'speciesName',
       'traits',
     ]);

@@ -17,17 +17,18 @@ const logger = pino({ level: configuration.logLevel });
 // DATA_DIR that cannot be created fails the start with the same log line
 // as a store or a port that cannot be opened.
 try {
+  // Blobs stay in memory until slice C2 puts them on disk: the store writes
+  // the species images into this one and the hub transport serves it to
+  // peers.
+  const blobs = new BsMem();
   const store = new PetShopStore(
     createIo(configuration, logger.child({ component: 'storage' })),
     {
+      blobs,
       traitRelationMode: configuration.traitRelationMode,
       logger: logger.child({ component: 'store' }),
     },
   );
-  // Blobs stay in memory until slice C2 puts them on disk; nothing writes
-  // one before slice B12, but the hub transport serves them to peers from
-  // here on.
-  const blobs = new BsMem();
   const transport = new HubTransport(
     configuration,
     logger.child({ component: 'transport' }),
