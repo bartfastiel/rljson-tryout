@@ -45,15 +45,23 @@ export const createCanvas = (width: number, height: number): RgbaImage => ({
  * Coverage from a signed distance to a shape's edge (negative inside):
  * full within half a pixel inside, none beyond half a pixel outside, a
  * linear ramp in between.
- *
- * Every distance below is computed with additions, multiplications and
- * `Math.sqrt` only, whose results IEEE 754 fixes to the bit; `Math.hypot`,
- * `Math.pow` and the trigonometric functions are left out on purpose,
- * since their rounding may differ between JavaScript engines, and an
- * image that differs by one pixel has another blob id on another node.
  */
 const coverageOfDistance = (distance: number): number =>
   Math.min(1, Math.max(0, 0.5 - distance));
+
+/**
+ * The length of a vector, deliberately as the square root of the summed
+ * squares rather than `Math.hypot`: every distance in this file is
+ * computed with additions, multiplications and `Math.sqrt` only, whose
+ * results IEEE 754 fixes to the bit, while `Math.hypot`, `Math.pow` and
+ * the trigonometric functions may round differently between JavaScript
+ * engines, and an image that differs by one pixel has another blob id on
+ * another node (`docs/findings/blobs.md`).
+ */
+const lengthOf = (x: number, y: number): number => {
+  const squaredLength = x * x + y * y;
+  return Math.sqrt(squaredLength);
+};
 
 const boundsAround = (
   points: readonly Point[],
@@ -82,13 +90,8 @@ const boundsAround = (
  */
 export const circle = ([centerX, centerY]: Point, radius: number): Shape => ({
   bounds: boundsAround([[centerX, centerY]], radius + 1),
-  coverage: (x, y) => {
-    const deltaX = x - centerX;
-    const deltaY = y - centerY;
-    return coverageOfDistance(
-      Math.sqrt(deltaX * deltaX + deltaY * deltaY) - radius,
-    );
-  },
+  coverage: (x, y) =>
+    coverageOfDistance(lengthOf(x - centerX, y - centerY) - radius),
 });
 
 /**
@@ -102,14 +105,11 @@ export const ellipse = (
   radiusY: number,
 ): Shape => ({
   bounds: boundsAround([[centerX, centerY]], Math.max(radiusX, radiusY) + 1),
-  coverage: (x, y) => {
-    const scaledX = (x - centerX) / radiusX;
-    const scaledY = (y - centerY) / radiusY;
-    return coverageOfDistance(
-      (Math.sqrt(scaledX * scaledX + scaledY * scaledY) - 1) *
+  coverage: (x, y) =>
+    coverageOfDistance(
+      (lengthOf((x - centerX) / radiusX, (y - centerY) / radiusY) - 1) *
         Math.min(radiusX, radiusY),
-    );
-  },
+    ),
 });
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
