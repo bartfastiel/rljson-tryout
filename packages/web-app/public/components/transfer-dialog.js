@@ -57,29 +57,14 @@ const rowCount = (tables) =>
 let nextId = 0;
 
 /**
- * One transfer as a row of the popup: a button that shows the direction
- * icon, the tables, the short hash, the row count, the time, the
- * duration and the status, and expands the row to the change set's
- * payload, loaded from the node the first time.
+ * What the row's button shows: the direction icon, the tables, the
+ * short hash, the row count, the time, the duration of a pull and the
+ * status, then the chevron.
  *
  * @param {import('../status-feed.js').SyncTransfer} transfer
  * @param {TransferPartner} partner
  */
-const transferRow = (transfer, partner) => {
-  const row = element('li', `transfer-row transfer-row-${transfer.direction}`);
-  row.dataset.key = transferKey(transfer);
-  nextId += 1;
-  const payloadId = `transfer-payload-${nextId}`;
-
-  const toggle = element('button', 'transfer-row-toggle');
-  toggle.type = 'button';
-  toggle.setAttribute('aria-expanded', 'false');
-  toggle.setAttribute('aria-controls', payloadId);
-  const icon = transferIcon(
-    sideOf(transfer),
-    partner.nodeId ?? '',
-    partner.name,
-  );
+const rowSummary = (transfer, partner) => {
   const summary = tablesSummary(transfer.tables);
   const rows = rowCount(transfer.tables);
   const time = element('time', 'transfer-row-time');
@@ -91,8 +76,10 @@ const transferRow = (transfer, partner) => {
     transfer.changeSetHash.slice(0, 8),
   );
   hash.title = transfer.changeSetHash;
-  toggle.append(
-    icon,
+  const pulled =
+    transfer.direction === 'incoming' && transfer.status !== 'pending';
+  return [
+    transferIcon(sideOf(transfer), partner.nodeId ?? '', partner.name),
     element(
       'span',
       'visually-hidden',
@@ -113,9 +100,7 @@ const transferRow = (transfer, partner) => {
     element(
       'span',
       'transfer-row-duration',
-      transfer.direction === 'incoming' && transfer.status !== 'pending'
-        ? `${transfer.durationMs} ms`
-        : '',
+      pulled ? `${transfer.durationMs} ms` : '',
     ),
     element(
       'span',
@@ -123,20 +108,35 @@ const transferRow = (transfer, partner) => {
       transfer.status,
     ),
     element('span', 'transfer-row-chevron'),
-  );
+  ];
+};
 
+/**
+ * The hidden part of a row and the button that shows it: the change
+ * set's payload, loaded from the node the first time the row expands,
+ * with a Retry when that fails (a change set that has not arrived yet
+ * answers 404).
+ *
+ * @param {import('../status-feed.js').SyncTransfer} transfer
+ */
+const expandablePayload = (transfer) => {
+  nextId += 1;
   const payload = element('div', 'transfer-payload');
-  payload.id = payloadId;
+  payload.id = `transfer-payload-${nextId}`;
   payload.hidden = true;
+  const toggle = element('button', 'transfer-row-toggle');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', payload.id);
   let loaded = false;
   const load = async () => {
     payload.replaceChildren(statusMessage('Loading the change set…'));
     try {
-      const document =
+      const changeSet =
         /** @type {import('../change-set-payload.js').ChangeSetPayload} */ (
           await fetchJson(`/api/change-sets/${transfer.changeSetHash}`)
         );
-      payload.replaceChildren(changeSetPayloadView(document));
+      payload.replaceChildren(changeSetPayloadView(changeSet));
       loaded = true;
     } catch (error) {
       payload.replaceChildren(
@@ -152,7 +152,22 @@ const transferRow = (transfer, partner) => {
       void load();
     }
   });
+  return { toggle, payload };
+};
 
+/**
+ * One transfer as a row of the popup: a button with the summary that
+ * expands the row to the change set's payload, and the error of a
+ * failed or retried pull below it.
+ *
+ * @param {import('../status-feed.js').SyncTransfer} transfer
+ * @param {TransferPartner} partner
+ */
+const transferRow = (transfer, partner) => {
+  const row = element('li', `transfer-row transfer-row-${transfer.direction}`);
+  row.dataset.key = transferKey(transfer);
+  const { toggle, payload } = expandablePayload(transfer);
+  toggle.append(...rowSummary(transfer, partner));
   row.append(toggle, payload);
   if (transfer.error !== undefined) {
     row.append(element('p', 'transfer-row-error', transfer.error));

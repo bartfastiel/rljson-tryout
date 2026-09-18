@@ -223,31 +223,40 @@ const comparison = (previousRow, row) => {
  */
 const historyLine = (item) => {
   const line = element('p', 'payload-history');
-  const row = item.row ?? {};
-  const referenceColumn = Object.keys(row).find(
-    (name) => name.endsWith('Ref') && name !== '_hash',
-  );
-  const previous = Array.isArray(row.previous) ? row.previous : [];
   line.append(
     element('span', 'payload-history-table', item.table),
     element('code', 'payload-hash', shortHash(item.ref)),
     element(
       'span',
       'payload-history-detail',
-      item.row === null
-        ? 'not on this node'
-        : [
-            `for ${shortHash(valueText(referenceColumn === undefined ? '' : row[referenceColumn]))}`,
-            `at ${valueText(row.timeId)}`,
-            previous.length === 0
-              ? 'first version'
-              : `after ${previous.map(valueText).join(', ')}`,
-            `by ${valueText(row.origin)}`,
-          ].join(' · '),
+      item.row === null ? 'not on this node' : historyDetail(item.row),
     ),
   );
   line.title = item.ref;
   return line;
+};
+
+/**
+ * "for <row hash> · at <timeId> · after <previous> · by <origin>" for an
+ * InsertHistory row; the `<table>Ref` column is the one ending in `Ref`.
+ *
+ * @param {Record<string, unknown>} row
+ */
+const historyDetail = (row) => {
+  const referenceColumn = Object.keys(row).find((name) => name.endsWith('Ref'));
+  const reference =
+    referenceColumn === undefined ? '' : valueText(row[referenceColumn]);
+  const previous = Array.isArray(row.previous) ? row.previous : [];
+  const supersedes =
+    previous.length === 0
+      ? 'first version'
+      : `after ${previous.map(valueText).join(', ')}`;
+  return [
+    `for ${shortHash(reference)}`,
+    `at ${valueText(row.timeId)}`,
+    supersedes,
+    `by ${valueText(row.origin)}`,
+  ].join(' · ');
 };
 
 /**
