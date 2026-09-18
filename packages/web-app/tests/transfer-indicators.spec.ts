@@ -116,6 +116,17 @@ const failedFromNode2 = {
   error: 'row animals@abc does not hash to its content, skipped',
 };
 
+/** A species image uploaded on node2, pulled with its blob (slice D5). */
+const imageFromNode2 = {
+  ...completedFromNode2,
+  changeSetHash: 'SW1hZ2VDaGFuZ2VTZXRIYXNo',
+  changeSetId: 'update-species-image-duck-1789654570000:img1',
+  tables: { species: 1, speciesInsertHistory: 1 },
+  blobs: [{ blobId: 'cZUR_CtM1HRbZkdIwhsEH9', bytes: 12_700 }],
+  durationMs: 31,
+  at: '2026-09-17T10:04:59.000Z',
+};
+
 const announcedToHub = {
   direction: 'outgoing',
   peerNodeId: 'id-node2',
@@ -543,6 +554,28 @@ test.describe('the transfer popup', () => {
 
     await expect(popup).toHaveCount(0);
     await expect(badge).toBeFocused();
+  });
+
+  test('shows the blob a pull fetched with the rows, and nothing for a pull without one', async ({
+    page,
+  }) => {
+    await mockEventStream(page);
+    await mockNodes(page, [imageFromNode2, completedFromNode2]);
+    await page.goto('/');
+
+    await partnerBadge(page, 'node2').click();
+
+    const rows = transferRows(page);
+    await expect(rows).toHaveCount(2);
+    const withBlob = rows.nth(0);
+    await expect(withBlob).toContainText('species 1');
+    await expect(withBlob).toContainText('2 rows');
+    await expect(withBlob.locator('.transfer-row-blobs')).toHaveText(
+      'blob 12.7 kB',
+    );
+    await expect(withBlob).toContainText('31 ms');
+    await expect(rows.nth(1).locator('.transfer-row-blobs')).toBeHidden();
+    await expectNoHorizontalScroll(page);
   });
 
   test('expands a transfer to the payload with the changed fields marked', async ({

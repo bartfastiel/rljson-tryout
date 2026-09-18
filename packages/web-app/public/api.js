@@ -94,3 +94,25 @@ export const postJson = (path, body) => sendJson('POST', path, body);
  * @returns {Promise<unknown>}
  */
 export const putJson = (path, body) => sendJson('PUT', path, body);
+
+/**
+ * Sends the bytes of a file to this node (`POST`) with the file's own
+ * media type, for example the image of a species, and returns the JSON
+ * the node answers with. Fails with the node's own message when the node
+ * refused the file (its media type, its bytes, its size).
+ *
+ * @param {string} path
+ * @param {Blob} file
+ * @returns {Promise<unknown>}
+ */
+export const postFile = async (path, file) => {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': file.type },
+    body: file,
+  });
+  if (!response.ok) {
+    throw new Error(await refusalMessage(response, path));
+  }
+  return response.json();
+};
