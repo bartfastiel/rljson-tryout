@@ -196,7 +196,9 @@ const detailView = (invoice) => {
 const shownTables = ['invoices', 'invoiceItems'];
 
 /** An invoice the node does not have: the not-found view takes over. */
-class InvoiceNotFound extends Error {}
+class InvoiceNotFound extends Error {
+  name = 'InvoiceNotFound';
+}
 
 /**
  * @param {string} id

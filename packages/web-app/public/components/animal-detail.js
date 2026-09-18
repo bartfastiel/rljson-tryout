@@ -338,7 +338,9 @@ const shownTables = ['animals', 'animalTraits', 'species', 'breeders'];
  * A version and its history the node does not have: the not-found view
  * takes the place of the detail.
  */
-class AnimalNotFound extends Error {}
+class AnimalNotFound extends Error {
+  name = 'AnimalNotFound';
+}
 
 /**
  * Fetches one version of an animal and the animal's history. Fails with
