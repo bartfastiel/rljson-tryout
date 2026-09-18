@@ -18,7 +18,7 @@ import { errorState, formatBytes, statusMessage } from '../view-helpers.js';
  */
 
 /** What the node accepts as a species image, checked here before it is sent. */
-const acceptedImageTypes = ['image/png', 'image/jpeg'];
+const acceptedImageTypes = new Set(['image/png', 'image/jpeg']);
 const maximumImageBytes = 1024 * 1024;
 
 const viewTitle = () => element('h1', 'view-title', 'Species');
@@ -49,7 +49,7 @@ const speciesImage = (species) => {
  * @param {File} file
  */
 const fileProblem = (file) => {
-  if (!acceptedImageTypes.includes(file.type)) {
+  if (!acceptedImageTypes.has(file.type)) {
     return 'Choose a PNG or JPEG image.';
   }
   if (file.size > maximumImageBytes) {

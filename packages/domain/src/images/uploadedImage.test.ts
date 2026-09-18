@@ -34,9 +34,9 @@ describe('detectedImageMediaType', () => {
       detectedImageMediaType(new TextEncoder().encode('<!doctype html>')),
     ).toBeNull();
     expect(detectedImageMediaType(Uint8Array.of(0xff, 0xd8, 0x00))).toBeNull();
-    expect(detectedImageMediaType(Uint8Array.of(0x47, 0x49, 0x46, 0x38))).toBe(
-      null,
-    );
+    expect(
+      detectedImageMediaType(Uint8Array.of(0x47, 0x49, 0x46, 0x38)),
+    ).toBeNull();
   });
 });
 
