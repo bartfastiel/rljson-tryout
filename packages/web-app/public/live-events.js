@@ -62,6 +62,8 @@ class LiveEvents {
   /** @type {ReturnType<typeof setTimeout> | null} */
   #reopenTimer = null;
   #everLive = false;
+  /** Whether anything subscribed yet, which is when the stream is due. */
+  #wanted = false;
 
   constructor() {
     window.addEventListener('offline', () => {
@@ -70,7 +72,9 @@ class LiveEvents {
     });
     window.addEventListener('online', () => {
       this.#setState('reconnecting');
-      this.#open();
+      if (this.#wanted) {
+        this.#open();
+      }
     });
   }
 
@@ -119,7 +123,9 @@ class LiveEvents {
     };
   }
 
+  /** Opens the stream for the first subscriber; later ones share it. */
   #ensureOpen() {
+    this.#wanted = true;
     if (this.#source === null && this.#reopenTimer === null) {
       this.#open();
     }
