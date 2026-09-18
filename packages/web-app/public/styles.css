@@ -198,14 +198,14 @@ a {
     padding: var(--space-1) 0;
   }
 
-  .node-bar:has(.node-link) {
+  .node-bar:has(.node-partner) {
     flex-basis: 100%;
     flex-wrap: wrap;
     padding-bottom: var(--space-2);
     overflow: visible;
   }
 
-  .node-bar:has(.node-link) > :first-child {
+  .node-bar:has(.node-partner) > :first-child {
     margin-left: 0;
   }
 }
@@ -246,7 +246,7 @@ a {
 }
 
 .node-badge,
-.node-link {
+.node-partner {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -256,6 +256,7 @@ a {
   padding: var(--space-1) var(--space-3);
   border: 2px solid var(--color-border);
   border-radius: 999px;
+  font: inherit;
   font-size: 0.8125rem;
   font-weight: 500;
   color: var(--color-text);
@@ -263,17 +264,124 @@ a {
   text-decoration: none;
 }
 
+/* A partner's badge is a button: it opens the popup with its transfers. */
+.node-partner {
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
 .node-badge-active {
   border-color: var(--color-accent);
   background: var(--color-accent-tint);
 }
 
-.node-link-seen {
+.node-partner-seen {
   border-color: var(--color-seen);
 }
 
-.node-link-unseen {
+.node-partner-unseen {
   border-color: var(--color-unseen);
+}
+
+/*
+ * The transfer icons of a partner: an arrow up for data arriving from it
+ * (upstream) and an arrow down for data going to it (downstream), an
+ * outline each with a fill on top. While a transfer runs, and for the
+ * second after it completed, the fill is clipped from the bottom and the
+ * clip rises in a loop, so the arrow fills up again and again; the loop
+ * starts at the phase `--transfer-phase` gives (negative, the elapsed
+ * part of the shared loop), which keeps an icon that was rebuilt in
+ * step with the one it replaced. A failed transfer flashes the icon red
+ * once. With reduced motion the fill simply shows, in the active colour,
+ * for the same time.
+ */
+.transfer-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  margin-left: var(--space-1);
+}
+
+.transfer-icon {
+  display: inline-flex;
+  width: 1rem;
+  height: 1rem;
+  color: var(--color-text-muted);
+}
+
+.transfer-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.transfer-icon-outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.transfer-icon-fill {
+  fill: currentColor;
+  clip-path: inset(100% 0 0 0);
+}
+
+.transfer-icon.is-receiving,
+.transfer-icon.is-sending,
+.transfer-icon.is-trailing {
+  color: var(--color-seen);
+}
+
+.transfer-icon.is-receiving .transfer-icon-fill,
+.transfer-icon.is-sending .transfer-icon-fill,
+.transfer-icon.is-trailing .transfer-icon-fill {
+  animation: transfer-fill 700ms linear infinite;
+  animation-delay: var(--transfer-phase, 0ms);
+}
+
+.transfer-icon.is-failed {
+  color: var(--color-unseen);
+  animation: transfer-flash 1000ms ease-out 1;
+}
+
+.transfer-icon.is-failed .transfer-icon-fill {
+  clip-path: none;
+}
+
+@keyframes transfer-fill {
+  from {
+    clip-path: inset(100% 0 0 0);
+  }
+
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes transfer-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transfer-icon.is-receiving .transfer-icon-fill,
+  .transfer-icon.is-sending .transfer-icon-fill,
+  .transfer-icon.is-trailing .transfer-icon-fill {
+    animation: none;
+    clip-path: none;
+  }
+
+  .transfer-icon.is-failed {
+    animation: none;
+  }
 }
 
 /*
@@ -711,6 +819,368 @@ a.card {
 .transfer-error {
   color: var(--color-error);
   overflow-wrap: anywhere;
+}
+
+/*
+ * The transfer popup of a partner node: a modal dialog that fills the
+ * screen on a phone and sits centred with a bounded height on a wide
+ * screen (see the wide-screen rules at the end), with the header (name,
+ * link, close button) staying put while the transfer list scrolls.
+ */
+.transfer-dialog {
+  display: none;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--color-text);
+  background: var(--color-background);
+}
+
+.transfer-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.transfer-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.transfer-dialog-header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.transfer-dialog-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.transfer-dialog-title {
+  margin: 0;
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.transfer-dialog-link {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.transfer-dialog-close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--tap-target);
+  min-height: var(--tap-target);
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 1.25rem;
+  color: var(--color-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.transfer-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-3) var(--space-4) var(--space-6);
+  overflow-y: auto;
+}
+
+.transfer-dialog-body .status {
+  margin: 0 0 var(--space-3);
+}
+
+.transfer-rows {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transfer-row {
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  font-size: 0.875rem;
+}
+
+.transfer-row-incoming {
+  border-left-color: var(--color-paid);
+}
+
+.transfer-row-outgoing {
+  border-left-color: var(--color-accent);
+}
+
+/*
+ * The row itself is the button that expands it: the direction icon, the
+ * tables, the short hash, the row count, the time, the duration and the
+ * status wrap as the width allows, and the chevron at the end turns
+ * when the payload is shown.
+ */
+.transfer-row-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  min-height: var(--tap-target);
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.transfer-row-toggle .transfer-icon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.transfer-row-tables {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.transfer-row-hash {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.transfer-row-count,
+.transfer-row-time,
+.transfer-row-duration {
+  color: var(--color-text-muted);
+}
+
+.transfer-row-count:empty,
+.transfer-row-duration:empty {
+  display: none;
+}
+
+.transfer-row-chevron {
+  flex: none;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-left: auto;
+  border-right: 2px solid var(--color-text-muted);
+  border-bottom: 2px solid var(--color-text-muted);
+  transform: rotate(45deg);
+  transition: transform 150ms ease-out;
+}
+
+.transfer-row-toggle[aria-expanded='true'] .transfer-row-chevron {
+  transform: rotate(-135deg);
+}
+
+.transfer-row-error {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-2);
+  color: var(--color-error);
+  overflow-wrap: anywhere;
+}
+
+.transfer-payload {
+  padding: 0 var(--space-3) var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.transfer-payload .status {
+  margin: var(--space-3) 0 0;
+}
+
+/*
+ * The payload of a change set: the change set in one line, every data
+ * row as a small section with its fields (next to the version it
+ * supersedes, the changed fields on a tinted background, the unchanged
+ * ones muted), every history row in one muted line. Below 768 px the
+ * two versions of a field stack, each labelled; from 768 px they sit
+ * side by side under a header row.
+ */
+.payload-change-set {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.payload-change-set-id {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.payload-hash {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.payload-item {
+  margin: var(--space-3) 0 0;
+}
+
+.payload-item-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: 0.9375rem;
+}
+
+.payload-note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.payload-history {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.payload-history-table {
+  font-weight: 600;
+}
+
+.field-list {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr);
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  margin: 0;
+}
+
+.field-list dt,
+.field-list dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.field-name {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.field-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.field-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+
+.field-compare-header {
+  display: none;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-radius: calc(var(--radius) / 2);
+}
+
+.field-changed {
+  background: var(--color-open-tint);
+}
+
+.field-changed .field-after {
+  font-weight: 600;
+}
+
+.field-unchanged {
+  color: var(--color-text-muted);
+}
+
+.payload-item-replaces {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.field-before::before,
+.field-after::before {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.field-before::before {
+  content: 'Before';
+}
+
+.field-after::before {
+  content: 'After';
+}
+
+.field-changed-region {
+  border-radius: 0.125rem;
+  background: var(--color-accent-tint);
+  box-shadow: 0 0 0 2px var(--color-accent-tint);
+}
+
+.field-show-all {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-target);
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: transparent;
+  cursor: pointer;
+}
+
+.node-card-name .transfer-icons {
+  vertical-align: middle;
+}
+
+.node-card-transfers {
+  margin-top: var(--space-3);
 }
 
 /*
@@ -1314,6 +1784,12 @@ button.chip {
     border-color: var(--color-accent);
   }
 
+  .node-partner:hover,
+  .transfer-dialog-close:hover,
+  .transfer-row-toggle:hover {
+    background: var(--color-accent-tint);
+  }
+
   a.card:hover {
     border-color: var(--color-accent);
   }
@@ -1381,5 +1857,48 @@ button.chip {
 
   .card {
     padding: var(--space-5);
+  }
+
+  .transfer-dialog {
+    width: min(44rem, calc(100vw - 2 * var(--space-8)));
+    height: auto;
+    max-height: min(85vh, 60rem);
+    margin: auto;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+
+  .transfer-dialog-header,
+  .transfer-dialog-body {
+    padding-right: var(--space-6);
+    padding-left: var(--space-6);
+  }
+
+  .field-compare-header,
+  .field-row {
+    display: grid;
+    grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: var(--space-3);
+  }
+
+  .field-compare-header {
+    padding: 0 var(--space-2);
+  }
+
+  .field-compare-heading {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .field-before::before,
+  .field-after::before {
+    display: none;
+  }
+
+  .field-same {
+    grid-column: 2 / -1;
   }
 }

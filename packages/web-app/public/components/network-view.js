@@ -3,9 +3,14 @@ import { element } from '../dom.js';
 import {
   browserProbeMarker,
   connectedClientsBadge,
+  nodeLabel,
+  openTransfersOf,
   topologyDot,
+  transferIcons,
 } from '../node-indicators.js';
 import { statusFeed } from '../status-feed.js';
+import { transferActivity } from '../transfer-activity.js';
+import { applyActivityTo } from '../transfer-icon.js';
 import {
   errorState,
   formatRelativeTime,
@@ -141,9 +146,9 @@ const nodeCard = (node, reachableFromBrowser, at) => {
       element('span', 'node-card-self', ' (this node)'),
     );
   } else {
-    const link = element('a', '', node.name ?? new URL(node.url).host);
+    const link = element('a', '', nodeLabel(node));
     link.href = node.url;
-    heading.append(link);
+    heading.append(link, transferIcons(node));
   }
 
   const signals = element('ul', 'node-signals');
@@ -191,6 +196,18 @@ const nodeCard = (node, reachableFromBrowser, at) => {
 
   const card = element('li', 'card node-card');
   card.append(heading, meta, signals, seen);
+  if (!node.self) {
+    const transfers = element(
+      'button',
+      'button button-secondary node-card-transfers',
+      'Transfers',
+    );
+    transfers.type = 'button';
+    transfers.dataset.transferPartner = node.url;
+    transfers.setAttribute('aria-label', `Transfers with ${nodeLabel(node)}`);
+    transfers.addEventListener('click', () => openTransfersOf(node, transfers));
+    card.append(transfers);
+  }
   return card;
 };
 
@@ -362,26 +379,35 @@ const peerCard = (peer, at) => {
 /**
  * The network view: what this node is (name, role, id, domain, hub, what
  * its hub transport is doing), every node of the environment with the
- * discovery flag, the server-side probe, this browser's own probe and the
- * connected clients of the hub, the change set synchronisation (counters
- * and the last transfers, each with the node it came from or went to),
- * and the peers discovery knows with their addresses and probe results.
- * Follows the shared status feed, which polls `/status` every five
- * seconds while the view is open.
+ * discovery flag, the server-side probe, this browser's own probe, the
+ * connected clients of the hub and, for a partner, the transfer icons
+ * of the header and a button for the same transfer popup, the change set
+ * synchronisation (counters and the last transfers, each with the node
+ * it came from or went to), and the peers discovery knows with their
+ * addresses and probe results. Follows the shared status feed, which the
+ * stream's events refresh and which polls `/status` every thirty seconds
+ * as the fallback while the view is open.
  */
 class NetworkView extends HTMLElement {
   /** @type {(() => void) | null} */
   #unsubscribe = null;
+  /** @type {(() => void) | null} */
+  #unsubscribeActivity = null;
 
   connectedCallback() {
     this.setAttribute('aria-busy', 'true');
     this.replaceChildren(viewTitle(), statusMessage('Loading the network…'));
     this.#unsubscribe = statusFeed.subscribe((update) => this.#render(update));
+    this.#unsubscribeActivity = transferActivity.subscribe(() =>
+      applyActivityTo(this),
+    );
   }
 
   disconnectedCallback() {
     this.#unsubscribe?.();
     this.#unsubscribe = null;
+    this.#unsubscribeActivity?.();
+    this.#unsubscribeActivity = null;
   }
 
   /**
@@ -426,6 +452,7 @@ class NetworkView extends HTMLElement {
       section('Synchronisation', synchronisation(status, at)),
       section('Discovered peers', peers),
     );
+    applyActivityTo(this);
   }
 }
 

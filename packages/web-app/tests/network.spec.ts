@@ -164,7 +164,7 @@ test.describe('with three nodes in the environment', () => {
     await mockThreeNodes(page);
   });
 
-  test('shows this node as the active badge and the others as links', async ({
+  test('shows this node as the active badge and the others as buttons that open their transfers', async ({
     page,
   }) => {
     await page.goto('/');
@@ -175,12 +175,12 @@ test.describe('with three nodes in the environment', () => {
     await expect(badge).toHaveAttribute('aria-current', 'true');
     await expect(badge).toContainText('Connected to node');
 
-    const links = bar.getByRole('link');
-    await expect(links).toHaveCount(2);
-    await expect(links.nth(0)).toHaveAttribute('href', node2Url);
-    await expect(links.nth(1)).toHaveAttribute('href', node3Url);
-    await expect(links.nth(0)).toContainText('node2');
-    await expect(links.nth(1)).toContainText('node3');
+    const partners = bar.getByRole('button');
+    await expect(partners).toHaveCount(2);
+    await expect(partners.nth(0)).toContainText('node2');
+    await expect(partners.nth(1)).toContainText('node3');
+    await expect(partners.nth(0)).toContainText('show transfers');
+    await expect(bar.getByRole('link')).toHaveCount(0);
   });
 
   test('outlines a node green when discovery sees it and red otherwise', async ({
@@ -188,11 +188,11 @@ test.describe('with three nodes in the environment', () => {
   }) => {
     await page.goto('/');
     const bar = nodeBar(page);
-    const seen = bar.getByRole('link', { name: /node2/ });
-    const unseen = bar.getByRole('link', { name: /node3/ });
+    const seen = bar.getByRole('button', { name: /node2/ });
+    const unseen = bar.getByRole('button', { name: /node3/ });
 
-    await expect(seen).toHaveClass(/node-link-seen/);
-    await expect(unseen).toHaveClass(/node-link-unseen/);
+    await expect(seen).toHaveClass(/node-partner-seen/);
+    await expect(unseen).toHaveClass(/node-partner-unseen/);
     await expect(seen).toContainText('in the discovery topology');
     await expect(unseen).toContainText('not in the discovery topology');
 
@@ -209,15 +209,15 @@ test.describe('with three nodes in the environment', () => {
     const bar = nodeBar(page);
 
     await expect(
-      bar.getByRole('link', { name: /node2/ }).locator('.browser-probe'),
+      bar.getByRole('button', { name: /node2/ }).locator('.browser-probe'),
     ).toHaveClass(/browser-probe-ok/);
     await expect(
-      bar.getByRole('link', { name: /node3/ }).locator('.browser-probe'),
+      bar.getByRole('button', { name: /node3/ }).locator('.browser-probe'),
     ).toHaveClass(/browser-probe-failed/);
-    await expect(bar.getByRole('link', { name: /node2/ })).toContainText(
+    await expect(bar.getByRole('button', { name: /node2/ })).toContainText(
       'reachable from your browser',
     );
-    await expect(bar.getByRole('link', { name: /node3/ })).toContainText(
+    await expect(bar.getByRole('button', { name: /node3/ })).toContainText(
       'not reachable from your browser',
     );
   });
@@ -229,15 +229,15 @@ test.describe('with three nodes in the environment', () => {
     const bar = nodeBar(page);
 
     const hubBadge = bar
-      .getByRole('link', { name: /node2/ })
+      .getByRole('button', { name: /node2/ })
       .locator('.node-clients');
     await expect(hubBadge).toHaveText(/2/);
     await expect(hubBadge).toHaveAttribute('title', '2 connected clients');
-    await expect(bar.getByRole('link', { name: /node2/ })).toContainText(
+    await expect(bar.getByRole('button', { name: /node2/ })).toContainText(
       '2 connected clients',
     );
     await expect(
-      bar.getByRole('link', { name: /node3/ }).locator('.node-clients'),
+      bar.getByRole('button', { name: /node3/ }).locator('.node-clients'),
     ).toHaveCount(0);
     await expect(bar.locator('.node-badge-active .node-clients')).toHaveCount(
       0,
@@ -249,13 +249,13 @@ test.describe('with three nodes in the environment', () => {
   }) => {
     await page.goto('/');
     const bar = nodeBar(page);
-    await expect(bar.getByRole('link')).toHaveCount(2);
+    await expect(bar.getByRole('button')).toHaveCount(2);
 
     await expectNoHorizontalScroll(page);
     const viewportWidth = viewportOf(page).width;
     const entries = [
       bar.locator('.node-badge-active'),
-      ...(await bar.getByRole('link').all()),
+      ...(await bar.getByRole('button').all()),
     ];
     for (const entry of entries) {
       const box = await boundingBoxOf(entry);
@@ -381,7 +381,7 @@ test.describe('with a single node', () => {
     await expect(bar.locator('.node-badge-active')).toContainText(
       'node-under-test',
     );
-    await expect(bar.getByRole('link')).toHaveCount(0);
+    await expect(bar.getByRole('button')).toHaveCount(0);
   });
 
   test('reports the node as standalone without peers on the network view', async ({
