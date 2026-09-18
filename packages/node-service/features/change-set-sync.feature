@@ -20,6 +20,14 @@ Feature: Change set synchronisation
     Then node1 and node3 list "bowser-the-guard-dog" as "Bowser the Retired Guard Dog" within five seconds
     And node1 and node3 show the renamed version as current, chained to the seed version
 
+  @in-process
+  Scenario: The transfers with a node and the rows an edit carried are served to the web app
+    Given three nodes of one domain connected through their hub
+    When "bowser-the-guard-dog" is renamed to "Bowser the Retired Guard Dog" on node2
+    Then node1 and node3 list that change set as their last transfer with node2 within five seconds
+    And node2 lists it as its last transfer with the hub
+    And node1 serves that change set with the animal's name before and after
+
   Scenario: A change set announced again is written once
     Given three nodes of one domain connected through their hub
     And Scrooge McDuck bought "donald-the-third" on the hub and every client holds that change set

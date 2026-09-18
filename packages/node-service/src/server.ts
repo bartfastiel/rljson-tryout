@@ -14,12 +14,14 @@ import type { RoleOrchestrator } from './network/roleOrchestrator.ts';
 import type { SyncAgent } from './network/syncAgent.ts';
 import { registerAnimalsRoutes } from './routes/animals.ts';
 import { registerBreedersRoutes } from './routes/breeders.ts';
+import { registerChangeSetsRoutes } from './routes/changeSets.ts';
 import { registerCustomersRoutes } from './routes/customers.ts';
 import { registerEventsRoute } from './routes/events.ts';
 import { registerInvoicesRoutes } from './routes/invoices.ts';
 import { registerSpeciesRoutes } from './routes/species.ts';
 import { registerStatsRoute } from './routes/stats.ts';
 import { registerStatusRoute } from './routes/status.ts';
+import { registerSyncRoutes } from './routes/sync.ts';
 import { registerTraitsRoutes } from './routes/traits.ts';
 import type { PetShopStore } from './store/petShopStore.ts';
 
@@ -53,7 +55,7 @@ export type ServerDependencies = Readonly<{
 /**
  * Builds a Fastify instance configured for this service, with the `/health`
  * and `/status` routes, the `/api` routes from roadmap section 2.5 reading
- * from the given store, the `/api/events` stream fed by the store, the
+ * from the given store and sync agent, the `/api/events` stream fed by the store, the
  * sync agent and the network components from the moment the server is
  * ready until it closes, and the web app served from the configured
  * directory at `/`. Does not start listening; the caller decides when and
@@ -106,6 +108,8 @@ export const buildServer = ({
   registerCustomersRoutes(server, store);
   registerAnimalsRoutes(server, store);
   registerInvoicesRoutes(server, store);
+  registerChangeSetsRoutes(server, store);
+  registerSyncRoutes(server, syncAgent);
 
   const eventHub = new EventHub(logger.child({ component: 'events' }), events);
   const liveEvents = new LiveEvents(

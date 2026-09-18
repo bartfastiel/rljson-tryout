@@ -1,15 +1,52 @@
 // @ts-check
+import { openTransferDialog } from './components/transfer-dialog.js';
 import { element } from './dom.js';
+import { transferIcon } from './transfer-icon.js';
 
 /**
- * The two small indicators the header's node bar and the network view
- * share for a node of the environment: whether discovery on this node
+ * The small indicators the header's node bar and the network view share
+ * for a node of the environment: whether discovery on this node
  * currently sees it (the primary signal, from UDP broadcast and TCP
- * probing on the server side) and whether this very browser could reach
- * it (the secondary signal, from the browser's own `GET /health` probe).
- * Both carry a visually hidden label so that the colour never stands
- * alone.
+ * probing on the server side), whether this very browser could reach it
+ * (the secondary signal, from the browser's own `GET /health` probe),
+ * the hub's client count, and the upstream and downstream transfer
+ * icons with the popup behind them. The colour indicators carry a
+ * visually hidden label so that the colour never stands alone.
  */
+
+/**
+ * @param {import('./status-feed.js').StatusNode} node
+ */
+export const nodeLabel = (node) => node.name ?? new URL(node.url).host;
+
+/**
+ * The upstream and downstream icons of a partner node, as the header's
+ * badges and the network view's cards show them; `applyActivityTo` of
+ * `transfer-icon.js` brings them to the current state.
+ *
+ * @param {import('./status-feed.js').StatusNode} node
+ */
+export const transferIcons = (node) => {
+  const icons = element('span', 'transfer-icons');
+  icons.append(
+    transferIcon('upstream', node.nodeId ?? '', nodeLabel(node)),
+    transferIcon('downstream', node.nodeId ?? '', nodeLabel(node)),
+  );
+  return icons;
+};
+
+/**
+ * Opens the transfer popup for a partner node from the given element,
+ * which gets the focus back when the popup closes.
+ *
+ * @param {import('./status-feed.js').StatusNode} node
+ * @param {HTMLElement} opener
+ */
+export const openTransfersOf = (node, opener) =>
+  openTransferDialog(
+    { nodeId: node.nodeId, name: nodeLabel(node), url: node.url },
+    opener,
+  );
 
 /**
  * A round dot, green when discovery sees the node and red otherwise.

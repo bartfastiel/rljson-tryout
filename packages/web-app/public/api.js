@@ -11,28 +11,12 @@ const genericMessage = (response, path) =>
   `The node answered ${response.status} ${response.statusText} for ${path}.`;
 
 /**
- * Fetches a JSON document from this node and fails with a readable message
- * when the node answers with an error status.
- *
- * @param {string} path
- * @returns {Promise<unknown>}
- */
-export const fetchJson = async (path) => {
-  const response = await fetch(path, {
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(genericMessage(response, path));
-  }
-  return response.json();
-};
-
-/**
  * The message of a refused request: the node's own `message` when it
  * answered `4xx` in Fastify's `{ statusCode, error, message }` shape, since
  * that message is written for the person who filled in the form ("No animal
- * with id ..."), the generic message otherwise (a `500` says nothing a
- * person can act on).
+ * with id ...") or asked for something the node has not got ("This node
+ * holds no change set with hash ..."), the generic message otherwise (a
+ * `500` says nothing a person can act on).
  *
  * @param {Response} response
  * @param {string} path
@@ -50,6 +34,24 @@ const refusalMessage = async (response, path) => {
   } catch {
     return generic;
   }
+};
+
+/**
+ * Fetches a JSON document from this node and fails with a readable message
+ * when the node answers with an error status: the node's own message for a
+ * refused request, the generic one otherwise.
+ *
+ * @param {string} path
+ * @returns {Promise<unknown>}
+ */
+export const fetchJson = async (path) => {
+  const response = await fetch(path, {
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(await refusalMessage(response, path));
+  }
+  return response.json();
 };
 
 /**

@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber';
 import { describe, expect } from 'vitest';
 
+import type { SyncTransfer } from '../../src/network/syncAgent.ts';
 import type { StatusReport } from '../../src/routes/status.ts';
+import type { ChangeSetPayload } from '../../src/store/petShopStore.ts';
 import {
   storageKinds,
   useTemporaryDataDirectories,
@@ -331,6 +333,116 @@ describe.each(storageKinds)('over the %s store', (storage) => {
                 status: 'completed',
               });
             }
+          },
+        );
+      },
+    );
+
+    Scenario(
+      'The transfers with a node and the rows an edit carried are served to the web app',
+      ({ Given, When, Then, And }) => {
+        let renamedHash = '';
+        let changeSetHash = '';
+
+        const transfersWith = async (
+          on: NodeName,
+          peer: NodeName,
+        ): Promise<SyncTransfer[]> =>
+          (
+            await world(on).server.inject({
+              method: 'GET',
+              url: `/api/sync/transfers?peer=${nodeIdOf(peer)}&limit=10`,
+            })
+          ).json<SyncTransfer[]>();
+
+        Given(
+          'three nodes of one domain connected through their hub',
+          async () => {
+            await connectedNodes();
+          },
+        );
+
+        When(
+          '"bowser-the-guard-dog" is renamed to "Bowser the Retired Guard Dog" on node2',
+          async () => {
+            const response = await world('node2').server.inject({
+              method: 'PUT',
+              url: '/api/animals/bowser-the-guard-dog',
+              payload: { name: 'Bowser the Retired Guard Dog' },
+            });
+            expect(response.statusCode).toBe(200);
+            renamedHash = response.json<{ hash: string }>().hash;
+          },
+        );
+
+        Then(
+          'node1 and node3 list that change set as their last transfer with node2 within five seconds',
+          async () => {
+            for (const name of ['node1', 'node3'] as const) {
+              await until(
+                async () =>
+                  (await transfersWith(name, 'node2'))[0]?.status ===
+                  'completed',
+              );
+              const [latest] = await transfersWith(name, 'node2');
+              expect(latest).toMatchObject({
+                direction: 'incoming',
+                peerNodeId: nodeIdOf('node2'),
+                changeSetId: expect.stringMatching(
+                  /^update-animal-bowser-the-guard-dog-/,
+                ) as string,
+                tables: expect.objectContaining({
+                  animals: 1,
+                  animalsInsertHistory: 1,
+                }) as Record<string, number>,
+                status: 'completed',
+              });
+              changeSetHash = latest!.changeSetHash;
+              expect(await transfersWith(name, 'node1')).toStrictEqual([]);
+            }
+          },
+        );
+
+        And('node2 lists it as its last transfer with the hub', async () => {
+          expect((await transfersWith('node2', 'node1'))[0]).toMatchObject({
+            direction: 'outgoing',
+            peerNodeId: nodeIdOf('node1'),
+            changeSetHash,
+            status: 'completed',
+          });
+          expect(await transfersWith('node2', 'node3')).toStrictEqual([]);
+        });
+
+        And(
+          "node1 serves that change set with the animal's name before and after",
+          async () => {
+            const response = await world('node1').server.inject({
+              method: 'GET',
+              url: `/api/change-sets/${changeSetHash}`,
+            });
+            expect(response.statusCode).toBe(200);
+            const payload = response.json<ChangeSetPayload>();
+            expect(payload.hash).toBe(changeSetHash);
+            const animal = payload.items.find(
+              (item) => item.table === 'animals',
+            );
+            expect(animal).toMatchObject({
+              ref: renamedHash,
+              row: { name: 'Bowser the Retired Guard Dog' },
+              previousRow: { name: 'Bowser the Guard Dog' },
+            });
+            const history = payload.items.find(
+              (item) => item.table === 'animalsInsertHistory',
+            );
+            expect(history).toMatchObject({
+              row: { animalsRef: renamedHash },
+              previousRow: null,
+            });
+            const missing = await world('node3').server.inject({
+              method: 'GET',
+              url: '/api/change-sets/NoSuchChangeSetHash00',
+            });
+            expect(missing.statusCode).toBe(404);
           },
         );
       },

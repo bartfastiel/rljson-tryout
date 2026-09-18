@@ -100,8 +100,8 @@ const listedAnimalName = async (
  * elects the hub, so node3 and node2 are whatever role the election gave
  * them, which is the point: a change set travels the same way from a
  * client and from the hub. The scenarios log the announce-to-visible
- * latency they measured. One compose run serves all three scenarios; the
- * third one restarts a client container.
+ * latency they measured. One compose run serves the three scenarios that
+ * are not tagged `@in-process`; the third one restarts a client container.
  */
 describeFeature(
   feature,
@@ -412,4 +412,5 @@ describeFeature(
       },
     );
   },
+  { excludeTags: ['in-process'] },
 );

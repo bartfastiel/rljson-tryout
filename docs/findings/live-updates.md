@@ -190,3 +190,85 @@ What the browser does:
   pulled, only that it was announced; the receiving side has to derive
   "arrived" itself. Reproduction: `connector.listen(cb)`, `cb` runs before
   `IoMulti.readRows` was ever called for the reference.
+
+## Slice D3b: transfer indicators
+
+### What we tried
+
+- Built the per-partner transfer icons of the header and the network
+  view (`transfer-activity.js`, `transfer-icon.js`), the popup with the
+  last ten transfers and the expandable payload (`transfer-dialog.js`,
+  `change-set-payload.js`), `GET /api/sync/transfers` over a ring of
+  fifty transfers in the `SyncAgent`, and `GET /api/change-sets/:hash`
+  over `PetShopStore.changeSetPayload`, which resolves the version a
+  data row supersedes through the local store.
+- Tested the payload resolution over both stores (an edited animal, a
+  seeded row, an invoice, a change set recorded without its rows), the
+  routes with `inject`, and the app with Playwright at both viewports
+  with a mocked stream, a mocked status and mocked endpoints.
+- Ran the three containers (host ports 8501 to 8503, node1 the hub)
+  with node1's web app open in Chromium at both viewports and a
+  `MutationObserver` on node2's upstream icon, renamed an animal on
+  node2, opened the popup, then issued an invoice on node2 while it was
+  open.
+
+### What happened
+
+- Resolving the version a received row supersedes needs no second read
+  of the network: a change set names the row's InsertHistory row, the
+  history row's `previous` names the `timeId` of the earlier history
+  row, which the sync agent pulled as a dependency when it was missing
+  (`docs/findings/change-set-sync.md`), and that row's `<table>Ref`
+  names the earlier data row. Two reads by `timeId` and by `_hash` on
+  the local store per data row; a seeded row and an invoice have
+  `previous: []` and read as first versions, a junction row of an edit
+  chains to the earlier pairing and shows the old `animalRef` next to
+  the new one.
+- On Compose the rename on node2 reached node1's icon 35 ms after the
+  `PUT` started (`is-receiving`), the pull took 5 to 9 ms (`is-trailing`
+  8 ms later), the status refresh the `sync` event triggers rebuilt the
+  bar about 300 ms later with the icon still trailing and the fill loop
+  in step, and the icon was idle after the trailing second. The invoice
+  issued on node2 while the popup was open appeared as its first row
+  (`invoices 1, invoiceItems 1`, 3 ms) before the `POST` had been
+  answered for 30 ms. The hub's own edit shows as one outgoing transfer
+  with `peerNodeId: null` on the hub, listed for every partner, and as
+  an incoming transfer from the hub's id on each client.
+- A `pending` start and the outcome of a pull that takes single-digit
+  milliseconds arrive in the same tick of the browser; the trailing
+  second is what makes a transfer visible at all, and a rebuilt icon
+  must not restart the loop, or every status refresh would show a jump.
+  The loop's phase is therefore global (`animation-delay` set to the
+  negative elapsed part of the 700 ms loop when an icon starts
+  animating), and `applyActivityTo` only touches an icon whose state
+  changed.
+- Playwright cannot stream a `route.fulfill`, so the tests answer
+  `/api/events` with one complete `text/event-stream` body per batch of
+  events and a `retry: 100`: the browser applies the events, sees the
+  response end, reconnects after 100 ms and waits on the next batch,
+  which the test releases when it is ready. The state classes of a
+  transfer can then be asserted one at a time, including the second of
+  `is-trailing`.
+- `showModal()` puts the focus on the first focusable element of the
+  dialog, the partner's link; the title takes it instead
+  (`tabindex="-1"`), so that the name is read first and Tab reaches the
+  link, the close button and the rows in order. The badge that opened
+  the popup may have been rebuilt by a status refresh by the time it
+  closes; the focus then goes to its successor for the same partner
+  (`data-transfer-partner`).
+
+### What it means for rljson users
+
+- The InsertHistory row is enough to show a before and after: keep the
+  history rows in the change set, pull the `previous` rows as
+  dependencies, and a diff of two versions is two local reads.
+- The row hashes and `timeId`s a change set carries are the only
+  identity a UI needs across nodes; a transfer list keyed by change set
+  hash and direction can merge a pull's start and outcome without
+  further state.
+
+### Candidates for upstream issues
+
+- None new; the missing "arrived" signal of `Connector.listen` (above)
+  is what makes the project's own `pending` and `completed` events
+  necessary for the indicators.

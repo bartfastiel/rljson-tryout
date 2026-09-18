@@ -46,6 +46,7 @@ import {
   personsInsertHistoryTableCfg,
   personsSeed,
   personsTableCfg,
+  referenceColumnOf,
   speciesInsertHistoryTableCfg,
   speciesSeed,
   speciesTableCfg,
@@ -590,6 +591,32 @@ export type PeerStores = (() => readonly Pick<Io, 'readRows'>[]) | null;
  * row as another node served it.
  */
 export type ReceivedRow = Readonly<{ table: string; row: SyncRow }>;
+
+/**
+ * One item of a change set as `GET /api/change-sets/:hash` serves it
+ * (slice D3b): the table and row hash the change set names, the row as
+ * this store holds it (`null` for a row the store lacks, which a change
+ * set recorded without its rows leaves behind), and, for a data row whose
+ * InsertHistory row in the same change set names a `previous` version,
+ * that version's row (`null` for a first version, a row whose predecessor
+ * this store does not hold, and every InsertHistory row).
+ */
+export type ChangeSetPayloadItem = Readonly<{
+  table: string;
+  ref: string;
+  row: SyncRow | null;
+  previousRow: SyncRow | null;
+}>;
+
+/**
+ * A change set with the content of its rows, what the web app shows when
+ * a transfer is expanded.
+ */
+export type ChangeSetPayload = Readonly<{
+  hash: string;
+  id: string;
+  items: readonly ChangeSetPayloadItem[];
+}>;
 
 const millisecondsOf = (historyTimeId: string): number =>
   Number(historyTimeId.split(':')[0]);
@@ -2321,15 +2348,150 @@ export class PetShopStore {
     if (!this.tableCfgsByKey.has(table) || !isSafeWhereValue(hash)) {
       return undefined;
     }
-    const matches = (row: SyncRow): boolean => row._hash === hash;
-    const local = await this.localIo.readRows({
+    return (
+      (await this.localRow(table, hash)) ??
+      this.readFromPeers(
+        table,
+        { _hash: hash },
+        (row) => row._hash === hash,
+        true,
+      )
+    );
+  }
+
+  /**
+   * The row with this hash in this table from the local store alone,
+   * `undefined` when the store lacks it. The caller checks the table and
+   * the hash.
+   */
+  private async localRow(
+    table: string,
+    hash: string,
+  ): Promise<SyncRow | undefined> {
+    const rljson = await this.localIo.readRows({
       table,
       where: { _hash: hash },
     });
-    return (
-      (local[table]._data as SyncRow[]).find(matches) ??
-      this.readFromPeers(table, { _hash: hash }, matches, true)
+    return (rljson[table]._data as SyncRow[]).find((row) => row._hash === hash);
+  }
+
+  /**
+   * The InsertHistory row with this `timeId` in the history table of
+   * `table` from the local store alone. The caller checks the table and
+   * the `timeId`.
+   */
+  private async localHistoryRow(
+    historyTableKey: string,
+    historyTimeId: string,
+  ): Promise<SyncRow | undefined> {
+    const rljson = await this.localIo.readRows({
+      table: historyTableKey,
+      where: { timeId: historyTimeId },
+    });
+    return (rljson[historyTableKey]._data as SyncRow[]).find(
+      (row) => row.timeId === historyTimeId,
     );
+  }
+
+  /**
+   * A change set this store holds with the content of every row it names
+   * and, per data row, the row of the version it supersedes: the
+   * InsertHistory row the same change set names for that row carries the
+   * `previous` `timeId`s (`docs/findings/entity-versions.md`), the history
+   * row of the first of them this store holds names the earlier row's
+   * hash, and that row is read from the local store. Nothing is asked of
+   * the network: a change set this node holds arrived whole
+   * (`writeReceivedRows`) and its predecessors were pulled with it, up to
+   * the dependency bound of the `SyncAgent`; a predecessor beyond that
+   * bound reads as `null`, like a first version. `undefined` for a change
+   * set this store does not hold, an unsafe hash included.
+   */
+  async changeSetPayload(hash: string): Promise<ChangeSetPayload | undefined> {
+    if (!(await this.holdsChangeSet(hash))) {
+      return undefined;
+    }
+    const changeSet = await this.localChangeSet(hash);
+    if (changeSet === undefined) {
+      return undefined;
+    }
+    const rows = await Promise.all(
+      changeSet.items.map((item) => this.localItemRow(item)),
+    );
+    const items = await Promise.all(
+      changeSet.items.map(
+        async (item, index): Promise<ChangeSetPayloadItem> => ({
+          table: item.table,
+          ref: item.ref,
+          row: rows[index] ?? null,
+          previousRow: await this.previousVersionOf(
+            item,
+            changeSet.items,
+            rows,
+          ),
+        }),
+      ),
+    );
+    return { hash: changeSet._hash, id: changeSet.id, items };
+  }
+
+  /**
+   * The row a change set item names from the local store alone,
+   * `undefined` when the store lacks it or the item names a table this
+   * store does not have.
+   */
+  private async localItemRow(
+    item: ChangeSetItem,
+  ): Promise<SyncRow | undefined> {
+    if (!this.tableCfgsByKey.has(item.table) || !isSafeWhereValue(item.ref)) {
+      return undefined;
+    }
+    return this.localRow(item.table, item.ref);
+  }
+
+  /**
+   * The row of the version a change set's data row supersedes, `null` when
+   * the item is a history row, when its history row in the change set
+   * names no predecessor, or when this store holds neither the
+   * predecessor's history row nor its data row.
+   */
+  private async previousVersionOf(
+    item: ChangeSetItem,
+    items: readonly ChangeSetItem[],
+    rows: readonly (SyncRow | undefined)[],
+  ): Promise<SyncRow | null> {
+    const historyTableKey = historyTableKeyOf(item.table);
+    if (!this.tableCfgsByKey.has(historyTableKey)) {
+      return null;
+    }
+    const referenceColumn = referenceColumnOf(item.table);
+    const historyRow = rows.find(
+      (row, index) =>
+        row !== undefined &&
+        items[index]!.table === historyTableKey &&
+        row[referenceColumn] === item.ref,
+    );
+    const previous = historyRow?.previous;
+    if (!Array.isArray(previous)) {
+      return null;
+    }
+    for (const previousTimeId of previous) {
+      if (typeof previousTimeId !== 'string' || !isSafeTimeId(previousTimeId)) {
+        continue;
+      }
+      const previousHistory = await this.localHistoryRow(
+        historyTableKey,
+        previousTimeId,
+      );
+      const previousHash = previousHistory?.[referenceColumn];
+      if (typeof previousHash !== 'string' || !isSafeWhereValue(previousHash)) {
+        continue;
+      }
+      const previousRow = await this.localRow(item.table, previousHash);
+      if (previousRow !== undefined) {
+        return previousRow;
+      }
+    }
+    return null;
   }
 
   /**
@@ -2352,17 +2514,12 @@ export class PetShopStore {
     ) {
       return undefined;
     }
-    const matches = (row: SyncRow): boolean => row.timeId === historyTimeId;
-    const local = await this.localIo.readRows({
-      table: historyTableKey,
-      where: { timeId: historyTimeId },
-    });
     return (
-      (local[historyTableKey]._data as SyncRow[]).find(matches) ??
+      (await this.localHistoryRow(historyTableKey, historyTimeId)) ??
       this.readFromPeers(
         historyTableKey,
         { timeId: historyTimeId },
-        matches,
+        (row) => row.timeId === historyTimeId,
         false,
       )
     );

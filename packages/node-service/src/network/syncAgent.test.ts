@@ -211,6 +211,79 @@ describe('SyncAgent announcing', () => {
   });
 });
 
+describe('SyncAgent remembering transfers', () => {
+  it('lists ten in the snapshot and keeps fifty behind them, newest first', () => {
+    const { store, channels, agent } = agentOverFakes();
+    channels.publish(new FakeChannel(null));
+
+    for (let index = 0; index < 60; index += 1) {
+      store.writeOwnChangeSet(`own-${index}`, []);
+    }
+
+    const listed = agent.snapshot().transfers;
+    expect(listed).toHaveLength(10);
+    expect(listed[0]!.changeSetId).toBe('own-59');
+    expect(listed[9]!.changeSetId).toBe('own-50');
+    const kept = agent.transfers({ limit: 100 });
+    expect(kept).toHaveLength(50);
+    expect(kept[0]!.changeSetId).toBe('own-59');
+    expect(kept[49]!.changeSetId).toBe('own-10');
+    expect(
+      agent.transfers({ limit: 3 }).map((it) => it.changeSetId),
+    ).toStrictEqual(['own-59', 'own-58', 'own-57']);
+    expect(agent.transfers({ limit: 0 })).toStrictEqual([]);
+  });
+
+  it('lists the transfers with one partner: the ones naming it and the announcements to every client', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    holdReferencedRows(store);
+    const asHub = new FakeChannel(null);
+    channels.publish(asHub);
+    const broadcast = store.writeOwnChangeSet('to-everyone', []);
+    const fromNode2 = remoteAnimalVersion(store, 'From node2', {
+      timeId: '1000:aaaa',
+    });
+    const fromNode3 = remoteAnimalVersion(store, 'From node3', {
+      timeId: '1001:bbbb',
+    });
+    asHub.deliver({
+      changeSetHash: fromNode2.changeSet._hash,
+      fromNodeId: 'node2',
+    });
+    await until(() => agent.snapshot().received === 1);
+    asHub.deliver({
+      changeSetHash: fromNode3.changeSet._hash,
+      fromNodeId: 'node3',
+    });
+    await until(() => agent.snapshot().received === 2);
+    const asClient = new FakeChannel('node3');
+    channels.publish(asClient);
+    const toHub = store.writeOwnChangeSet('to-the-hub', []);
+
+    const withNode2 = agent.transfers({ peerNodeId: 'node2', limit: 10 });
+    expect(
+      withNode2.map((it) => `${it.direction} ${it.changeSetHash}`),
+    ).toStrictEqual([
+      `incoming ${fromNode2.changeSet._hash}`,
+      `outgoing ${broadcast._hash}`,
+    ]);
+    const withNode3 = agent.transfers({ peerNodeId: 'node3', limit: 10 });
+    expect(
+      withNode3.map((it) => `${it.direction} ${it.changeSetHash}`),
+    ).toStrictEqual([
+      `outgoing ${toHub._hash}`,
+      `incoming ${fromNode3.changeSet._hash}`,
+      `outgoing ${broadcast._hash}`,
+    ]);
+    expect(agent.transfers({ peerNodeId: 'node3', limit: 1 })).toStrictEqual([
+      withNode3[0],
+    ]);
+    expect(agent.transfers({ peerNodeId: 'node4', limit: 10 })).toStrictEqual([
+      withNode2[1],
+    ]);
+  });
+});
+
 describe('SyncAgent catching up', () => {
   it('starts with no catch-up', () => {
     const { agent } = agentOverFakes();
