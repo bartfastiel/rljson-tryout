@@ -45,6 +45,16 @@ const tableKeys = Object.keys(tableCfgs) as (keyof GeneratedSeed)[];
 const medium = seedPlans.medium.generated!;
 const large = seedPlans.large.generated!;
 
+/**
+ * The generated part of each size, produced once for the whole file: the
+ * `large` seed renders fifty species images and hashes 25 000 rows, which
+ * is not worth repeating per test.
+ */
+const generatedSeeds = {
+  medium: generatedSeedFor('medium')!,
+  large: generatedSeedFor('large')!,
+};
+
 const tinyCounts: GeneratedCounts = {
   species: 2,
   traits: 3,
@@ -265,7 +275,7 @@ describe('generateSeed', () => {
     }
     const statuses = new Set(generated.invoices.map((row) => row.status));
     const mediumStatuses = new Set(
-      generatedSeedFor('medium')!.invoices.map((row) => row.status),
+      generatedSeeds.medium.invoices.map((row) => row.status),
     );
     expect([...statuses].every((status) => mediumStatuses.has(status))).toBe(
       true,
@@ -310,7 +320,7 @@ describe('generateSeed', () => {
     const handWrittenAnimals = new Set(
       handWrittenSeedBase.animals.map((row) => row._hash),
     );
-    const mediumSeed = generatedSeedFor('medium')!;
+    const mediumSeed = generatedSeeds.medium;
 
     expect(
       mediumSeed.animals.some((row) => handWrittenSpecies.has(row.speciesRef)),
@@ -354,7 +364,7 @@ describe('generatedSeedFor', () => {
     ['medium', medium],
     ['large', large],
   ] as const)('generates the counts of the %s plan', (size, counts) => {
-    const generated = generatedSeedFor(size)!;
+    const generated = generatedSeeds[size];
 
     expect(generated.species).toHaveLength(counts.species);
     expect(generated.traits).toHaveLength(counts.traits);
@@ -366,7 +376,7 @@ describe('generatedSeedFor', () => {
   });
 
   it('produces the golden hashes of the medium seed', () => {
-    const generated = generatedSeedFor('medium')!;
+    const generated = generatedSeeds.medium;
 
     expect(
       Object.fromEntries(
@@ -381,12 +391,12 @@ describe('generatedSeedFor', () => {
     ).toMatchInlineSnapshot(`
       {
         "animalTraits": {
-          "first": "Z-AFULrm4iA1SKDP_3GrIt",
-          "table": "wBVPU-VNkXO7plcDkskOtI",
+          "first": "RSM7IKasX1s9VCfFvsS-Zb",
+          "table": "2mF4lxC2KWoiNb61WSub2z",
         },
         "animals": {
-          "first": "83S46KyR_M4-SkZDVTrL13",
-          "table": "pDbTGk22gQj_UKmqq2dWDF",
+          "first": "XfEB_qN5tOctOASD7WjTEu",
+          "table": "9X44XdoR798gOsC0ShXrm7",
         },
         "breeders": {
           "first": "8GT-_byx4jUaaRFWbzyKaj",
@@ -397,8 +407,8 @@ describe('generatedSeedFor', () => {
           "table": "vSKTojRzrGzTDuDhga8Vn2",
         },
         "invoiceItems": {
-          "first": "OcK9_HeODUEW-Eh9Y4ddkp",
-          "table": "rHH_H8yEfwXSw9PIaqh2WL",
+          "first": "RoUkOFVZIxq4g2vrs-dycI",
+          "table": "UXtV0xz4f-TAKI3SAE0WjM",
         },
         "invoices": {
           "first": "ogYnCYmn_umRvXQjZkuC56",
@@ -409,8 +419,8 @@ describe('generatedSeedFor', () => {
           "table": "t5VQbXWlc_pvCAwzKW_ORF",
         },
         "species": {
-          "first": "FqOHsIwMHV50ScFls23kmc",
-          "table": "6d8GEyHRorVIVKsaizTTeO",
+          "first": "9fmPgNK8hYM5NcQ117ZpmD",
+          "table": "lwu0X_Uz7njv8Uwz8Hdya6",
         },
         "traits": {
           "first": "co85HYwjuuE6VYQuziFgoF",
@@ -421,7 +431,7 @@ describe('generatedSeedFor', () => {
   });
 
   it('produces the golden hashes of the large seed', () => {
-    const generated = generatedSeedFor('large')!;
+    const generated = generatedSeeds.large;
 
     expect(
       Object.fromEntries(
@@ -436,12 +446,12 @@ describe('generatedSeedFor', () => {
     ).toMatchInlineSnapshot(`
       {
         "animalTraits": {
-          "first": "IeOxIPCx0BQEcVXRalkWvn",
-          "table": "gwTanwgkWJ6LBnQreQbW0P",
+          "first": "vCFe7PWriCBRwSsh-YHJUe",
+          "table": "p93eVuJJDfOlZX7-3C1CFK",
         },
         "animals": {
-          "first": "yO2TC-CRHY8XGYSEY4iO0G",
-          "table": "Bu0BvZtiDRlI-Dz2kkq8vT",
+          "first": "TYYPAhopR979iHSe7wR1PG",
+          "table": "gq5gdqCTCq1Wx4gY9CqyOl",
         },
         "breeders": {
           "first": "Pyv2pgKvTTMYpvX0oWieNc",
@@ -452,8 +462,8 @@ describe('generatedSeedFor', () => {
           "table": "-SDY5pX0vtGtW-TseZSjZU",
         },
         "invoiceItems": {
-          "first": "-HAvA5CV-VQI6KBYQGs2-U",
-          "table": "qNvJDv-_T14vWmXLj26Cup",
+          "first": "ffgfWc_y_NABYG5vNLbDrw",
+          "table": "uTA8GexSuMY8A5tsaOeO3C",
         },
         "invoices": {
           "first": "wzwRmDyHoxc_ZgA_0y7AL8",
@@ -464,8 +474,8 @@ describe('generatedSeedFor', () => {
           "table": "PqZjThEacXnWN7vQzg0rre",
         },
         "species": {
-          "first": "FqOHsIwMHV50ScFls23kmc",
-          "table": "umNF5MmXqcvyM07cYq84C5",
+          "first": "9fmPgNK8hYM5NcQ117ZpmD",
+          "table": "c-qKZTokqSyXIe8DbBpq56",
         },
         "traits": {
           "first": "co85HYwjuuE6VYQuziFgoF",
@@ -476,15 +486,13 @@ describe('generatedSeedFor', () => {
   });
 
   it('resolves every reference of the medium seed against the hand-written seed and itself', async () => {
-    const errors = await validationErrors(
-      wholeDocument(generatedSeedFor('medium')!),
-    );
+    const errors = await validationErrors(wholeDocument(generatedSeeds.medium));
 
     expect(errors).toStrictEqual({});
   });
 
   it('is rejected by the validator when a generated reference is broken', async () => {
-    const generated = generatedSeedFor('medium')!;
+    const generated = generatedSeeds.medium;
     const [firstItem, ...otherItems] = generated.invoiceItems;
     const broken: GeneratedSeed = {
       ...generated,
@@ -499,11 +507,17 @@ describe('generatedSeedFor', () => {
     expect(errors).toMatchObject({ base: { hasErrors: true } });
   });
 
-  it('resolves every reference of the large seed', async () => {
-    const errors = await validationErrors(
-      wholeDocument(generatedSeedFor('large')!),
-    );
+  // The validator walks 25 000 rows and every reference between them: about
+  // a second on a development machine, two to five on a shared CI runner.
+  it(
+    'resolves every reference of the large seed',
+    { timeout: 30_000 },
+    async () => {
+      const errors = await validationErrors(
+        wholeDocument(generatedSeeds.large),
+      );
 
-    expect(errors).toStrictEqual({});
-  });
+      expect(errors).toStrictEqual({});
+    },
+  );
 });

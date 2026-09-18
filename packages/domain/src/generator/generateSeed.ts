@@ -5,7 +5,7 @@ import { animalsSeed } from '../seed/animals.ts';
 import { breedersSeed } from '../seed/breeders.ts';
 import { customersSeed } from '../seed/customers.ts';
 import { personsSeed } from '../seed/persons.ts';
-import { speciesSeed } from '../seed/species.ts';
+import { speciesRowOf, speciesSeed } from '../seed/species.ts';
 import { traitsSeed } from '../seed/traits.ts';
 import {
   animalTraitId,
@@ -146,7 +146,7 @@ const generateSpecies = (
   random: RandomSource,
 ): HashedSpeciesRow[] =>
   takeFromPool(speciesPool, count, 'species').map((template, index) =>
-    hashed({
+    speciesRowOf({
       id: generatedId(template.name, index + 1),
       name: template.name,
       latinName: template.latinName,

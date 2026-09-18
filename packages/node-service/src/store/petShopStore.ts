@@ -1,3 +1,4 @@
+import { BsMem, type Bs } from '@rljson/bs';
 import { Db } from '@rljson/db';
 import type { Io } from '@rljson/io';
 import type { FastifyBaseLogger } from 'fastify';
@@ -43,6 +44,8 @@ import {
   seedChangeSetId,
   seedInvoices,
   seedPlans,
+  speciesImage,
+  speciesImageMimeType,
   personsInsertHistoryTableCfg,
   personsSeed,
   personsTableCfg,
@@ -214,10 +217,12 @@ export type AnimalBreeder = {
  * One animal as `PetShopStore.listAnimals` returns it: the fields a caller
  * needs to show a card, with the referenced species and breeder already
  * resolved so the caller never has to look `speciesRef` or `breederRef` up
- * itself. `speciesId`, `speciesName`, `breederId` and `breederFarmName` are
- * `null` for the store-integrity case of an animal whose reference does not
- * resolve to a row in the store, rather than the method failing the whole
- * list for one broken row. Traits are used to filter this list
+ * itself; `speciesImageUrl` is the path the image of that species version
+ * is served at (`speciesImagePath`). `speciesId`, `speciesName`,
+ * `speciesImageUrl`, `breederId` and `breederFarmName` are `null` for the
+ * store-integrity case of an animal whose reference does not resolve to a
+ * row in the store, rather than the method failing the whole list for one
+ * broken row. Traits are used to filter this list
  * (`AnimalFilter.traitId`) but never appear in it themselves, so the list
  * stays as light as `backgroundStory` already keeps it; only `AnimalDetail`
  * carries them, and only `AnimalDetail` carries the full breeder (person
@@ -229,6 +234,7 @@ export type AnimalWithSpecies = {
   name: string;
   speciesId: string | null;
   speciesName: string | null;
+  speciesImageUrl: string | null;
   breederId: string | null;
   breederFarmName: string | null;
   bornOn: string;
@@ -928,15 +934,39 @@ const resolveAnimalBreeder = (
 };
 
 /**
- * What `PetShopStore` can be given at construction: `traitRelationMode`
- * picks the implementation of the animal-trait relation
- * (`docs/findings/n-to-m.md`, default `multi-reference`); `today` returns
- * the ISO date an issued invoice is dated with, replaceable in tests so
- * that an invoice number and date can be asserted exactly; `logger`
- * receives the warning when a read through the network fails (a silent
- * default for tests that build a store without one).
+ * The path `GET /api/species/:hash/image` serves the image of one species
+ * version at (roadmap section 2.5), as the species list and the animal
+ * payloads link to it. Content addressed twice over: the species hash
+ * covers the row's `imageBlobId`, and the blob id covers the PNG bytes, so
+ * the same path always serves the same bytes and a client may cache them
+ * for good. A hash is URL-safe base64, so nothing needs escaping.
+ */
+export const speciesImagePath = (speciesHash: string): string =>
+  `/api/species/${speciesHash}/image`;
+
+/**
+ * The image of one species version as `PetShopStore.speciesImage` returns
+ * it: the bytes and the media type the species row names.
+ */
+export type SpeciesImage = Readonly<{
+  content: Buffer;
+  mimeType: string;
+}>;
+
+/**
+ * What `PetShopStore` can be given at construction: `blobs` is the blob
+ * store the species images live in, the one `main.ts` also hands to the
+ * hub transport so that a peer reads the same blobs (a fresh in-memory
+ * one when absent, for tests); `traitRelationMode` picks the
+ * implementation of the animal-trait relation (`docs/findings/n-to-m.md`,
+ * default `multi-reference`); `today` returns the ISO date an issued
+ * invoice is dated with, replaceable in tests so that an invoice number
+ * and date can be asserted exactly; `logger` receives the warning when a
+ * read through the network fails (a silent default for tests that build a
+ * store without one).
  */
 export type PetShopStoreOptions = Readonly<{
+  blobs?: Bs;
   traitRelationMode?: TraitRelationMode;
   today?: () => string;
   logger?: Pick<FastifyBaseLogger, 'warn'>;
@@ -970,6 +1000,12 @@ export class PetShopStore {
    * the clients, as client it is what the `Client` exposes to the hub.
    */
   readonly localIo: Io;
+  /**
+   * The blob store the species images are written to at seed time and
+   * read from by `speciesImage`: `BsMem` on every node until slice C2
+   * puts the blobs of a persistent node on disk.
+   */
+  readonly blobs: Bs;
   private readonly io: IoSwitch;
   private readonly db: Db;
   private readonly traitRelationMode: TraitRelationMode;
@@ -1000,6 +1036,7 @@ export class PetShopStore {
 
   constructor(io: Io, options: PetShopStoreOptions = {}) {
     this.localIo = io;
+    this.blobs = options.blobs ?? new BsMem();
     this.io = new IoSwitch(io);
     this.db = new Db(this.io);
     this.traitRelationMode = options.traitRelationMode ?? 'multi-reference';
@@ -1101,7 +1138,8 @@ export class PetShopStore {
    * `writeSeedPart`: species, traits, persons, breeders, customers, then
    * animals with their `animalTraits` junction rows and finally the
    * invoices with their items, each table after the tables its rows
-   * reference by hash, one change set per entity.
+   * reference by hash, one change set per entity. The image of every
+   * seeded species goes into the blob store on the way (`storeSpeciesImage`).
    *
    * The seed is deterministic down to its InsertHistory rows and change
    * sets: every history row gets its `timeId` from one `SeedClock`
@@ -1180,6 +1218,9 @@ export class PetShopStore {
     };
 
     await single(speciesTableCfg, part.species);
+    for (const species of part.species) {
+      await this.storeSpeciesImage(species.id);
+    }
     await single(traitsTableCfg, part.traits);
     await single(personsTableCfg, part.persons);
     await single(breedersTableCfg, part.breeders);
@@ -1431,6 +1472,61 @@ export class PetShopStore {
   }
 
   /**
+   * Renders the image of a species from its id and stores it in the blob
+   * store, which names it by its content: storing the same image twice
+   * keeps one blob under one id (`docs/findings/blobs.md`). Returns the
+   * bytes and the id the store gave them.
+   */
+  private async storeSpeciesImage(
+    speciesId: string,
+  ): Promise<{ content: Buffer; blobId: string }> {
+    const content = Buffer.from(speciesImage(speciesId));
+    const { blobId } = await this.blobs.setBlob(content);
+    return { content, blobId };
+  }
+
+  /**
+   * The image of one species version, by the version's hash, as
+   * `GET /api/species/:hash/image` serves it; `undefined` when no species
+   * row of the local store has this hash. The bytes come from the blob
+   * store under the row's `imageBlobId`. A row whose blob the store lacks
+   * (a `sqlite` node restarted with its rows on disk but its blobs in a
+   * fresh `BsMem`, until slice C2 keeps them on disk too) gets its image
+   * rendered again from the species id and stored, which yields the same
+   * bytes under the same id because the image is a pure function of the
+   * id; a row that names another id than the renderer produces today (a
+   * species written by a node with another image algorithm) is served the
+   * freshly rendered image all the same, with a warning.
+   */
+  async speciesImage(hash: string): Promise<SpeciesImage | undefined> {
+    if (!isSafeWhereValue(hash)) {
+      return undefined;
+    }
+    const species = (await this.localRow(speciesTableCfg.key, hash)) as
+      HashedSpeciesRow | undefined;
+    if (species === undefined) {
+      return undefined;
+    }
+    if (await this.blobs.blobExists(species.imageBlobId)) {
+      const { content } = await this.blobs.getBlob(species.imageBlobId);
+      return { content, mimeType: species.imageMimeType };
+    }
+    const rendered = await this.storeSpeciesImage(species.id);
+    if (rendered.blobId !== species.imageBlobId) {
+      this.logger.warn(
+        {
+          speciesId: species.id,
+          speciesHash: hash,
+          imageBlobId: species.imageBlobId,
+          renderedBlobId: rendered.blobId,
+        },
+        'species row names another image blob than the renderer produces, serving the rendered one',
+      );
+    }
+    return { content: rendered.content, mimeType: speciesImageMimeType };
+  }
+
+  /**
    * Every current trait version in the store, ordered by `id`, in the
    * shape `GET /api/traits` serves (roadmap section 2.5).
    */
@@ -1567,6 +1663,8 @@ export class PetShopStore {
           name: animal.name,
           speciesId: species?.id ?? null,
           speciesName: species?.name ?? null,
+          speciesImageUrl:
+            species === undefined ? null : speciesImagePath(species._hash),
           breederId: breeder?.id ?? null,
           breederFarmName: breeder?.farmName ?? null,
           bornOn: animal.bornOn,
@@ -1618,6 +1716,8 @@ export class PetShopStore {
       name: animal.name,
       speciesId: species?.id ?? null,
       speciesName: species?.name ?? null,
+      speciesImageUrl:
+        species === undefined ? null : speciesImagePath(species._hash),
       breederId: breeder?.id ?? null,
       breederFarmName: breeder?.farmName ?? null,
       bornOn: animal.bornOn,

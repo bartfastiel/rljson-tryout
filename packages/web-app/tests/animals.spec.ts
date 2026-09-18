@@ -7,6 +7,7 @@ import {
   boundingBoxOf,
   breederFilterChips,
   cardListItems,
+  expectImageLoaded,
   listedCount,
   loadMoreButton,
   speciesFilterChips,
@@ -26,12 +27,18 @@ const animalListRequests = /\/api\/animals\?/;
  * reaches the real node.
  */
 const mockAnimalPages = async (page: Page, total = 120): Promise<void> => {
+  const species = (await (await page.request.get('/api/species')).json()) as {
+    id: string;
+    imageUrl: string;
+  }[];
+  const duck = species.find((entry) => entry.id === 'duck');
   const animals = Array.from({ length: total }, (_, index) => ({
     id: `fake-${index + 1}`,
     hash: `hash-${index + 1}`,
     name: `Fake animal ${index + 1}`,
     speciesId: 'duck',
     speciesName: 'Duck',
+    speciesImageUrl: duck?.imageUrl ?? null,
     breederId: 'grandma-ducks-farm',
     breederFarmName: "Grandma Duck's Farm",
     bornOn: '2020-01-01',
@@ -70,6 +77,29 @@ test('lists the first page of animals with species name, birth date and price', 
     await expect(card.locator('.animal-born-on')).toContainText('Born ');
     await expect(card.locator('.animal-price')).toContainText('€');
   }
+});
+
+test('shows the species badge of every animal as a small round image', async ({
+  page,
+}) => {
+  const counts = await animalCounts(page);
+  await page.goto('/#/animals');
+
+  const thumbnails = cardListItems(page).locator('img.animal-thumbnail');
+  await expect(thumbnails).toHaveCount(counts.firstPage);
+  for (const thumbnail of await thumbnails.all()) {
+    await expect(thumbnail).toHaveAttribute(
+      'src',
+      /^\/api\/species\/[A-Za-z0-9_-]{22}\/image$/,
+    );
+  }
+  const first = thumbnails.first();
+  await expectImageLoaded(first);
+  const box = await first.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBe(48);
+  expect(box!.height).toBe(48);
+  await expect(first).toHaveCSS('border-radius', '50%');
 });
 
 test('shows the species filter with an entry per species of the node', async ({

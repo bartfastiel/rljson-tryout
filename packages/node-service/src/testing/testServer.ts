@@ -1,7 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { BsMem } from '@rljson/bs';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import pino from 'pino';
 
@@ -51,9 +50,10 @@ export const silentLogger = (): FastifyBaseLogger => pino({ level: 'silent' });
 
 /**
  * A hub transport over the given store with a silent logger, wired the
- * way `main.ts` wires it (the store's `Io` lent to `@rljson/server`, blobs
- * in memory). Not started: it binds and connects only when a test drives
- * it. Port `0` in the test configuration keeps a hub on an ephemeral port.
+ * way `main.ts` wires it (the store's `Io` lent to `@rljson/server`, the
+ * store's blob store served to peers). Not started: it binds and connects
+ * only when a test drives it. Port `0` in the test configuration keeps a
+ * hub on an ephemeral port.
  */
 export const buildTestTransport = (
   store: PetShopStore,
@@ -63,7 +63,7 @@ export const buildTestTransport = (
     { ...testConfiguration, ...overrides },
     silentLogger(),
     store,
-    new BsMem(),
+    store.blobs,
   );
 
 /**

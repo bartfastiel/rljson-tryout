@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { cardListItems, listedCount } from './support.ts';
+import { cardListItems, expectImageLoaded, listedCount } from './support.ts';
 
 test('lists every species of the node as a card', async ({ page }) => {
   await page.goto('/#/species');
@@ -14,6 +14,51 @@ test('lists every species of the node as a card', async ({ page }) => {
     await expect(card.locator('.species-latin-name')).not.toBeEmpty();
     await expect(card.locator('.species-description')).not.toBeEmpty();
   }
+});
+
+test('shows the image of every species, named after the species and loaded with real pixels', async ({
+  page,
+}) => {
+  const listed = (await (await page.request.get('/api/species')).json()) as {
+    name: string;
+    imageUrl: string;
+  }[];
+  await page.goto('/#/species');
+
+  const images = page.getByRole('main').locator('img.species-image');
+  await expect(images).toHaveCount(listed.length);
+  for (const species of listed) {
+    const image = page.getByRole('img', { name: species.name, exact: true });
+    await expect(image).toHaveAttribute('src', species.imageUrl);
+    await expectImageLoaded(image);
+    const box = await image.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(150);
+    expect(Math.abs(box!.width - box!.height)).toBeLessThan(1);
+  }
+});
+
+test('serves a species image as PNG and answers 404 for an unknown hash', async ({
+  page,
+}) => {
+  const [species] = (await (await page.request.get('/api/species')).json()) as {
+    imageUrl: string;
+  }[];
+
+  const image = await page.request.get(species.imageUrl);
+  expect(image.status()).toBe(200);
+  expect(image.headers()['content-type']).toBe('image/png');
+  expect(image.headers()['cache-control']).toBe(
+    'public, max-age=31536000, immutable',
+  );
+  expect([...(await image.body()).subarray(0, 4)]).toStrictEqual([
+    0x89, 0x50, 0x4e, 0x47,
+  ]);
+
+  const unknown = await page.request.get(
+    '/api/species/NoSuchSpeciesVersion00/image',
+  );
+  expect(unknown.status()).toBe(404);
 });
 
 test('shows the full description of a species', async ({ page }) => {

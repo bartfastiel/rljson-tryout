@@ -165,3 +165,20 @@ export const averageCharactersPerLine = (locator: Locator): Promise<number> =>
     const lineCount = range.getClientRects().length;
     return lineCount === 0 ? 0 : text.length / lineCount;
   });
+
+/**
+ * Waits until an image has finished loading with real pixels behind it: a
+ * broken or still pending image reports a `naturalWidth` of zero.
+ */
+export const expectImageLoaded = async (image: Locator): Promise<void> => {
+  await expect(image).toBeVisible();
+  await expect
+    .poll(() =>
+      image.evaluate((element) =>
+        element instanceof HTMLImageElement && element.complete
+          ? element.naturalWidth
+          : 0,
+      ),
+    )
+    .toBeGreaterThan(0);
+};

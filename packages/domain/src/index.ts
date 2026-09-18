@@ -30,6 +30,12 @@ export {
 } from './generator/seedSizes.ts';
 export { storyLength } from './generator/stories.ts';
 export { hashMatches, hashed } from './hashing.ts';
+export { pngSignature } from './images/png.ts';
+export {
+  speciesImage,
+  speciesImageBlobId,
+  speciesImageMimeType,
+} from './images/speciesImage.ts';
 export {
   invoiceRows,
   type InvoiceDraft,
@@ -121,6 +127,7 @@ export {
   speciesInsertHistoryTableCfg,
   speciesTableCfg,
   type HashedSpeciesRow,
+  type SpeciesRow,
 } from './tables/species.ts';
 export {
   traitsInsertHistoryTableCfg,

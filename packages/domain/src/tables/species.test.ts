@@ -27,6 +27,8 @@ describe('speciesTableCfg', () => {
       ['name', 'string'],
       ['latinName', 'string'],
       ['description', 'string'],
+      ['imageBlobId', 'string'],
+      ['imageMimeType', 'string'],
     ]);
   });
 });

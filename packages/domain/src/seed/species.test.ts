@@ -4,6 +4,10 @@ import { BaseValidator, Validate, type Rljson } from '@rljson/rljson';
 import { describe, expect, it } from 'vitest';
 
 import { hashed } from '../hashing.ts';
+import {
+  speciesImageBlobId,
+  speciesImageMimeType,
+} from '../images/speciesImage.ts';
 import { speciesTableCfg } from '../tables/species.ts';
 import { speciesSeed } from './species.ts';
 
@@ -44,10 +48,17 @@ describe('speciesSeed', () => {
 
   it('has stable hashes so every node computes the same row identity', () => {
     expect(speciesSeed.map((row) => [row.id, row._hash])).toStrictEqual([
-      ['duck', 'xI6DZUDjFIEyY36SPtyEbQ'],
-      ['dog', 'I-juPXLwPS1okXNzZTK8M9'],
-      ['chicken', 'hHX5w6eWLTesDMdieZGBfm'],
+      ['duck', '9eFmOk6oyayAqkBGGm0iCi'],
+      ['dog', 'PmKg9tDJKn69CRX79dJmhS'],
+      ['chicken', 'p_EhH-nIu-FByYeqMinCeS'],
     ]);
+  });
+
+  it('names the procedural PNG of each species as its image', () => {
+    for (const row of speciesSeed) {
+      expect(row.imageBlobId).toBe(speciesImageBlobId(row.id));
+      expect(row.imageMimeType).toBe(speciesImageMimeType);
+    }
   });
 
   it('validates as a species table with the rljson validator', async () => {

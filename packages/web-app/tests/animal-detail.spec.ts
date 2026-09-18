@@ -4,6 +4,7 @@ import {
   animalCounts,
   animalDetailTraitChips,
   cardListItems,
+  expectImageLoaded,
   speciesFilterChips,
   traitFilterChips,
 } from './support.ts';
@@ -33,6 +34,19 @@ test('renders the name, species, facts and full story of the long seeded animal'
     .locator('.animal-facts')
     .getByRole('link', { name: 'Duck', exact: true });
   await expect(speciesLink).toBeVisible();
+
+  const animal = (await (
+    await page.request.get('/api/animals/sir-quackington')
+  ).json()) as { speciesImageUrl: string };
+  const speciesImage = page.locator('img.animal-species-image');
+  await expect(speciesImage).toHaveAttribute('src', animal.speciesImageUrl);
+  await expectImageLoaded(speciesImage);
+  const imageBox = await speciesImage.boundingBox();
+  const factsBox = await page.locator('.animal-facts').boundingBox();
+  expect(imageBox).not.toBeNull();
+  expect(factsBox).not.toBeNull();
+  expect(imageBox!.width).toBeGreaterThanOrEqual(96);
+  expect(factsBox!.x).toBeGreaterThanOrEqual(imageBox!.x + imageBox!.width);
 
   const story = page.locator('.animal-story');
   await expect(story).toBeVisible();
