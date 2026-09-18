@@ -80,7 +80,12 @@ const network = async () => {
   return { hub, clients, all: [hub, ...clients] };
 };
 
-describe('SyncAgent over the hub transport', () => {
+/**
+ * Three seeded stores over real sockets take about 1.5 s on a development
+ * machine and have run into Vitest's default of 5 s on a busy CI runner,
+ * so each scenario gets three times the time.
+ */
+describe('SyncAgent over the hub transport', { timeout: 15_000 }, () => {
   it('announces the seed on connect and every other node skips it by hash', async () => {
     const { hub, clients, all } = await network();
 
