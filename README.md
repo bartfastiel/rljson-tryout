@@ -36,6 +36,7 @@ Slice D1 (discovery and roles) was pulled forward: every node discovers the othe
 Slice D2 (hub transport) makes the nodes talk: the hub serves its store over socket.io on the hub port, every client connects to it, and a row written on one node is readable by its hash on every other node through the read cascade of `@rljson/server`.
 Slice D3 (change set synchronisation) makes them agree: every change a node writes is announced as one change set, every other node pulls it within tens of milliseconds, an animal renamed on one node shows the new name on all of them, and the seed is deterministic, so a node seeded `medium` fills the `small` ones with its generated rows.
 Implementation follows [docs/roadmap.md](docs/roadmap.md) slice by slice; the reasoning behind the architecture is in [docs/plan.md](docs/plan.md).
+What we learned about rljson is collected in [docs/findings/](docs/findings/), and the lessons learned and reproduced bug reports for rljson's authors in [docs/rljson-feedback/](docs/rljson-feedback/README.md).
 Every pull request deploys its own preview with a staging certificate.
 The manual `Up` and `Down` workflows switch the whole system off and on.
 

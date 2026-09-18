@@ -1168,3 +1168,13 @@ Every `docs/findings/<topic>.md` has four sections: what we tried (commands,
 sizes, versions), what happened (numbers, logs, screenshots as text), what it
 means for rljson users, and candidates for upstream issues with a one-line
 reproduction each.
+
+The candidates are consolidated for rljson's authors in
+`docs/rljson-feedback/`: `README.md` holds the lessons learned (what worked,
+what we built ourselves, friction, security and performance observations,
+prioritised suggestions) and `issues/NN-<slug>.md` one issue-ready report per
+bug or improvement, numbered by severity, each with a reproduction script
+that was run against the pinned versions and its real output. A new
+candidate in a findings file gets its issue file there in the same pull
+request; a candidate that could not be reproduced stays in the findings
+file marked "observed, not isolated".
