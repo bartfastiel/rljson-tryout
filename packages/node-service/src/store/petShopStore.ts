@@ -566,11 +566,17 @@ export type SyncRow = { _hash: string } & Record<string, unknown>;
 
 /**
  * Called with every change set this store writes on its own account (an
- * invoice issued, an animal edited, the seed), in write order. A change
- * set received from another node is written without this call: it was
- * announced by the node that wrote it.
+ * invoice issued, an animal edited, the seed), in write order, together
+ * with the ids of the entities it wrote: the rows of the domain tables
+ * the change set names (an invoice and its items, an animal and its
+ * trait pairings), not their history rows. A change set received from
+ * another node is written without this call: it was announced by the
+ * node that wrote it.
  */
-export type ChangeSetListener = (changeSet: HashedChangeSetRow) => void;
+export type ChangeSetListener = (
+  changeSet: HashedChangeSetRow,
+  entityIds: readonly string[],
+) => void;
 
 /**
  * What `PetShopStore.seedIfEmpty` reports: the size it was asked for and
@@ -1129,7 +1135,7 @@ export class PetShopStore {
     await this.recordChangeSet(hashed({ id: changeSetId, items }), {
       timeId: clock.next(),
       origin: seedOrigin,
-      announce: true,
+      announce: rows.map(([, row]) => row.id),
     });
   }
 
@@ -1701,6 +1707,7 @@ export class PetShopStore {
       current.timeId,
     );
     const changeSetItems = [...written.changeSetItems];
+    const entityIds = [id];
     const animalTraits =
       await this.readVersioned<HashedAnimalTraitRow>(animalTraitsTableCfg);
     for (const trait of traits) {
@@ -1722,10 +1729,12 @@ export class PetShopStore {
         currentPairing?.timeId,
       );
       changeSetItems.push(...writtenPairing.changeSetItems);
+      entityIds.push(pairingId);
     }
     await this.writeChangeSet(
       updateAnimalChangeSetId(id, written.timeId),
       changeSetItems,
+      entityIds,
     );
 
     return PetShopStore.animalDetail(animal, await this.readAnimalTables());
@@ -1998,6 +2007,7 @@ export class PetShopStore {
     const changeSet = await this.writeChangeSet(
       issueInvoiceChangeSetId(number),
       changeSetItems,
+      [invoice.id, ...items.map((item) => item.id)],
     );
 
     return invoiceDetail(invoice, {
@@ -2049,17 +2059,19 @@ export class PetShopStore {
 
   /**
    * Writes one change set an API path produced (an invoice issued, an
-   * animal edited) with a history row stamped now, and announces it to
-   * the listeners of `onChangeSetWritten`.
+   * animal edited) with a history row stamped now, and announces it with
+   * the ids of the entities it wrote to the listeners of
+   * `onChangeSetWritten`.
    */
   private writeChangeSet(
     id: string,
     items: ChangeSetItem[],
+    entityIds: readonly string[],
   ): Promise<HashedChangeSetRow> {
     return this.recordChangeSet(hashed({ id, items }), {
       timeId: timeId(),
       origin: apiOrigin,
-      announce: true,
+      announce: entityIds,
     });
   }
 
@@ -2074,13 +2086,18 @@ export class PetShopStore {
    * components row, with `origin` naming what wrote it
    * (`docs/findings/change-sets.md`). Writing a change set the store
    * already holds is a no-op for the row (content addressed) and appends
-   * a history row. With `announce`, the listeners of `onChangeSetWritten`
-   * are told about it, in write order; a received change set is recorded
-   * without announcing it.
+   * a history row. With `announce`, the ids of the entities the change
+   * set wrote, the listeners of `onChangeSetWritten` are told about it,
+   * in write order; a received change set is recorded without announcing
+   * it (`announce: null`).
    */
   private async recordChangeSet(
     changeSet: HashedChangeSetRow,
-    options: { timeId: string; origin: string; announce: boolean },
+    options: {
+      timeId: string;
+      origin: string;
+      announce: readonly string[] | null;
+    },
   ): Promise<HashedChangeSetRow> {
     await this.db.core.import(
       {
@@ -2105,9 +2122,9 @@ export class PetShopStore {
       },
       { validate: false },
     );
-    if (options.announce) {
+    if (options.announce !== null) {
       for (const listener of this.changeSetListeners) {
-        listener(changeSet);
+        listener(changeSet, options.announce);
       }
     }
 
@@ -2253,7 +2270,7 @@ export class PetShopStore {
     await this.recordChangeSet(changeSet, {
       timeId: timeId(),
       origin: syncOrigin,
-      announce: false,
+      announce: null,
     });
   }
 

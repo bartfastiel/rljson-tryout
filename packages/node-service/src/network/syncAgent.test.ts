@@ -531,6 +531,39 @@ describe('SyncAgent receiving', () => {
     expect(store.pulls).toHaveLength(1);
     expect(agent.snapshot().pending).toBeLessThanOrEqual(1);
   });
+
+  it('tells its transfer listeners when a pull starts and when it settles, and about announcements', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    holdReferencedRows(store);
+    const channel = new FakeChannel('hub-node');
+    channels.publish(channel);
+    const { changeSet } = remoteAnimalVersion(store, 'Bowser');
+    const heard: string[] = [];
+    const unsubscribe = agent.onTransfer((transfer) =>
+      heard.push(
+        `${transfer.direction} ${transfer.status} ${transfer.changeSetId ?? '?'} ${transfer.error ?? ''}`.trim(),
+      ),
+    );
+
+    const own = store.writeOwnChangeSet('mine', []);
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().received === 1);
+    channel.deliver({ changeSetHash: own._hash, fromNodeId: 'node2' });
+    await until(() => agent.snapshot().skipped === 1);
+
+    expect(heard).toStrictEqual([
+      'outgoing completed mine',
+      'incoming pending ?',
+      `incoming completed ${changeSet.id}`,
+    ]);
+    expect(
+      agent.snapshot().transfers.map((transfer) => transfer.status),
+    ).toStrictEqual(['completed', 'completed']);
+
+    unsubscribe();
+    store.writeOwnChangeSet('later', []);
+    expect(heard).toHaveLength(3);
+  });
 });
 
 describe('SyncAgent pulling what received rows point at', () => {

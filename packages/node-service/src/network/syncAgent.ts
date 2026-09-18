@@ -56,15 +56,17 @@ export type SyncStatus = 'completed' | 'pending' | 'failed';
 
 /**
  * One change set transfer as `/status` lists it under `sync.transfers`
- * and slice B13 will stream it as the SSE `sync` event: which way it
- * went, which node it came from or went to (`peerNodeId`: on an incoming
- * transfer the node that wrote the change set, when its announcement
- * said so; on an outgoing one the hub this client announced to, `null`
- * on the hub, which announces to every connected client), the change set
- * by hash and id, how many rows per table it named, how long the pull
- * took, when it finished, and whether it completed, is still pending
- * (the pull could not finish and is retried) or failed for good, with
- * the reason.
+ * and the SSE `sync` event streams it: which way it went, which node it
+ * came from or went to (`peerNodeId`: on an incoming transfer the node
+ * that wrote the change set, when its announcement said so; on an
+ * outgoing one the hub this client announced to, `null` on the hub,
+ * which announces to every connected client), the change set by hash
+ * and id, how many rows per table it named, how long the pull took, when
+ * it finished, and whether it completed, is still pending (the pull
+ * could not finish and is retried) or failed for good, with the reason.
+ * The stream additionally hears a transfer the moment its pull starts:
+ * `pending` with no `error`, `durationMs` 0 and the id and tables not
+ * known yet; `/status` lists outcomes only.
  */
 export type SyncTransfer = Readonly<{
   direction: SyncDirection;
@@ -94,6 +96,9 @@ export type SyncSnapshot = Readonly<{
   lastError: string | null;
   transfers: readonly SyncTransfer[];
 }>;
+
+/** Called with every transfer the moment the agent records or starts it. */
+export type TransferListener = (transfer: SyncTransfer) => void;
 
 export type SyncAgentOptions = Readonly<{
   /** How long one change set may take to pull, all its rows together. */
@@ -280,6 +285,7 @@ export class SyncAgent {
   private readonly queue: string[] = [];
   private readonly active = new Map<string, Promise<void>>();
   private readonly transfers: SyncTransfer[] = [];
+  private readonly transferListeners = new Set<TransferListener>();
   private readonly counters = {
     announced: 0,
     received: 0,
@@ -363,6 +369,18 @@ export class SyncAgent {
       pending: this.pending.size,
       lastError: this.lastError,
       transfers: [...this.transfers],
+    };
+  }
+
+  /**
+   * Registers a listener for every transfer: each one `snapshot` lists,
+   * as it is recorded, plus the start of every pull (slice B13 streams
+   * them as `sync` events). Returns the function that unregisters it.
+   */
+  onTransfer(listener: TransferListener): () => void {
+    this.transferListeners.add(listener);
+    return () => {
+      this.transferListeners.delete(listener);
     };
   }
 
@@ -550,6 +568,16 @@ export class SyncAgent {
       tables: {},
       started,
     };
+    this.notifyTransfer({
+      direction: 'incoming',
+      peerNodeId: outcome.fromNodeId,
+      changeSetHash,
+      changeSetId: null,
+      tables: {},
+      durationMs: 0,
+      at: new Date(started).toISOString(),
+      status: 'pending',
+    });
     try {
       await this.pullChangeSet(
         changeSetHash,
@@ -814,6 +842,13 @@ export class SyncAgent {
     this.transfers.unshift(transfer);
     if (this.transfers.length > 10) {
       this.transfers.length = 10;
+    }
+    this.notifyTransfer(transfer);
+  }
+
+  private notifyTransfer(transfer: SyncTransfer): void {
+    for (const listener of this.transferListeners) {
+      listener(transfer);
     }
   }
 }
