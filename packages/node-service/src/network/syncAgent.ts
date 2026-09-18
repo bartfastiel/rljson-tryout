@@ -110,7 +110,8 @@ export type CatchUpSnapshot = Readonly<{
  * it held them already (an announcement of a change set the catch-up
  * pulled a moment before, the hub's bootstrap of its latest reference),
  * how many are pending and how many failed, the last error, the last ten
- * transfers, newest first, and the last catch-up.
+ * transfers, newest first (the agent remembers fifty, which `transfers`
+ * lists per partner), and the last catch-up.
  */
 export type SyncSnapshot = Readonly<{
   announced: number;
@@ -125,6 +126,28 @@ export type SyncSnapshot = Readonly<{
 
 /** Called with every transfer the moment the agent records or starts it. */
 export type TransferListener = (transfer: SyncTransfer) => void;
+
+/**
+ * How many transfers the agent keeps and how many of them `/status`
+ * lists: the ten of the contract, and enough behind them for a list of
+ * the last ten with one partner (`GET /api/sync/transfers`, slice D3b).
+ */
+const keptTransfers = 50;
+const statusTransfers = 10;
+
+/**
+ * Whether a transfer counts as one with the given node: it names that
+ * node as its partner, or it is an announcement the hub made to every
+ * connected client at once (`peerNodeId` null), which reached that node
+ * too. The web app maps the `sync` events to the partner badges by the
+ * same rule.
+ */
+export const concernsPartner = (
+  transfer: SyncTransfer,
+  nodeId: string,
+): boolean =>
+  transfer.peerNodeId === nodeId ||
+  (transfer.direction === 'outgoing' && transfer.peerNodeId === null);
 
 export type SyncAgentOptions = Readonly<{
   /** How long one change set may take to pull, all its rows together. */
@@ -366,7 +389,7 @@ export class SyncAgent {
   private readonly pending = new Map<string, PendingChangeSet>();
   private readonly queue: string[] = [];
   private readonly active = new Map<string, Promise<void>>();
-  private readonly transfers: SyncTransfer[] = [];
+  private readonly recentTransfers: SyncTransfer[] = [];
   private readonly transferListeners = new Set<TransferListener>();
   private readonly counters = {
     announced: 0,
@@ -453,9 +476,25 @@ export class SyncAgent {
       ...this.counters,
       pending: this.pending.size,
       lastError: this.lastError,
-      transfers: [...this.transfers],
+      transfers: this.recentTransfers.slice(0, statusTransfers),
       catchUp: this.catchUpSnapshot(),
     };
+  }
+
+  /**
+   * The last transfers, newest first, at most `limit` of them and at most
+   * the `keptTransfers` the agent remembers; with `peerNodeId`, only the
+   * ones with that partner (`concernsPartner`).
+   */
+  transfers(options: { peerNodeId?: string; limit: number }): SyncTransfer[] {
+    const { peerNodeId, limit } = options;
+    const matching =
+      peerNodeId === undefined
+        ? this.recentTransfers
+        : this.recentTransfers.filter((transfer) =>
+            concernsPartner(transfer, peerNodeId),
+          );
+    return matching.slice(0, Math.max(0, limit));
   }
 
   private catchUpSnapshot(): CatchUpSnapshot {
@@ -1132,9 +1171,9 @@ export class SyncAgent {
   }
 
   private record(transfer: SyncTransfer): void {
-    this.transfers.unshift(transfer);
-    if (this.transfers.length > 10) {
-      this.transfers.length = 10;
+    this.recentTransfers.unshift(transfer);
+    if (this.recentTransfers.length > keptTransfers) {
+      this.recentTransfers.length = keptTransfers;
     }
     this.notifyTransfer(transfer);
   }
