@@ -369,7 +369,9 @@ written on the hub is readable by hash on a client") and
 `features/change-set-sync.feature` ("an invoice issued on node3 appears
 on node1 and node2 within five seconds", "an animal renamed on node2
 shows the new name on node1 and node3", "a change set announced again is
-written once", the latter two also run in-process by `pnpm test`) and
+written once", the latter two also run in-process by `pnpm test`; its
+fourth scenario, the transfers with a node and the rows an edit carried
+as the web app reads them, runs in-process only) and
 `features/bootstrap.feature` ("node3 restarts and catches up"; its two
 other scenarios, a hub that restarts and a node that joins with change
 sets of its own, run in-process only) drive exactly this setup:
