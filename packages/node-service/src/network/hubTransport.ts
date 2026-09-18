@@ -98,11 +98,12 @@ export type TransportSnapshot =
 /**
  * What the transport needs from the node's store: the `Io` to lend to
  * `@rljson/server`, the switch that routes the store's reads through the
- * active multi, and the peer stores the synchronisation pulls from.
+ * active multi, the peer stores the synchronisation pulls rows from, and
+ * the blob cascade it pulls blobs through.
  */
 export type TransportStore = Pick<
   PetShopStore,
-  'localIo' | 'readThrough' | 'pullThrough'
+  'localIo' | 'readThrough' | 'pullThrough' | 'fetchBlobsThrough'
 >;
 
 /**
@@ -202,7 +203,9 @@ const serverLoggerOver = (logger: FastifyBaseLogger): ServerLogger => ({
  * through the hub, to every other client, while writes stay local, and
  * the synchronisation pulls from the `IoPeer`s alone
  * (`TransportStore.pullThrough`), so that nothing lands in the store
- * before a whole change set does. Every
+ * before a whole change set does, and the blobs a received row names are
+ * pulled through the active `BsMulti` (`TransportStore.fetchBlobsThrough`),
+ * which caches them locally (slice D5). Every
  * domain table is created on the `Server` or `Client` as
  * `docs/roadmap.md` section 3.2 asks, a no-op after the store created
  * them. The hub port is bound by the socket.io server itself, which also
@@ -465,6 +468,7 @@ export class HubTransport {
         .filter((client) => client.io !== null)
         .map((client) => client.io),
     );
+    this.store.fetchBlobsThrough(() => server.bs);
     this.logger.info(
       { port: this.boundPort(), hubAddress },
       'hub transport serving',
@@ -756,6 +760,7 @@ export class HubTransport {
       const peer = client.peerStores.io;
       return peer === undefined ? [] : [peer];
     });
+    this.store.fetchBlobsThrough(() => client.bs);
     this.logger.info({ hubAddress: state.hubAddress }, 'connected to hub');
     if (client.connector !== undefined) {
       const channel = new ConnectorChannel(
@@ -811,6 +816,7 @@ export class HubTransport {
     this.state = { role: 'standalone' };
     this.store.readThrough(null);
     this.store.pullThrough(null);
+    this.store.fetchBlobsThrough(null);
     if (this.channel !== null) {
       this.publishChannel(null);
     }

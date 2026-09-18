@@ -1,11 +1,12 @@
 import {
+  blobIdOf,
   hashed,
   seedTimeId,
   type HashedChangeSetRow,
 } from '@rljson-tryout/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { SyncRow } from '../store/petShopStore.ts';
+import { BlobMismatchError, type SyncRow } from '../store/petShopStore.ts';
 import {
   FakeChannel,
   FakeChannelSource,
@@ -1223,6 +1224,180 @@ describe('SyncAgent pulling what received rows point at', () => {
       expect.objectContaining({
         level: 'warn',
         message: 'a row the received rows point at could not be pulled',
+      }),
+    );
+  });
+});
+
+/**
+ * A species version with an uploaded image, its history row and the
+ * change set naming both, as another node would serve them; the blob
+ * itself goes on the fake network only when the test says so.
+ */
+const remoteSpeciesVersion = (
+  store: FakeSyncStore,
+  content: Buffer,
+): { changeSet: HashedChangeSetRow; blobId: string; species: SyncRow } => {
+  const blobId = blobIdOf(content);
+  const species = hashed({
+    id: 'duck',
+    name: 'Duck',
+    latinName: 'Anas platyrhynchos',
+    description: 'A duck with a photo.',
+    imageBlobId: blobId,
+    imageMimeType: 'image/jpeg',
+  });
+  const history = hashed({
+    speciesRef: species._hash,
+    timeId: `${Date.now()}:blob`,
+    route: '/species',
+    origin: 'db.insert',
+    previous: [],
+  });
+  const changeSet = hashed({
+    id: `update-species-image-duck-${history.timeId}`,
+    items: [
+      { table: 'species', ref: species._hash },
+      { table: 'speciesInsertHistory', ref: history._hash },
+    ],
+  });
+  store.serve('species', species);
+  store.serve('speciesInsertHistory', history);
+  store.serve('changeSets', changeSet);
+  return { changeSet, blobId, species };
+};
+
+describe('SyncAgent pulling the blobs received rows name', () => {
+  it('pulls the blob of a received species version after its rows and lists it on the transfer', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const content = Buffer.from('a photo of a duck, 12 700 bytes in spirit');
+    const { changeSet, blobId } = remoteSpeciesVersion(store, content);
+    store.serveBlob(blobId, content);
+
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'n1' });
+    await until(() => agent.snapshot().received === 1);
+
+    expect(store.localBlobs.get(blobId)).toStrictEqual(content);
+    expect(store.blobPulls).toStrictEqual([blobId]);
+    expect(store.writes).toHaveLength(1);
+    expect(store.recorded).toStrictEqual([changeSet]);
+    expect(agent.snapshot().transfers[0]).toStrictEqual(
+      expect.objectContaining({
+        direction: 'incoming',
+        changeSetHash: changeSet._hash,
+        tables: { species: 1, speciesInsertHistory: 1 },
+        blobs: [{ blobId, bytes: content.length }],
+        status: 'completed',
+      }),
+    );
+  });
+
+  it('pulls nothing for a blob this node holds and lists no blobs then', async () => {
+    const { store, channels, agent } = agentOverFakes();
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const content = Buffer.from('a photo this node has already');
+    const { changeSet, blobId } = remoteSpeciesVersion(store, content);
+    store.localBlobs.set(blobId, content);
+
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'n1' });
+    await until(() => agent.snapshot().received === 1);
+
+    expect(store.blobPulls).toStrictEqual([]);
+    expect(agent.snapshot().transfers[0]).not.toHaveProperty('blobs');
+  });
+
+  it('completes the change set when no node holds the blob, and logs it', async () => {
+    const { store, channels, agent, records } = agentOverFakes();
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const { changeSet, blobId } = remoteSpeciesVersion(
+      store,
+      Buffer.from('a photo nobody serves'),
+    );
+
+    channel.deliver({ changeSetHash: changeSet._hash, fromNodeId: 'n1' });
+    await until(() => agent.snapshot().received === 1);
+
+    expect(store.recorded).toStrictEqual([changeSet]);
+    expect(store.localBlobs.has(blobId)).toBe(false);
+    expect(agent.snapshot()).toMatchObject({ pending: 0, failed: 0 });
+    expect(agent.snapshot().transfers[0]).toMatchObject({
+      status: 'completed',
+    });
+    expect(agent.snapshot().transfers[0]).not.toHaveProperty('blobs');
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        message:
+          'a blob the received rows name is held by no node, left to the image endpoint',
+        fields: expect.objectContaining({
+          blobId,
+          changeSetHash: changeSet._hash,
+        }) as Record<string, unknown>,
+      }),
+    );
+  });
+
+  it('completes the change set when the blob comes back wrong or not at all, and logs it', async () => {
+    const { store, channels, agent, records } = agentOverFakes({
+      pullTimeoutMs: 150,
+    });
+    const channel = new FakeChannel();
+    channels.publish(channel);
+    const rejected = remoteSpeciesVersion(store, Buffer.from('rejected'));
+    store.onPullBlob(() => {
+      throw new BlobMismatchError(rejected.blobId, 'SomethingElse00000000A');
+    });
+
+    channel.deliver({
+      changeSetHash: rejected.changeSet._hash,
+      fromNodeId: 'n1',
+    });
+    await until(() => agent.snapshot().received === 1);
+
+    expect(store.recorded).toStrictEqual([rejected.changeSet]);
+    expect(agent.snapshot().transfers[0]).toMatchObject({
+      changeSetHash: rejected.changeSet._hash,
+      status: 'completed',
+    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        message:
+          'a blob the received rows name could not be pulled, left to the image endpoint',
+        fields: expect.objectContaining({
+          blobId: rejected.blobId,
+          err: expect.objectContaining({
+            message: `pull of blob ${rejected.blobId} failed: the network served bytes for blob ${rejected.blobId} that hash to SomethingElse00000000A, refused`,
+          }) as unknown,
+        }) as Record<string, unknown>,
+      }),
+    );
+
+    const hanging = remoteSpeciesVersion(store, Buffer.from('hanging'));
+    store.onPullBlob(() => new Promise(() => undefined));
+    channel.deliver({
+      changeSetHash: hanging.changeSet._hash,
+      fromNodeId: 'n1',
+    });
+    await until(() => agent.snapshot().received === 2);
+
+    expect(agent.snapshot().transfers[0]).toMatchObject({
+      changeSetHash: hanging.changeSet._hash,
+      status: 'completed',
+    });
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        level: 'warn',
+        fields: expect.objectContaining({
+          blobId: hanging.blobId,
+          err: expect.objectContaining({
+            message: `pull of blob ${hanging.blobId} exceeded 150 ms`,
+          }) as unknown,
+        }) as Record<string, unknown>,
       }),
     );
   });
