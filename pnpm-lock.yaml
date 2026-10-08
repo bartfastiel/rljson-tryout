@@ -222,17 +222,17 @@ importers:
         specifier: workspace:*
         version: link:../domain
       '@rljson/bs':
-        specifier: 0.0.26
-        version: 0.0.26
+        specifier: 0.0.29
+        version: 0.0.29
       '@rljson/db':
-        specifier: 0.0.42
-        version: 0.0.42
+        specifier: 0.0.52
+        version: 0.0.52
       '@rljson/io':
         specifier: 0.0.78
         version: 0.0.78
       '@rljson/io-sqlite-node':
-        specifier: 1.0.7
-        version: 1.0.7
+        specifier: 1.0.8
+        version: 1.0.8
       '@rljson/network':
         specifier: 0.0.21
         version: 0.0.21
@@ -240,8 +240,8 @@ importers:
         specifier: 0.0.81
         version: 0.0.81
       '@rljson/server':
-        specifier: 0.0.64
-        version: 0.0.64
+        specifier: 0.0.73
+        version: 0.0.73
       fastify:
         specifier: ^5.12.5
         version: 5.12.5
@@ -582,20 +582,24 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
-  '@rljson/bs@0.0.26':
-    resolution: {integrity: sha512-LN+HGv6vkhAOX5CmykUqrXtdaeUpqJJWSSJEWh00oGxmPmhNAJCHIeAVrmk1LGPszMsRU7fsCT6zxxQOCbJ/FA==}
+  '@rljson/bs@0.0.29':
+    resolution: {integrity: sha512-DXVqDc9oeyxVF75XXVuRxHi9KLFIQbw/zVQNHRYSPAvu2gWVFfzodU9CQxbgYdmMJBR9efWMoNCfvE7lB2DMew==}
     engines: {node: '>=22.14.0'}
 
-  '@rljson/db@0.0.42':
-    resolution: {integrity: sha512-jd1B6xv6/cyzzw80W2ydG85oXpIJP3vetkAbpdmdUY1rAjOw7++UM1VuGTttu0GnB/1u5dTkj68WMXCqrdKqDg==}
+  '@rljson/db@0.0.51':
+    resolution: {integrity: sha512-Niim8VeW5j0sSsdUKzPVEt08NbmqCqeCrxGiq/qStwY4b6a3MgmT4v9GklDFvIv+FQ8D/oxbjRzMHOnjK2MVpg==}
+    engines: {node: '>=22.14.0'}
+
+  '@rljson/db@0.0.52':
+    resolution: {integrity: sha512-NCPs7GtlRyFw7hsOGwkBtT1N+PGb94Nyr28xm/PKqC+SYcnjPLXkId33YDjyjZLzPLR9RGu29djsuwQF9bIqpg==}
     engines: {node: '>=22.14.0'}
 
   '@rljson/hash@0.0.19':
     resolution: {integrity: sha512-1bBHWbzzaOE3ba2niyvmu4d9VYv5atLzzHDI2ka3AlHLyBDD8Q9qI/HCjimULJlprIGVeN4+jN8sth4CdnGxOQ==}
     engines: {node: '>=22.14.0'}
 
-  '@rljson/io-sqlite-node@1.0.7':
-    resolution: {integrity: sha512-Lye+CtyGrjJeHxercCDYrRNw3vjXJ/JtbPrBWN93rln6TjosNrpPr5OS8eUf2Xpy82VPMpHARcfyKqMRGjK4Pg==}
+  '@rljson/io-sqlite-node@1.0.8':
+    resolution: {integrity: sha512-jal9P8huEVNbR1d7mBTjneBXaIpgIGQpUmRwK5++Lx3K8RGDtv6NNG+lQvCFMnRdyWTSk2QsufvpUd1329vjMQ==}
     engines: {node: '>=22.14.0'}
 
   '@rljson/io@0.0.78':
@@ -618,12 +622,16 @@ packages:
     resolution: {integrity: sha512-e+ha2nWl1oH2SC3G6ih1pbgHwJ2fJL6US+SIEs7aQkDpZbo0pHkea61BCZLf3u2o2j1LGdxUDcHznNUoHEsNkQ==}
     engines: {node: '>=22.14.0'}
 
-  '@rljson/server@0.0.64':
-    resolution: {integrity: sha512-Q67Q6evNaTu0ikSN9n+aMRcWlJYhx81QEsVXKJGBFR/4Y3qKPrpLEuljmRDj9FHfeD3BUCcWOdUZTo6KLLuEWQ==}
+  '@rljson/server@0.0.73':
+    resolution: {integrity: sha512-phsr2iiyGtffn4pVWHjfrYd9osc/Ae5ChcMckTUHnZGVdaGIcQc1gcwaXywMEZ4KlJDX492nLM8hw+6dnNRR3g==}
     engines: {node: '>=22.14.0'}
 
   '@rljson/validate@0.0.11':
     resolution: {integrity: sha512-XigbFKLQMLb420UwgwRDRRWdbsL6wNv3l7dxQqs/Z66EQhEPtoc0FSGLfIFM5X4gPd1zJFTIUIwcUOv47PjFkw==}
+    engines: {node: '>=22.14.0'}
+
+  '@rljson/validate@0.0.12':
+    resolution: {integrity: sha512-bQMU8ao53EDl/T3thNDcbnEkLM8JRn15ncVtF8DW1TZjS/kb2xbrjDfZxVjXCouB8RsZPZh9FueVqU/s9mRXvg==}
     engines: {node: '>=22.14.0'}
 
   '@rolldown/binding-android-arm-eabi@1.2.8':
@@ -2100,19 +2108,29 @@ snapshots:
     dependencies:
       playwright: 1.63.0
 
-  '@rljson/bs@0.0.26':
+  '@rljson/bs@0.0.29':
     dependencies:
       '@rljson/hash': 0.0.19
       '@rljson/json': 0.0.23
       '@rljson/rljson': 0.0.81
 
-  '@rljson/db@0.0.42':
+  '@rljson/db@0.0.51':
     dependencies:
       '@rljson/hash': 0.0.19
       '@rljson/io': 0.0.78
       '@rljson/json': 0.0.23
       '@rljson/rljson': 0.0.81
-      '@rljson/validate': 0.0.11
+      '@rljson/validate': 0.0.12
+      filtrex: 3.1.0
+      object-traversal: 1.0.1
+
+  '@rljson/db@0.0.52':
+    dependencies:
+      '@rljson/hash': 0.0.19
+      '@rljson/io': 0.0.78
+      '@rljson/json': 0.0.23
+      '@rljson/rljson': 0.0.81
+      '@rljson/validate': 0.0.12
       filtrex: 3.1.0
       object-traversal: 1.0.1
 
@@ -2120,7 +2138,7 @@ snapshots:
     dependencies:
       '@rljson/json': 0.0.23
 
-  '@rljson/io-sqlite-node@1.0.7':
+  '@rljson/io-sqlite-node@1.0.8':
     dependencies:
       '@rljson/hash': 0.0.19
       '@rljson/io': 0.0.78
@@ -2151,10 +2169,10 @@ snapshots:
       '@rljson/json': 0.0.23
       nanoid: 5.1.16
 
-  '@rljson/server@0.0.64':
+  '@rljson/server@0.0.73':
     dependencies:
-      '@rljson/bs': 0.0.26
-      '@rljson/db': 0.0.42
+      '@rljson/bs': 0.0.29
+      '@rljson/db': 0.0.51
       '@rljson/hash': 0.0.19
       '@rljson/io': 0.0.78
       '@rljson/json': 0.0.23
@@ -2162,6 +2180,12 @@ snapshots:
       '@rljson/rljson': 0.0.81
 
   '@rljson/validate@0.0.11':
+    dependencies:
+      '@rljson/hash': 0.0.19
+      '@rljson/json': 0.0.23
+      '@rljson/rljson': 0.0.81
+
+  '@rljson/validate@0.0.12':
     dependencies:
       '@rljson/hash': 0.0.19
       '@rljson/json': 0.0.23
