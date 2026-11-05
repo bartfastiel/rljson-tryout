@@ -10,8 +10,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@rljson/hash": "0.0.19",
+    "@rljson/hash": "0.0.21",
     "@rljson/json": "0.0.23",
-    "@rljson/rljson": "0.0.81"
+    "@rljson/rljson": "0.0.88"
   }
 }
