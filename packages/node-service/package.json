@@ -26,7 +26,7 @@
     "socket.io-client": "4.8.3"
   },
   "devDependencies": {
-    "@amiceli/vitest-cucumber": "^8.0.0",
+    "@amiceli/vitest-cucumber": "^8.0.1",
     "esbuild": "^0.28.2"
   }
 }
